@@ -325,19 +325,30 @@ list?". Printing goes through the `Show` dictionary like any other code.
     and fixity on 157k characters take 728 ms on mruby and 337 ms on CRuby.
     A 60–90k character Prelude would cost about 0.3–0.4 s on mruby before
     type checking even starts, which confirms the snapshot.
-  - **Machine (measured after build step 3), at 10⁶ elements:**
+  - **Machine, at 10⁶ elements** (hand-written Core; after step 3 → after
+    the machine stretch):
     | | GHCi | CRuby | mruby |
     |---|---|---|---|
-    | `foldr (+) 0 [1..n]` | 0.27 s | 22.2 s | 122.5 s |
-    | `count n` (non-tail) | 0.87 s | 11.3 s | 55.3 s |
-    | `foldl' (+) 0 [1..n]` | 0.04 s | 18.2 s | 38.4 s |
+    | `foldr (+) 0 [1..n]` | 0.27 s | 22.2 → 17.7 s | 122.5 → 39.5 s |
+    | `count n` (non-tail) | 0.87 s | 11.3 → 8.1 s | 55.3 → 21.6 s |
+    | `foldl' (+) 0 [1..n]` | 0.04 s | 18.2 → 15.1 s | 38.4 → 27.7 s |
 
-    These are hand-written Core at about 24 machine steps per element.
-    CRuby manages about 1.2M steps/s and mruby about 0.5M. On mruby, blocks
-    allocating Procs were a large cost, now removed from the hot path. One
-    big, constantly written Array was re-scanned by the incremental GC, so
-    the stack is now segmented. Scaling is linear to about 160k and still
-    superlinear above that.
+    What helped:
+    - no blocks in the loop (mruby allocates a Proc per block);
+    - a segmented frame stack (mruby's GC rescanned one huge array);
+    - `while` instead of `loop do`;
+    - integer opcodes and integer-encoded variables;
+    - case continuations as three stack entries rather than an object;
+    - known saturated calls and already-evaluated scrutinees short-cut
+      (24 → 19 steps per element);
+    - one method per primitive, called without an argument array;
+    - flat Array-backed values, which cut memory by ~1/3 and with it
+      most of mruby's GC superlinearity at depth.
+
+    The machine now runs at ~1.1–1.4M steps/s on CRuby and ~0.5–0.7M on
+    mruby. The remaining big levers are fewer steps (better Core from the
+    desugarer, unboxed arithmetic on known types) or a C machine for the
+    mruby binary.
   - **Interactive: a usable prompt in under 10 ms**, meaning the prompt is
     printed and keystrokes are accepted. The order is: load bytecode, put
     the terminal in raw mode, print the prompt, *then* decode the Prelude

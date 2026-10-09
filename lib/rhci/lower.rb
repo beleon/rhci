@@ -2,7 +2,7 @@
 
 module Rhci
   # Compiles Core to machine code: resolves variables to slots
-  # (LocalAtom), closure environments (EnvAtom) or global cells, converts
+  # (encoded atoms, see VM::ValueAtom), environments or global cells, converts
   # closures to flat environments, and puts the program in A-normal form
   # (arguments, constructor fields and primitive operands become atoms;
   # complex arguments are let-bound as thunks).
@@ -12,8 +12,11 @@ module Rhci
     class Body
       attr_reader :captures, :nlocals
 
-      def initialize(parent)
+      # env_offset: where captured values start in the closure object that
+      # serves as this body's environment (VM::Thunk / VM::Fun ENV_OFFSET).
+      def initialize(parent, env_offset = 0)
         @parent = parent
+        @env_offset = env_offset
         @slots = {}
         @env = {}
         @captures = []
@@ -39,15 +42,16 @@ module Rhci
         @slots.key?(name) || (@parent && @parent.local?(name))
       end
 
-      # The atom for `name` inside this body (nil if not a local anywhere).
+      # The encoded atom for `name` inside this body: slot i, or -(j+1) for
+      # environment slot j; nil if `name` is not a local anywhere.
       def lookup(name)
-        return VM::LocalAtom.new(@slots[name]) if @slots.key?(name)
-        return VM::EnvAtom.new(@env[name]) if @env.key?(name)
+        return @slots[name] if @slots.key?(name)
+        return -(@env_offset + @env[name]) - 1 if @env.key?(name)
         return nil unless @parent && @parent.local?(name)
 
         @captures << @parent.lookup(name)
         @env[name] = @captures.length - 1
-        VM::EnvAtom.new(@env[name])
+        -(@env_offset + @env[name]) - 1
       end
     end
 
@@ -66,9 +70,9 @@ module Rhci
     # A global definition -> its value (a Fun, or a CAF thunk).
     def global_value(name, expr)
       if expr.is_a?(Core::Lam)
-        VM::Fun.new(lam(expr, nil, name), nil)
+        VM::Fun.build(lam(expr, nil, name))
       else
-        VM::Thunk.new(expression(expr), nil)
+        VM::Thunk.build(expression(expr))
       end
     end
 
@@ -82,7 +86,7 @@ module Rhci
 
     def compile_inner(e, body, pending)
       case e
-      when Core::Var, Core::Lit then VM::XAtom.new(atom(e, body, pending))
+      when Core::Var, Core::Lit then VM.atom_node(atom(e, body, pending))
       when Core::Str then VM::XStr.new(e.cps)
       when Core::App
         fn = atom(e.fn, body, pending)
@@ -90,7 +94,7 @@ module Rhci
       when Core::Lam
         slot = body.new_slot
         pending << [slot, :fun, lam(e, body)]
-        VM::XAtom.new(VM::LocalAtom.new(slot))
+        VM::XLocal.new(slot)
       when Core::Let
         slots = e.binds.map { |name, _| body.bind(name) }
         binds = []
@@ -131,24 +135,24 @@ module Rhci
         cell = @globals[e.name]
         raise "lower: unknown variable #{e.name}" unless cell
 
-        VM::GlobalAtom.new(cell)
+        cell
       when Core::Lit then VM::ValueAtom.new(e.value)
       else
         slot = body.new_slot
         pending << rhs_bind(slot, e, body, pending)
-        VM::LocalAtom.new(slot)
+        slot
       end
     end
 
     def lam(e, parent, name = nil)
-      body = Body.new(parent)
+      body = Body.new(parent, VM::Fun::ENV_OFFSET)
       e.params.each { |p| body.bind(p) }
       x = compile(e.body, body)
       VM::LamCode.new(e.params.length, body.captures, body.nlocals, x, name)
     end
 
     def thunk(e, parent)
-      body = Body.new(parent)
+      body = Body.new(parent, VM::Thunk::ENV_OFFSET)
       x = compile(e, body)
       VM::ThunkCode.new(body.captures, body.nlocals, x)
     end

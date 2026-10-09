@@ -26,7 +26,7 @@ RULES = [
   [/\.to_s\b.*Float|Float.*\.to_s\b/, 'never print Floats with Ruby (mruby uses %.15g)'],
   [/\$!/, 'mruby leaves $! nil inside a rescue modifier; use begin/rescue => e'],
   [/^\s*raise\s*$/, 'a bare `raise` does not re-raise on mruby; use `rescue => e` and `raise e`'],
-  [/^\s*class (Range|Array|Hash|String|Integer|Float|Proc|Method|Module|Class|Struct|Symbol|Comparable|Kernel|Data|Set|Time|IO|File) /,
+  [/^\s*class (Range|Array|Hash|String|Integer|Float|Proc|Method|Module|Class|Struct|Symbol|Comparable|Kernel|Data|Set|Time|IO|File)\b/,
    'mruby resolves this to the core class inside includers; pick another name']
 ].freeze
 
