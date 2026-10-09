@@ -71,16 +71,33 @@ module RT
   class FakeIO
     attr_reader :written
 
-    def initialize(input = '')
-      @lines = input.split("\n").map { |l| "#{l}\n" }
+    # log/tag: writes are also appended to log as "tag:text", so a test
+    # can see how writes to several fakes interleave.
+    def initialize(input = '', log: nil, tag: nil)
+      @log = log
+      @tag = tag
+      @input = input
+      @pos = 0
       @written = ''.dup
     end
 
     def gets
-      @lines.shift
+      return nil if @pos >= @input.length
+      stop = @input.index("\n", @pos)
+      stop = stop.nil? ? @input.length : stop + 1
+      line = @input[@pos, stop - @pos]
+      @pos = stop
+      line
+    end
+
+    def getc
+      return nil if @pos >= @input.length
+      @pos += 1
+      @input[@pos - 1]
     end
 
     def write(str)
+      @log << "#{@tag}:#{str}" if @log
       @written << str
       str.length
     end

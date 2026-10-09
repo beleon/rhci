@@ -31,7 +31,7 @@ RT.suite 'oracle: semantics' do
       out = RT::FakeIO.new
       # Speed is not what this checks: each input gets a step budget, and
       # one that exhausts it is skipped (counted), not failed.
-      session = Rhci::Session.new(stdout: out, limits: { steps: 3_000_000 }, cwd: SEM_FILES)
+      session = Rhci::Session.new(stdout: out, stderr: out, limits: { steps: 3_000_000 }, cwd: SEM_FILES)
       problems = []
       sem_probes.each do |p|
         next unless p.section == title

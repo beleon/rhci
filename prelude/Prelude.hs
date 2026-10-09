@@ -28,6 +28,7 @@ infixl 0 `on`
 infixl 9 !!
 infix 5 \\
 infixl 7 :%
+infixr 5 +++, <++
 
 -- ---- primitives -------------------------------------------------------------
 
@@ -115,8 +116,8 @@ foreign import prim "doubleShow" rhci_doubleShow :: Double -> [Char]
 
 data Bool = False | True deriving (Eq, Ord, Enum, Bounded, Show)
 data Ordering = LT | EQ | GT deriving (Eq, Ord, Enum, Bounded, Show)
-data Maybe a = Nothing | Just a deriving (Eq, Ord, Show)
-data Either a b = Left a | Right b deriving (Eq, Ord, Show)
+data Maybe a = Nothing | Just a deriving (Eq, Ord, Show, Read)
+data Either a b = Left a | Right b deriving (Eq, Ord, Show, Read)
 
 -- IO a is a function of a dummy world token; IORes sequences effects.
 data IORes a = IORes a
@@ -1090,7 +1091,7 @@ ioError :: IOError -> IO a
 ioError (IOError s) = IO (\_ -> rhci_raise s)
 
 putChar :: Char -> IO ()
-putChar c = IO (\_ -> case rhci_putChar c of () -> IORes ())
+putChar c = hPutChar stdout c
 
 putStr :: String -> IO ()
 putStr [] = rhci_returnIO ()
@@ -1101,6 +1102,110 @@ putStrLn s = putStr s `rhci_thenIO` putChar '\n'
 
 print :: Show a => a -> IO ()
 print x = putStrLn (show x)
+
+-- ---- System.IO and input ------------------------------------------------------
+
+foreign import prim "hPutChar" rhci_hPutChar :: Int -> Char -> ()
+foreign import prim "hFlush" rhci_hFlush :: Int -> ()
+foreign import prim "getChar" rhci_getChar :: () -> Char
+foreign import prim "getLine" rhci_getLine :: () -> [Char]
+foreign import prim "isEOF" rhci_isEOF :: () -> Bool
+foreign import prim "readChar" rhci_readChar :: () -> Int
+foreign import prim "getArgs" rhci_getArgs :: () -> [[Char]]
+foreign import prim "getContents" rhci_getContents :: () -> ()
+foreign import prim "setBuffering" rhci_setBuffering :: Int -> BufferMode -> ()
+foreign import prim "getBuffering" rhci_getBuffering :: Int -> BufferMode -> BufferMode
+
+-- A Handle is the descriptor number and the name GHC shows.
+data Handle = Handle Int String
+
+instance Show Handle where
+  showsPrec _ (Handle _ n) = showString "{handle: " . showString n . showString "}"
+
+instance Eq Handle where
+  Handle a _ == Handle b _ = rhci_intEq a b
+
+stdin, stdout, stderr :: Handle
+stdin = Handle 0 "<stdin>"
+stdout = Handle 1 "<stdout>"
+stderr = Handle 2 "<stderr>"
+
+data BufferMode = NoBuffering | LineBuffering | BlockBuffering (Maybe Int)
+  deriving (Eq, Ord, Read, Show)
+
+data IOMode = ReadMode | WriteMode | AppendMode | ReadWriteMode
+  deriving (Eq, Ord, Enum, Read, Show)
+
+hPutChar :: Handle -> Char -> IO ()
+hPutChar (Handle h _) c = IO (\_ -> case rhci_hPutChar h c of () -> IORes ())
+
+hPutStr :: Handle -> String -> IO ()
+hPutStr _ [] = rhci_returnIO ()
+hPutStr h (c:cs) = hPutChar h c `rhci_thenIO` hPutStr h cs
+
+hPutStrLn :: Handle -> String -> IO ()
+hPutStrLn h s = hPutStr h s `rhci_thenIO` hPutChar h '\n'
+
+hPrint :: Show a => Handle -> a -> IO ()
+hPrint h x = hPutStrLn h (show x)
+
+hFlush :: Handle -> IO ()
+hFlush (Handle h _) = IO (\_ -> case rhci_hFlush h of () -> IORes ())
+
+-- The mode is remembered and reported (GHCi starts with NoBuffering), but
+-- output always appears in program order: stdout is flushed at each
+-- newline, before stderr is written, and before stdin is read.
+hSetBuffering :: Handle -> BufferMode -> IO ()
+hSetBuffering (Handle h _) m = IO (\_ -> case rhci_setBuffering h m of () -> IORes ())
+
+hGetBuffering :: Handle -> IO BufferMode
+hGetBuffering (Handle h _) = IO (\_ -> case rhci_getBuffering h NoBuffering of m -> m `seq` IORes m)
+
+rhci_stdinOnly :: String -> Handle -> IO a -> IO a
+rhci_stdinOnly what (Handle h n) act
+  | rhci_intEq h 0 = act
+  | otherwise = ioError (IOError (n ++ ": " ++ what ++ ": illegal operation (handle is not open for reading)"))
+
+getChar :: IO Char
+getChar = IO (\w -> case rhci_getChar w of c -> c `seq` IORes c)
+
+getLine :: IO String
+getLine = IO (\w -> case rhci_getLine w of s -> s `seq` IORes s)
+
+isEOF :: IO Bool
+isEOF = IO (\w -> case rhci_isEOF w of b -> b `seq` IORes b)
+
+hGetChar :: Handle -> IO Char
+hGetChar h = rhci_stdinOnly "hGetChar" h getChar
+
+hGetLine :: Handle -> IO String
+hGetLine h = rhci_stdinOnly "hGetLine" h getLine
+
+hIsEOF :: Handle -> IO Bool
+hIsEOF h = rhci_stdinOnly "hIsEOF" h isEOF
+
+-- stdin as a lazy String: characters are read as the list is consumed.
+rhci_lazyInput :: () -> String
+rhci_lazyInput w = case rhci_readChar w of
+  c -> if rhci_intLt c 0 then [] else rhci_chr c : rhci_lazyInput w
+
+rhci_stdinContents :: String
+rhci_stdinContents = rhci_lazyInput ()
+
+getContents :: IO String
+getContents = IO (\w -> case rhci_getContents w of () -> IORes (rhci_lazyInput w))
+
+hGetContents :: Handle -> IO String
+hGetContents h = rhci_stdinOnly "hGetContents" h getContents
+
+interact :: (String -> String) -> IO ()
+interact f = getContents `rhci_bindIO` \s -> putStr (f s)
+
+getArgs :: IO [String]
+getArgs = IO (\w -> case rhci_getArgs w of a -> a `seq` IORes a)
+
+getProgName :: IO String
+getProgName = rhci_returnIO "<interactive>"
 
 rhci_print :: Show a => a -> IO ()
 rhci_print x = putStrLn (show x)
@@ -1843,11 +1948,28 @@ unwords :: [String] -> String
 unwords [] = ""
 unwords ws = rhci_foldr1 (\w s -> w ++ ' ' : s) ws
 
--- ---- Data.Char (exact for Latin-1; beyond it rhci refuses) ------------------------------------
+-- ---- Data.Char (GHC's Unicode tables) --------------------------------------------
 
-foreign import prim "charClass" rhci_charClass :: Char -> Int
+foreign import prim "charCategory" rhci_charCategory :: Char -> Int
 foreign import prim "charUpper" rhci_toUpper :: Char -> Char
 foreign import prim "charLower" rhci_toLower :: Char -> Char
+foreign import prim "charTitle" rhci_toTitle :: Char -> Char
+foreign import prim "isUpperCase" isUpperCase :: Char -> Bool
+foreign import prim "isLowerCase" isLowerCase :: Char -> Bool
+
+data GeneralCategory
+  = UppercaseLetter | LowercaseLetter | TitlecaseLetter | ModifierLetter | OtherLetter
+  | NonSpacingMark | SpacingCombiningMark | EnclosingMark
+  | DecimalNumber | LetterNumber | OtherNumber
+  | ConnectorPunctuation | DashPunctuation | OpenPunctuation | ClosePunctuation
+  | InitialQuote | FinalQuote | OtherPunctuation
+  | MathSymbol | CurrencySymbol | ModifierSymbol | OtherSymbol
+  | Space | LineSeparator | ParagraphSeparator
+  | Control | Format | Surrogate | PrivateUse | NotAssigned
+  deriving (Show, Read, Eq, Ord, Enum, Bounded)
+
+generalCategory :: Char -> GeneralCategory
+generalCategory c = toEnum (rhci_charCategory c)
 
 ord :: Char -> Int
 ord = rhci_ord
@@ -1873,38 +1995,46 @@ isAscii c = c < '\x80'
 isLatin1 :: Char -> Bool
 isLatin1 c = c <= '\xff'
 
+-- By category number: 0-4 letters, 5-7 marks, 8-10 numbers, 11-17
+-- punctuation, 18-21 symbols, 22-24 separators, 25 Control.
+rhci_catIn :: Int -> Int -> Char -> Bool
+rhci_catIn lo hi c = let k = rhci_charCategory c in rhci_intGe k lo && rhci_intLe k hi
+
 isControl :: Char -> Bool
-isControl c = rhci_charClass c == 0
+isControl = rhci_catIn 25 25
 
 isPrint :: Char -> Bool
-isPrint c = rhci_charClass c /= 0
+isPrint c = not (rhci_catIn 23 29 c)
 
 isUpper :: Char -> Bool
-isUpper c = rhci_charClass c == 1
+isUpper c = let k = rhci_charCategory c in rhci_intEq k 0 || rhci_intEq k 2
 
 isLower :: Char -> Bool
-isLower c = rhci_charClass c == 2
+isLower = rhci_catIn 1 1
 
 isAlpha :: Char -> Bool
-isAlpha c = let k = rhci_charClass c in k == 1 || k == 2 || k == 3
+isAlpha = rhci_catIn 0 4
 
 isLetter :: Char -> Bool
-isLetter = isAlpha
+isLetter = rhci_catIn 0 4
+
+isMark :: Char -> Bool
+isMark = rhci_catIn 5 7
 
 isAlphaNum :: Char -> Bool
-isAlphaNum c = let k = rhci_charClass c in k == 1 || k == 2 || k == 3 || k == 4
+isAlphaNum c = let k = rhci_charCategory c in rhci_intLe k 4 || (rhci_intGe k 8 && rhci_intLe k 10)
 
 isNumber :: Char -> Bool
-isNumber c = rhci_charClass c == 4
+isNumber = rhci_catIn 8 10
 
 isPunctuation :: Char -> Bool
-isPunctuation c = rhci_charClass c == 5
+isPunctuation = rhci_catIn 11 17
 
 isSymbol :: Char -> Bool
-isSymbol c = rhci_charClass c == 6
+isSymbol = rhci_catIn 18 21
 
 isSeparator :: Char -> Bool
-isSeparator c = rhci_charClass c == 7
+isSeparator = rhci_catIn 22 24
 
 isAsciiUpper :: Char -> Bool
 isAsciiUpper c = c >= 'A' && c <= 'Z'
@@ -1918,6 +2048,9 @@ toUpper = rhci_toUpper
 toLower :: Char -> Char
 toLower = rhci_toLower
 
+toTitle :: Char -> Char
+toTitle = rhci_toTitle
+
 digitToInt :: Char -> Int
 digitToInt c
   | isDigit c = ord c - ord '0'
@@ -1930,3 +2063,718 @@ intToDigit i
   | i >= 0 && i <= 9 = chr (ord '0' + i)
   | i >= 10 && i <= 15 = chr (ord 'a' + i - 10)
   | otherwise = errorWithoutStackTrace ("Char.intToDigit: not a digit " ++ show i)
+
+-- ---- Read -------------------------------------------------------------------------
+-- Ported from base (Text.ParserCombinators.ReadP and ReadPrec, Text.Read.Lex,
+-- GHC.Read, Text.Read), so what parses, what is ambiguous, and what `reads`
+-- leaves over are GHC's.
+
+type ReadS a = String -> [(a, String)]
+
+-- ReadP's parser states. Final holds a non-empty list (NonEmpty in base).
+data P a
+  = Get (Char -> P a)
+  | Look (String -> P a)
+  | Fail
+  | Result a (P a)
+  | Final [(a, String)]
+
+rhci_returnP :: a -> P a
+rhci_returnP x = Result x Fail
+
+rhci_bindP :: P a -> (a -> P b) -> P b
+rhci_bindP (Get f) k = Get (\c -> rhci_bindP (f c) k)
+rhci_bindP (Look f) k = Look (\s -> rhci_bindP (f s) k)
+rhci_bindP Fail _ = Fail
+rhci_bindP (Result x p) k = rhci_altP (k x) (rhci_bindP p k)
+rhci_bindP (Final rs) k = rhci_final [ys' | (x, s) <- rs, ys' <- rhci_run (k x) s]
+
+rhci_altP :: P a -> P a -> P a
+rhci_altP (Get f1) (Get f2) = Get (\c -> rhci_altP (f1 c) (f2 c))
+rhci_altP (Result x p) q = Result x (rhci_altP p q)
+rhci_altP p (Result x q) = Result x (rhci_altP p q)
+rhci_altP Fail p = p
+rhci_altP p Fail = p
+rhci_altP (Final r) (Final t) = Final (r ++ t)
+rhci_altP (Final r) (Look f) = Look (\s -> Final (r ++ rhci_run (f s) s))
+rhci_altP (Final r) p = Look (\s -> Final (r ++ rhci_run p s))
+rhci_altP (Look f) (Final r) = Look (\s -> Final (rhci_run (f s) s ++ r))
+rhci_altP p (Final r) = Look (\s -> Final (rhci_run p s ++ r))
+rhci_altP (Look f) (Look g) = Look (\s -> rhci_altP (f s) (g s))
+rhci_altP (Look f) p = Look (\s -> rhci_altP (f s) p)
+rhci_altP p (Look f) = Look (\s -> rhci_altP p (f s))
+
+rhci_final :: [(a, String)] -> P a
+rhci_final [] = Fail
+rhci_final rs = Final rs
+
+rhci_run :: P a -> ReadS a
+rhci_run (Get f) (c:s) = rhci_run (f c) s
+rhci_run (Look f) s = rhci_run (f s) s
+rhci_run (Result x p) s = (x, s) : rhci_run p s
+rhci_run (Final rs) _ = rs
+rhci_run _ _ = []
+
+-- base's ReadP is rank-2: forall b. (a -> P b) -> P b. rhci has no rank-2
+-- types, so b is fixed to () and the few places that instantiate it
+-- differently (running a parser, <++, gather) coerce; the machine is
+-- untyped, so the coercion is the identity.
+foreign import prim "coerce" rhci_coerce :: a -> b
+
+newtype ReadP a = R ((a -> P ()) -> P ())
+
+rhci_runR :: ReadP a -> P a
+rhci_runR (R f) = rhci_coerce (f (\a -> rhci_coerce (rhci_returnP a)))
+
+instance Functor ReadP where
+  fmap h (R f) = R (\k -> f (\a -> k (h a)))
+
+instance Applicative ReadP where
+  pure x = R (\k -> k x)
+  R mf <*> R mx = R (\k -> mf (\f -> mx (\x -> k (f x))))
+
+instance Monad ReadP where
+  R m >>= f = R (\k -> m (\a -> case f a of R m' -> m' k))
+
+instance MonadFail ReadP where
+  fail _ = R (\_ -> Fail)
+
+rhci_getP :: ReadP Char
+rhci_getP = R Get
+
+rhci_lookP :: ReadP String
+rhci_lookP = R Look
+
+rhci_pfailP :: ReadP a
+rhci_pfailP = R (\_ -> Fail)
+
+rhci_plusP :: ReadP a -> ReadP a -> ReadP a
+rhci_plusP (R f1) (R f2) = R (\k -> rhci_altP (f1 k) (f2 k))
+
+-- Left-biased choice: q only if p yields nothing.
+rhci_leftP :: ReadP a -> ReadP a -> ReadP a
+rhci_leftP p0 q = rhci_lookP >>= \s -> probe (rhci_runR p0) s 0
+  where
+    probe (Get f) (c:s) n = probe (f c) s (rhci_intAdd n 1)
+    probe (Look f) s n = probe (f s) s n
+    probe p@(Result _ _) _ n = discard n >> R (rhci_bindP p)
+    probe (Final r) _ _ = R (rhci_bindP (Final r))
+    probe _ _ _ = q
+    discard n = if rhci_intEq n 0 then return () else rhci_getP >> discard (rhci_intSub n 1)
+
+rhci_gather :: ReadP a -> ReadP (String, a)
+rhci_gather (R m) =
+  R (\k -> gath id (rhci_coerce (m (\a -> rhci_coerce (rhci_returnP (\s -> k (s, a)))))))
+  where
+    gath l (Get f) = Get (\c -> gath (l . (c:)) (f c))
+    gath _ Fail = Fail
+    gath l (Look f) = Look (\s -> gath l (f s))
+    gath l (Result k p) = rhci_altP (k (l [])) (gath l p)
+    gath _ (Final _) = errorWithoutStackTrace "do not use readS_to_P in gather!"
+
+rhci_satisfy :: (Char -> Bool) -> ReadP Char
+rhci_satisfy p = rhci_getP >>= \c -> if p c then return c else rhci_pfailP
+
+rhci_char :: Char -> ReadP Char
+rhci_char c = rhci_satisfy (c ==)
+
+rhci_string :: String -> ReadP String
+rhci_string this = rhci_lookP >>= scan this
+  where
+    scan [] _ = return this
+    scan (x:xs) (y:ys) | x == y = rhci_getP >> scan xs ys
+    scan _ _ = rhci_pfailP
+
+rhci_munch :: (Char -> Bool) -> ReadP String
+rhci_munch p = rhci_lookP >>= scan
+  where
+    scan (c:cs) | p c = rhci_getP >> scan cs >>= \s -> return (c : s)
+    scan _ = return ""
+
+rhci_munch1 :: (Char -> Bool) -> ReadP String
+rhci_munch1 p = rhci_getP >>= \c -> if p c then rhci_munch p >>= \s -> return (c : s) else rhci_pfailP
+
+rhci_choiceP :: [ReadP a] -> ReadP a
+rhci_choiceP [] = rhci_pfailP
+rhci_choiceP [p] = p
+rhci_choiceP (p:ps) = rhci_plusP p (rhci_choiceP ps)
+
+rhci_skipSpaces :: ReadP ()
+rhci_skipSpaces = rhci_lookP >>= skip
+  where
+    skip (c:s) | isSpace c = rhci_getP >> skip s
+    skip _ = return ()
+
+rhci_readP_to_S :: ReadP a -> ReadS a
+rhci_readP_to_S p = rhci_run (rhci_runR p)
+
+rhci_readS_to_P :: ReadS a -> ReadP a
+rhci_readS_to_P r = R (\k -> Look (\s -> rhci_final [bs'' | (a, s') <- r s, bs'' <- rhci_run (k a) s']))
+
+-- ReadPrec
+
+type Prec = Int
+
+newtype ReadPrec a = RP (Prec -> ReadP a)
+
+instance Functor ReadPrec where
+  fmap h (RP f) = RP (\n -> fmap h (f n))
+
+instance Applicative ReadPrec where
+  pure x = RP (\_ -> pure x)
+  RP ff <*> RP fx = RP (\n -> ff n <*> fx n)
+
+instance Monad ReadPrec where
+  RP f >>= k = RP (\n -> f n >>= \a -> case k a of RP f' -> f' n)
+
+instance MonadFail ReadPrec where
+  fail s = RP (\_ -> fail s)
+
+minPrec :: Prec
+minPrec = 0
+
+lift :: ReadP a -> ReadPrec a
+lift m = RP (\_ -> m)
+
+step :: ReadPrec a -> ReadPrec a
+step (RP f) = RP (\n -> f (rhci_intAdd n 1))
+
+reset :: ReadPrec a -> ReadPrec a
+reset (RP f) = RP (\_ -> f minPrec)
+
+prec :: Prec -> ReadPrec a -> ReadPrec a
+prec n (RP f) = RP (\c -> if rhci_intLe c n then f n else rhci_pfailP)
+
+get :: ReadPrec Char
+get = lift rhci_getP
+
+look :: ReadPrec String
+look = lift rhci_lookP
+
+(+++) :: ReadPrec a -> ReadPrec a -> ReadPrec a
+RP f1 +++ RP f2 = RP (\n -> rhci_plusP (f1 n) (f2 n))
+
+(<++) :: ReadPrec a -> ReadPrec a -> ReadPrec a
+RP f1 <++ RP f2 = RP (\n -> rhci_leftP (f1 n) (f2 n))
+
+pfail :: ReadPrec a
+pfail = lift rhci_pfailP
+
+choice :: [ReadPrec a] -> ReadPrec a
+choice ps = foldr (+++) pfail ps
+
+readPrec_to_P :: ReadPrec a -> (Int -> ReadP a)
+readPrec_to_P (RP f) = f
+
+readP_to_Prec :: (Int -> ReadP a) -> ReadPrec a
+readP_to_Prec f = RP f
+
+readPrec_to_S :: ReadPrec a -> (Int -> ReadS a)
+readPrec_to_S (RP f) n = rhci_readP_to_S (f n)
+
+readS_to_Prec :: (Int -> ReadS a) -> ReadPrec a
+readS_to_Prec f = RP (\n -> rhci_readS_to_P (f n))
+
+-- Text.Read.Lex
+
+data Lexeme
+  = Char Char
+  | String String
+  | Punc String
+  | Ident String
+  | Symbol String
+  | Number Number
+  | EOF
+  deriving (Eq, Show)
+
+data Number
+  = MkNumber Int [Int]
+  | MkDecimal [Int] (Maybe [Int]) (Maybe Integer)
+  deriving (Eq, Show)
+
+rhci_val :: Integer -> [Int] -> Integer
+rhci_val base = go 0
+  where
+    go r [] = r
+    go r (d:ds) = let r' = r * base + toInteger d in r' `seq` go r' ds
+
+rhci_numberToInteger :: Number -> Maybe Integer
+rhci_numberToInteger (MkNumber base iPart) = Just (rhci_val (toInteger base) iPart)
+rhci_numberToInteger (MkDecimal iPart Nothing Nothing) = Just (rhci_val 10 iPart)
+rhci_numberToInteger _ = Nothing
+
+-- numberToRational as (numerator, denominator), not reduced.
+rhci_numberToRational :: Number -> (Integer, Integer)
+rhci_numberToRational (MkNumber base iPart) = (rhci_val (toInteger base) iPart, 1)
+rhci_numberToRational (MkDecimal iPart mFPart mExp) =
+  let i = rhci_val 10 iPart
+  in case (mFPart, mExp) of
+       (Nothing, Nothing) -> (i, 1)
+       (Nothing, Just e) -> if e >= 0 then (i * 10 ^ e, 1) else (i, 10 ^ negate e)
+       (Just fPart, Nothing) -> rhci_fracExp 0 i fPart
+       (Just fPart, Just e) -> rhci_fracExp e i fPart
+
+rhci_fracExp :: Integer -> Integer -> [Int] -> (Integer, Integer)
+rhci_fracExp e mant [] = if e < 0 then (mant, 10 ^ negate e) else (mant * 10 ^ e, 1)
+rhci_fracExp e mant (d:ds) =
+  let e' = e - 1
+      mant' = mant * 10 + toInteger d
+  in e' `seq` mant' `seq` rhci_fracExp e' mant' ds
+
+-- Nothing means Infinity: the exponent is far beyond the type's range.
+rhci_numberToRangedRational :: (Int, Int) -> Number -> Maybe (Integer, Integer)
+rhci_numberToRangedRational (neg, pos) n@(MkDecimal iPart mFPart (Just e))
+  | e > toInteger (maxBound :: Int) || e < toInteger (minBound :: Int) = Nothing
+  | otherwise =
+      let mFirstDigit = case dropWhile (0 ==) iPart of
+            iPart'@(_ : _) -> Just (length iPart')
+            [] -> case mFPart of
+                    Nothing -> Nothing
+                    Just fPart -> case span (0 ==) fPart of
+                                    (_, []) -> Nothing
+                                    (zeroes, _) -> Just (negate (length zeroes))
+      in case mFirstDigit of
+           Nothing -> Just (0, 1)
+           Just firstDigit ->
+             let firstDigit' = firstDigit + fromInteger e
+             in if firstDigit' > (pos + 3)
+                  then Nothing
+                  else if firstDigit' < (neg - 3)
+                    then Just (0, 1)
+                    else Just (rhci_numberToRational n)
+rhci_numberToRangedRational _ n = Just (rhci_numberToRational n)
+
+rhci_lexL :: ReadP Lexeme
+rhci_lexL = rhci_skipSpaces >> rhci_lexToken
+
+rhci_expect :: Lexeme -> ReadP ()
+rhci_expect lexeme = rhci_skipSpaces >> rhci_lexToken >>= \thing ->
+  if thing == lexeme then return () else rhci_pfailP
+
+rhci_hsLex :: ReadP String
+rhci_hsLex = rhci_skipSpaces >> rhci_gather rhci_lexToken >>= \(s, _) -> return s
+
+rhci_lexToken :: ReadP Lexeme
+rhci_lexToken =
+  rhci_plusP rhci_lexEOF (rhci_plusP rhci_lexLitChar (rhci_plusP rhci_lexString
+    (rhci_plusP rhci_lexPunc (rhci_plusP rhci_lexSymbol (rhci_plusP rhci_lexId rhci_lexNumber)))))
+
+rhci_lexEOF :: ReadP Lexeme
+rhci_lexEOF = rhci_lookP >>= \s -> if null s then return EOF else rhci_pfailP
+
+rhci_lexPunc :: ReadP Lexeme
+rhci_lexPunc = rhci_satisfy rhci_isPuncChar >>= \c -> return (Punc [c])
+
+rhci_isPuncChar :: Char -> Bool
+rhci_isPuncChar c = c `elem` ",;()[]{}`"
+
+rhci_lexSymbol :: ReadP Lexeme
+rhci_lexSymbol = rhci_munch1 rhci_isSymbolChar >>= \s ->
+  if s `elem` ["..", "::", "=", "\\", "|", "<-", "->", "@", "~", "=>"]
+    then return (Punc s)
+    else return (Symbol s)
+
+-- By category number: 11 ConnectorPunctuation, 12 DashPunctuation,
+-- 17 OtherPunctuation, 18-21 the symbol categories.
+rhci_isSymbolChar :: Char -> Bool
+rhci_isSymbolChar c = not (rhci_isPuncChar c) && symbolic (rhci_charCategory c)
+  where
+    symbolic k
+      | rhci_intGe k 18 && rhci_intLe k 21 = True
+      | rhci_intEq k 12 = True
+      | rhci_intEq k 17 = not (c `elem` "'\"")
+      | rhci_intEq k 11 = c /= '_'
+      | otherwise = False
+
+rhci_lexId :: ReadP Lexeme
+rhci_lexId = rhci_satisfy isIdsChar >>= \c -> rhci_munch isIdfChar >>= \s -> return (Ident (c : s))
+  where
+    isIdsChar c = isAlpha c || c == '_'
+    isIdfChar c = isAlphaNum c || c `elem` "_'"
+
+rhci_lexLitChar :: ReadP Lexeme
+rhci_lexLitChar = rhci_char '\'' >> rhci_lexCharE >>= \(c, esc) ->
+  if esc || c /= '\'' then rhci_char '\'' >> return (Char c) else rhci_pfailP
+
+rhci_lexChar :: ReadP Char
+rhci_lexChar = rhci_lexCharE >>= \(c, _) -> consumeEmpties >> return c
+  where
+    consumeEmpties = rhci_lookP >>= \rest -> case rest of
+      ('\\':'&':_) -> rhci_string "\\&" >> consumeEmpties
+      _ -> return ()
+
+rhci_lexCharE :: ReadP (Char, Bool)
+rhci_lexCharE = rhci_getP >>= \c1 ->
+  if c1 == '\\' then rhci_lexEsc >>= \c2 -> return (c2, True) else return (c1, False)
+
+rhci_lexEsc :: ReadP Char
+rhci_lexEsc = rhci_plusP rhci_lexEscChar (rhci_plusP rhci_lexNumeric (rhci_plusP rhci_lexCntrlChar rhci_lexAscii))
+
+rhci_lexEscChar :: ReadP Char
+rhci_lexEscChar = rhci_getP >>= \c -> case c of
+  'a' -> return '\a'
+  'b' -> return '\b'
+  'f' -> return '\f'
+  'n' -> return '\n'
+  'r' -> return '\r'
+  't' -> return '\t'
+  'v' -> return '\v'
+  '\\' -> return '\\'
+  '"' -> return '"'
+  '\'' -> return '\''
+  _ -> rhci_pfailP
+
+rhci_lexNumeric :: ReadP Char
+rhci_lexNumeric =
+  rhci_leftP rhci_lexBaseChar (return 10) >>= \base ->
+  rhci_lexInteger base >>= \n ->
+  if n <= 1114111 then return (chr (fromInteger n)) else rhci_pfailP
+
+rhci_lexCntrlChar :: ReadP Char
+rhci_lexCntrlChar = rhci_char '^' >> rhci_getP >>= \c ->
+  if c >= '@' && c <= '_' then return (chr (rhci_intSub (ord c) 64)) else rhci_pfailP
+
+rhci_lexAscii :: ReadP Char
+rhci_lexAscii = rhci_choiceP
+  (rhci_leftP (rhci_string "SOH" >> return '\1') (rhci_string "SO" >> return '\14')
+   : map (\(s, c) -> rhci_string s >> return (chr c))
+       [ ("NUL", 0), ("STX", 2), ("ETX", 3), ("EOT", 4), ("ENQ", 5), ("ACK", 6), ("BEL", 7)
+       , ("BS", 8), ("HT", 9), ("LF", 10), ("VT", 11), ("FF", 12), ("CR", 13), ("SI", 15)
+       , ("DLE", 16), ("DC1", 17), ("DC2", 18), ("DC3", 19), ("DC4", 20), ("NAK", 21)
+       , ("SYN", 22), ("ETB", 23), ("CAN", 24), ("EM", 25), ("SUB", 26), ("ESC", 27)
+       , ("FS", 28), ("GS", 29), ("RS", 30), ("US", 31), ("SP", 32), ("DEL", 127) ])
+
+rhci_lexString :: ReadP Lexeme
+rhci_lexString = rhci_char '"' >> body id
+  where
+    body f = lexStrItem >>= \(c, esc) ->
+      if c /= '"' || esc then body (f . (c:)) else return (String (f ""))
+    lexStrItem = rhci_plusP (lexEmpty >> lexStrItem) rhci_lexCharE
+    lexEmpty = rhci_char '\\' >> rhci_getP >>= \c ->
+      if c == '&' then return ()
+      else if isSpace c then rhci_skipSpaces >> rhci_char '\\' >> return ()
+      else rhci_pfailP
+
+rhci_lexNumber :: ReadP Lexeme
+rhci_lexNumber = rhci_leftP rhci_lexHexOct rhci_lexDecNumber
+
+rhci_lexHexOct :: ReadP Lexeme
+rhci_lexHexOct = rhci_char '0' >> rhci_lexBaseChar >>= \base ->
+  rhci_lexDigits base >>= \digits -> return (Number (MkNumber base digits))
+
+rhci_lexBaseChar :: ReadP Int
+rhci_lexBaseChar = rhci_getP >>= \c -> case c of
+  'o' -> return 8
+  'O' -> return 8
+  'x' -> return 16
+  'X' -> return 16
+  _ -> rhci_pfailP
+
+rhci_lexDecNumber :: ReadP Lexeme
+rhci_lexDecNumber =
+  rhci_lexDigits 10 >>= \xs ->
+  rhci_leftP rhci_lexFrac (return Nothing) >>= \mFrac ->
+  rhci_leftP rhci_lexExp (return Nothing) >>= \mExp ->
+  return (Number (MkDecimal xs mFrac mExp))
+
+rhci_lexFrac :: ReadP (Maybe [Int])
+rhci_lexFrac = rhci_char '.' >> rhci_lexDigits 10 >>= \fraction -> return (Just fraction)
+
+rhci_lexExp :: ReadP (Maybe Integer)
+rhci_lexExp = rhci_plusP (rhci_char 'e') (rhci_char 'E') >>
+  rhci_plusP signedExp (rhci_lexInteger 10) >>= \e -> return (Just e)
+  where
+    signedExp = rhci_plusP (rhci_char '-') (rhci_char '+') >>= \c ->
+      rhci_lexInteger 10 >>= \n -> return (if c == '-' then negate n else n)
+
+rhci_lexDigits :: Int -> ReadP [Int]
+rhci_lexDigits base = rhci_lookP >>= \s -> scan s id >>= \xs ->
+  if null xs then rhci_pfailP else return xs
+  where
+    scan (c:cs) f = case rhci_valDig base c of
+      Just n -> rhci_getP >> scan cs (f . (n:))
+      Nothing -> return (f [])
+    scan [] f = return (f [])
+
+rhci_lexInteger :: Int -> ReadP Integer
+rhci_lexInteger base = rhci_lexDigits base >>= \xs -> return (rhci_val (toInteger base) xs)
+
+rhci_valDig :: Int -> Char -> Maybe Int
+rhci_valDig base c
+  | rhci_intEq base 8 = if c >= '0' && c <= '7' then Just (rhci_intSub (ord c) 48) else Nothing
+  | rhci_intEq base 10 = if c >= '0' && c <= '9' then Just (rhci_intSub (ord c) 48) else Nothing
+  | c >= '0' && c <= '9' = Just (rhci_intSub (ord c) 48)
+  | c >= 'a' && c <= 'f' = Just (rhci_intSub (ord c) 87)
+  | c >= 'A' && c <= 'F' = Just (rhci_intSub (ord c) 55)
+  | otherwise = Nothing
+
+-- GHC.Read
+
+class Read a where
+  readsPrec :: Int -> ReadS a
+  readList :: ReadS [a]
+  readPrec :: ReadPrec a
+  readListPrec :: ReadPrec [a]
+  readsPrec = readPrec_to_S readPrec
+  readList = readPrec_to_S (rhci_list readPrec) 0
+  readPrec = readS_to_Prec readsPrec
+  readListPrec = readS_to_Prec (\_ -> readList)
+
+readListDefault :: Read a => ReadS [a]
+readListDefault = readPrec_to_S readListPrec 0
+
+readListPrecDefault :: Read a => ReadPrec [a]
+readListPrecDefault = rhci_list readPrec
+
+readParen :: Bool -> ReadS a -> ReadS a
+readParen b g = if b then mandatory else optional
+  where
+    optional r = g r ++ mandatory r
+    mandatory r = [(x, u) | (open, s) <- lex r, open == "(", (x, t) <- optional s, (close, u) <- lex t, close == ")"]
+
+lex :: ReadS String
+lex s = rhci_readP_to_S rhci_hsLex s
+
+lexLitChar :: ReadS String
+lexLitChar = rhci_readP_to_S (rhci_gather rhci_lexChar >>= \(s, _) -> return (removeNulls s))
+  where
+    removeNulls [] = []
+    removeNulls ('\\':'&':xs) = removeNulls xs
+    removeNulls (first:rest) = first : removeNulls rest
+
+readLitChar :: ReadS Char
+readLitChar = rhci_readP_to_S rhci_lexChar
+
+lexP :: ReadPrec Lexeme
+lexP = lift rhci_lexL
+
+rhci_expectP :: Lexeme -> ReadPrec ()
+rhci_expectP lexeme = lift (rhci_expect lexeme)
+
+rhci_expectCharP :: Char -> ReadPrec a -> ReadPrec a
+rhci_expectCharP c a = get >>= \q -> if q == c then a else pfail
+
+rhci_skipSpacesThenP :: ReadPrec a -> ReadPrec a
+rhci_skipSpacesThenP m = look >>= skip
+  where
+    skip (c:s) | isSpace c = get >> skip s
+    skip _ = m
+
+rhci_paren :: ReadPrec a -> ReadPrec a
+rhci_paren p = rhci_skipSpacesThenP (rhci_paren' p)
+
+rhci_paren' :: ReadPrec a -> ReadPrec a
+rhci_paren' p = rhci_expectCharP '(' (reset p >>= \x -> rhci_skipSpacesThenP (rhci_expectCharP ')' (pure x)))
+
+parens :: ReadPrec a -> ReadPrec a
+parens p = optional
+  where
+    optional = rhci_skipSpacesThenP (p +++ mandatory)
+    mandatory = rhci_paren' optional
+
+rhci_list :: ReadPrec a -> ReadPrec [a]
+rhci_list readx = parens (rhci_expectP (Punc "[") >> (listRest False +++ listNext))
+  where
+    listRest started = lexP >>= \l -> case l of
+      Punc c -> if c == "]" then return []
+                else if c == "," && started then listNext
+                else pfail
+      _ -> pfail
+    listNext = reset readx >>= \x -> listRest True >>= \xs -> return (x : xs)
+
+rhci_choose :: [(String, ReadPrec a)] -> ReadPrec a
+rhci_choose sps = foldr ((+++) . tryOne) pfail sps
+  where
+    tryOne (s, p) = lexP >>= \token -> case token of
+      Ident s' -> if s == s' then p else pfail
+      Symbol s' -> if s == s' then p else pfail
+      _ -> pfail
+
+rhci_readField :: String -> ReadPrec a -> ReadPrec a
+rhci_readField fieldName readVal =
+  rhci_expectP (Ident fieldName) >> rhci_expectP (Punc "=") >> readVal
+
+rhci_readSymField :: String -> ReadPrec a -> ReadPrec a
+rhci_readSymField fieldName readVal =
+  rhci_expectP (Punc "(") >> rhci_expectP (Symbol fieldName) >> rhci_expectP (Punc ")")
+    >> rhci_expectP (Punc "=") >> readVal
+
+-- What derived instances call (user definitions cannot capture them).
+rhci_readPrec :: Read a => ReadPrec a
+rhci_readPrec = readPrec
+
+rhci_readListDefault :: Read a => ReadS [a]
+rhci_readListDefault = readListDefault
+
+rhci_readListPrecDefault :: Read a => ReadPrec [a]
+rhci_readListPrecDefault = readListPrecDefault
+
+rhci_parens :: ReadPrec a -> ReadPrec a
+rhci_parens = parens
+
+rhci_prec :: Prec -> ReadPrec a -> ReadPrec a
+rhci_prec = prec
+
+rhci_step :: ReadPrec a -> ReadPrec a
+rhci_step = step
+
+rhci_reset :: ReadPrec a -> ReadPrec a
+rhci_reset = reset
+
+rhci_altRP :: ReadPrec a -> ReadPrec a -> ReadPrec a
+rhci_altRP = (+++)
+
+rhci_pfailRP :: ReadPrec a
+rhci_pfailRP = pfail
+
+rhci_returnRP :: a -> ReadPrec a
+rhci_returnRP = return
+
+rhci_bindRP :: ReadPrec a -> (a -> ReadPrec b) -> ReadPrec b
+rhci_bindRP = (>>=)
+
+rhci_thenRP :: ReadPrec a -> ReadPrec b -> ReadPrec b
+rhci_thenRP m k = m >>= \_ -> k
+
+rhci_identL, rhci_symbolL, rhci_puncL :: String -> Lexeme
+rhci_identL = Ident
+rhci_symbolL = Symbol
+rhci_puncL = Punc
+
+instance Read Char where
+  readPrec = parens (lexP >>= \l -> case l of
+    Char c -> return c
+    _ -> pfail)
+  readListPrec = parens ((lexP >>= \l -> case l of
+                            String s -> return s
+                            _ -> pfail)
+                         +++ readListPrecDefault)
+  readList = readListDefault
+
+instance Read Bool where
+  readPrec = parens (lexP >>= \l -> case l of
+    Ident s -> if s == "True" then return True else if s == "False" then return False else pfail
+    _ -> pfail)
+  readListPrec = readListPrecDefault
+  readList = readListDefault
+
+instance Read Ordering where
+  readPrec = parens (lexP >>= \l -> case l of
+    Ident s -> if s == "LT" then return LT else if s == "EQ" then return EQ
+               else if s == "GT" then return GT else pfail
+    _ -> pfail)
+  readListPrec = readListPrecDefault
+  readList = readListDefault
+
+instance Read a => Read [a] where
+  readPrec = readListPrec
+  readListPrec = readListPrecDefault
+  readList = readListDefault
+
+instance Read Lexeme where
+  readPrec = lexP
+  readListPrec = readListPrecDefault
+  readList = readListDefault
+
+rhci_readNumber :: Num a => (Lexeme -> ReadPrec a) -> ReadPrec a
+rhci_readNumber convert = parens (lexP >>= \x ->
+  if x == Symbol "-" then lexP >>= \y -> convert y >>= \n -> return (negate n) else convert x)
+
+rhci_convertInt :: Num a => Lexeme -> ReadPrec a
+rhci_convertInt (Number n) = case rhci_numberToInteger n of
+  Just i -> return (fromInteger i)
+  Nothing -> pfail
+rhci_convertInt _ = pfail
+
+rhci_convertFrac :: Lexeme -> ReadPrec Double
+rhci_convertFrac (Ident s)
+  | s == "NaN" = return (0 / 0)
+  | s == "Infinity" = return (1 / 0)
+  | otherwise = pfail
+rhci_convertFrac (Number n) = case rhci_numberToRangedRational (negate 1021, 1024) n of
+  Nothing -> return (1 / 0)
+  Just (p, q) -> return (rhci_doubleFromRational p q)
+rhci_convertFrac _ = pfail
+
+instance Read Int where
+  readPrec = rhci_readNumber rhci_convertInt
+  readListPrec = readListPrecDefault
+  readList = readListDefault
+
+instance Read Integer where
+  readPrec = rhci_readNumber rhci_convertInt
+  readListPrec = readListPrecDefault
+  readList = readListDefault
+
+instance Read Double where
+  readPrec = rhci_readNumber rhci_convertFrac
+  readListPrec = readListPrecDefault
+  readList = readListDefault
+
+instance Read () where
+  readPrec = parens (rhci_paren (return ()))
+  readListPrec = readListPrecDefault
+  readList = readListDefault
+
+rhci_wrapTup :: ReadPrec a -> ReadPrec a
+rhci_wrapTup p = parens (rhci_paren p)
+
+rhci_readComma :: ReadPrec ()
+rhci_readComma = rhci_expectP (Punc ",")
+
+rhci_readTup2 :: (Read a, Read b) => ReadPrec (a, b)
+rhci_readTup2 = readPrec >>= \x -> rhci_readComma >> readPrec >>= \y -> return (x, y)
+
+rhci_readTup4 :: (Read a, Read b, Read c, Read d) => ReadPrec (a, b, c, d)
+rhci_readTup4 = rhci_readTup2 >>= \(a, b) -> rhci_readComma >> rhci_readTup2 >>= \(c, d) -> return (a, b, c, d)
+
+instance (Read a, Read b) => Read (a, b) where
+  readPrec = rhci_wrapTup rhci_readTup2
+  readListPrec = readListPrecDefault
+  readList = readListDefault
+
+instance (Read a, Read b, Read c) => Read (a, b, c) where
+  readPrec = rhci_wrapTup (rhci_readTup2 >>= \(a, b) -> rhci_readComma >> readPrec >>= \c -> return (a, b, c))
+  readListPrec = readListPrecDefault
+  readList = readListDefault
+
+instance (Read a, Read b, Read c, Read d) => Read (a, b, c, d) where
+  readPrec = rhci_wrapTup rhci_readTup4
+  readListPrec = readListPrecDefault
+  readList = readListDefault
+
+instance (Read a, Read b, Read c, Read d, Read e) => Read (a, b, c, d, e) where
+  readPrec = rhci_wrapTup (rhci_readTup4 >>= \(a, b, c, d) -> rhci_readComma >> readPrec >>= \e ->
+                             return (a, b, c, d, e))
+  readListPrec = readListPrecDefault
+  readList = readListDefault
+
+-- Text.Read
+
+reads :: Read a => ReadS a
+reads = readsPrec minPrec
+
+readEither :: Read a => String -> Either String a
+readEither s = case [x | (x, rest) <- readPrec_to_S read' minPrec s, null rest] of
+    [x] -> Right x
+    [] -> Left "Prelude.read: no parse"
+    _ -> Left "Prelude.read: ambiguous parse"
+  where
+    read' = readPrec >>= \x -> lift rhci_skipSpaces >> return x
+
+readMaybe :: Read a => String -> Maybe a
+readMaybe s = case readEither s of
+  Left _ -> Nothing
+  Right a -> Just a
+
+read :: Read a => String -> a
+read s = either errorWithoutStackTrace id (readEither s)
+
+readIO :: Read a => String -> IO a
+readIO s = case [x | (x, t) <- reads s, (a, b) <- lex t, null a, null b] of
+  [x] -> return x
+  [] -> ioError (userError "Prelude.readIO: no parse")
+  _ -> ioError (userError "Prelude.readIO: ambiguous parse")
+
+readLn :: Read a => IO a
+readLn = getLine >>= readIO

@@ -10,6 +10,8 @@ parser
 fixity
 frontend
 core
+unicode_data
+unicode
 vm
 lower
 types

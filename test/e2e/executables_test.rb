@@ -61,5 +61,16 @@ EXECUTABLES.each do |label, cmd|
             "<interactive>:1:4: parse error (possibly incorrect indentation or mismatched brackets)\n", err
       RT.ok out.include?("'x' :: Char\n"), out
     end
+
+    RT.test 'stdin: -i, getArgs, getLine prompts, UTF-8 input, stderr' do
+      RT.eq ["HÉ Λ\nX", '', 0], run_exe(cmd, ['-i', '-c', 'map toUpper'], "hé λ\nx")
+      RT.eq ["Name: hi λ\n", '', 0],
+            run_exe(cmd, ['-x', 'putStr "Name: " >> getLine >>= \\n -> putStrLn ("hi " ++ n)'], "λ\n")
+      RT.eq ["one\ntwo three\n", '', 0], run_exe(cmd, ['-x', 'getArgs >>= mapM_ putStrLn', 'one', 'two three'])
+      RT.eq ['', "e\n", 0], run_exe(cmd, ['-x', 'hPutStrLn stderr "e"'])
+      _, err, code = run_exe(cmd, ['-x', 'getLine'])
+      RT.eq 1, code
+      RT.ok err.include?('<stdin>: hGetLine: end of file'), err
+    end
   end
 end

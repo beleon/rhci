@@ -1517,3 +1517,414 @@ ghci> {- block -} 2
 ghci> :t 1 -- comment
 1 -- comment :: Num a => a
 
+## 27. Read: numbers, layout of the input, precedence
+
+ghci> read "42" :: Int
+42
+ghci> read " ( -7 ) " :: Integer
+-7
+ghci> read "- 7" :: Int
+-7
+ghci> read "(-7)" :: Int
+-7
+ghci> read "((7))" :: Int
+7
+ghci> read "7 " :: Int
+7
+ghci> read "7x" :: Int
+*** Exception: Prelude.read: no parse
+ghci> read "+7" :: Int
+*** Exception: Prelude.read: no parse
+ghci> read "0x1F" :: Int
+31
+ghci> read "0o17" :: Int
+15
+ghci> read "0b101" :: Int
+*** Exception: Prelude.read: no parse
+ghci> read "1e3" :: Int
+*** Exception: Prelude.read: no parse
+ghci> read "1.0" :: Int
+*** Exception: Prelude.read: no parse
+ghci> read "9223372036854775808" :: Int
+-9223372036854775808
+ghci> read "123456789012345678901234567890" :: Integer
+123456789012345678901234567890
+ghci> read "3" :: Double
+3.0
+ghci> read "3.5e2" :: Double
+350.0
+ghci> read ".5" :: Double
+*** Exception: Prelude.read: no parse
+ghci> read "5." :: Double
+*** Exception: Prelude.read: no parse
+ghci> read "1e500" :: Double
+Infinity
+ghci> read "1e-500" :: Double
+0.0
+ghci> read "-0.0" :: Double
+-0.0
+ghci> read "Infinity" :: Double
+Infinity
+ghci> read "-Infinity" :: Double
+-Infinity
+ghci> read "NaN" :: Double
+NaN
+ghci> read "0x10" :: Double
+16.0
+ghci> read "2.5E-3" :: Double
+2.5e-3
+ghci> read "0.1" :: Double
+0.1
+ghci> read "1e1000000000000" :: Double
+Infinity
+ghci> read "Just -3" :: Maybe Int
+Just (-3)
+ghci> read "Just (-3)" :: Maybe Int
+Just (-3)
+ghci> read "Just Just 3" :: Maybe (Maybe Int)
+*** Exception: Prelude.read: no parse
+ghci> read "Just (Just 3)" :: Maybe (Maybe Int)
+Just (Just 3)
+ghci> read "[Left 1, Right True]" :: [Either Int Bool]
+[Left 1,Right True]
+ghci> read "[1,2,3]" :: [Int]
+[1,2,3]
+ghci> read "[ 1 , 2 ]" :: [Int]
+[1,2]
+ghci> read "[]" :: [Int]
+[]
+ghci> read "[1,]" :: [Int]
+*** Exception: Prelude.read: no parse
+ghci> read "(1,\"a\\nb\",True)" :: (Int,String,Bool)
+(1,"a\nb",True)
+ghci> read "( 1 , 2 )" :: (Int,Int)
+(1,2)
+ghci> read "(1,2,3,4,5)" :: (Int,Int,Int,Int,Int)
+(1,2,3,4,5)
+ghci> read "()"
+()
+ghci> read " ( ) "
+()
+ghci> read "3"
+*** Exception: Prelude.read: no parse
+ghci> read "True" :: Bool
+True
+ghci> read "LT" :: Ordering
+LT
+ghci> read "GT " :: Ordering
+GT
+ghci> read "true" :: Bool
+*** Exception: Prelude.read: no parse
+
+## 28. Read: chars, strings, lex, reads
+
+ghci> import Data.Char
+ghci> read "'x'" :: Char
+'x'
+ghci> read "'\\n'" :: Char
+'\n'
+ghci> read "'\\''" :: Char
+'\''
+ghci> read "''" :: Char
+*** Exception: Prelude.read: no parse
+ghci> read "\"a\\SOHb\\^Ac\\1234\\&5\\x41\\o101\"" :: String
+"a\SOHb\SOHc\1234\&5AA"
+ghci> read "\"a\\SO\\&H\"" :: String
+"a\SO\&H"
+ghci> read "\"a\\   \\b\"" :: String
+"ab"
+ghci> read "['a','\\n']" :: String
+"a\n"
+ghci> read "\"\\1114112\"" :: String
+"*** Exception: Prelude.read: no parse
+ghci> read "'\\DEL'" :: Char
+'\DEL'
+ghci> reads "12 rest" :: [(Int,String)]
+[(12," rest")]
+ghci> reads "(12) rest" :: [(Int,String)]
+[(12," rest")]
+ghci> reads "x" :: [(Int,String)]
+[]
+ghci> reads "1.5" :: [(Int,String)]
+[]
+ghci> reads "  \"hi\" there" :: [(String,String)]
+[("hi"," there")]
+ghci> reads "" :: [(Int,String)]
+[]
+ghci> lex " hello world"
+[("hello"," world")]
+ghci> lex "'a' rest"
+[("'a'"," rest")]
+ghci> lex "<= x"
+[("<="," x")]
+ghci> lex "1.5e3x"
+[("1.5e3","x")]
+ghci> lex "0x1Fg"
+[("0x1F","g")]
+ghci> lex "\"str\" tail"
+[("\"str\""," tail")]
+ghci> lex ""
+[("","")]
+ghci> lex "   "
+[("","")]
+ghci> lex "(x)"
+[("(","x)")]
+ghci> lex "_foo'1 bar"
+[("_foo'1"," bar")]
+ghci> lex "->x"
+[("->","x")]
+ghci> lex "`f`"
+[("`","f`")]
+ghci> lex "1e"
+[("1","e")]
+ghci> lex "1.e5"
+[("1",".e5")]
+ghci> lex "\x3bb\&x y"
+[("\955x"," y")]
+ghci> readParen True reads "(5)" :: [(Int,String)]
+[(5,"")]
+ghci> readParen False reads "5" :: [(Int,String)]
+[(5,"")]
+ghci> readParen True reads "5" :: [(Int,String)]
+[]
+ghci> readLitChar "\\nabc"
+[('\n',"abc")]
+ghci> lexLitChar "\\nabc"
+[("\\n","abc")]
+ghci> lexLitChar "\\SOHx"
+[("\\SOH","x")]
+ghci> readLitChar "\\SOx"
+[('\SO',"x")]
+ghci> :t read
+read :: Read a => String -> a
+ghci> :t reads
+reads :: Read a => ReadS a
+ghci> :t lex
+lex :: ReadS String
+
+## 29. Read: derived instances
+
+ghci> data T = A | B Int | C { f :: Int, g :: Bool } | Int :+ Int | Int `Q` Int deriving (Show, Read)
+ghci> read " [A,B 3, C {f = 1, g = True}, 1 :+ 2, 3 `Q` 4, (B (-2))]" :: [T]
+[A,B 3,C {f = 1, g = True},1 :+ 2,3 `Q` 4,B (-2)]
+ghci> read "B -2" :: T
+B (-2)
+ghci> read "B 3" :: T
+B 3
+ghci> read "(B 3)" :: T
+B 3
+ghci> read "B (3)" :: T
+B 3
+ghci> reads "A B" :: [(T, String)]
+[(A," B")]
+ghci> read "C{f= -1,g=False}" :: T
+C {f = -1, g = False}
+ghci> read "C {g = False, f = 1}" :: T
+*** Exception: Prelude.read: no parse
+ghci> read "C 1 True" :: T
+*** Exception: Prelude.read: no parse
+ghci> read "(:+) 1 2" :: T
+*** Exception: Prelude.read: no parse
+ghci> read "1 :+ 2 :+ 3" :: T
+*** Exception: Prelude.read: no parse
+ghci> read "Q 3 4" :: T
+*** Exception: Prelude.read: no parse
+ghci> show (3 `Q` 4)
+"3 `Q` 4"
+ghci> data U = U Int Int | V deriving (Show, Read, Eq)
+ghci> read "U 1 2" :: U
+U 1 2
+ghci> read "U 1" :: U
+*** Exception: Prelude.read: no parse
+ghci> read "V" :: U
+V
+ghci> read "V " == V
+True
+ghci> data P a = P a a deriving (Show, Read)
+ghci> read "P (Just 1) Nothing" :: P (Maybe Int)
+P (Just 1) Nothing
+ghci> read "P \"a\" \"b\"" :: P String
+P "a" "b"
+ghci> read "[(1,P 'a' 'b')]" :: [(Int, P Char)]
+[(1,P 'a' 'b')]
+ghci> data E deriving Show
+ghci> data R = R { x :: Double } deriving (Show, Read)
+ghci> read "R {x = 1.5}" :: R
+R {x = 1.5}
+ghci> read "R {x = -1.5}" :: R
+R {x = -1.5}
+ghci> read "R { x = 2 }" :: R
+R {x = 2.0}
+ghci> read "(R {x = 2})" :: R
+R {x = 2.0}
+ghci> read "Just R {x = 2}" :: Maybe R
+Just (R {x = 2.0})
+
+## 30. Text.Read and readIO
+
+ghci> import Text.Read
+ghci> readMaybe "5" :: Maybe Int
+Just 5
+ghci> readMaybe "5 6" :: Maybe Int
+Nothing
+ghci> readMaybe " 5 " :: Maybe Int
+Just 5
+ghci> readEither "x" :: Either String Int
+Left "Prelude.read: no parse"
+ghci> readEither "12" :: Either String Integer
+Right 12
+ghci> readIO "5" :: IO Int
+5
+ghci> readIO "x" :: IO Int
+*** Exception: user error (Prelude.readIO: no parse)
+ghci> readIO " 5  " :: IO Int
+5
+ghci> read "x" :: Int
+*** Exception: Prelude.read: no parse
+ghci> read "1 2" :: Int
+*** Exception: Prelude.read: no parse
+ghci> fmap (+1) (readMaybe "41") :: Maybe Int
+Just 42
+ghci> readPrec_to_S (readPrec :: ReadPrec Int) 0 "12"
+[(12,"")]
+ghci> readPrec_to_S lexP 0 "12 x"
+[(Number (MkDecimal [1,2] Nothing Nothing)," x")]
+ghci> readPrec_to_S lexP 0 "1.5e3"
+[(Number (MkDecimal [1] (Just [5]) (Just 3)),"")]
+ghci> readPrec_to_S lexP 0 "'c'"
+[(Char 'c',"")]
+ghci> readPrec_to_S lexP 0 "\"s\""
+[(String "s","")]
+ghci> readPrec_to_S lexP 0 "->"
+[(Punc "->","")]
+ghci> readPrec_to_S lexP 0 ""
+[(EOF,"")]
+ghci> readPrec_to_S (prec 5 (lift (return 'x'))) 6 ""
+[]
+ghci> readPrec_to_S (step (prec 5 (lift (return 'x')))) 5 ""
+[]
+ghci> readPrec_to_S (get +++ get) 0 "ab"
+[('a',"b"),('a',"b")]
+ghci> readPrec_to_S (get <++ return 'z') 0 "ab"
+[('a',"b")]
+ghci> readPrec_to_S (return 'z' <++ get) 0 "ab"
+[('z',"ab")]
+ghci> readPrec_to_S (parens (lift (return 1 :: ReadP Int))) 0 "(x)"
+
+<interactive>:49:42: error: [GHC-76037]
+    Not in scope: type constructor or class ‘ReadP’
+    Suggested fix:
+      Perhaps use one of these:
+        ‘Read’ (imported from Prelude), ‘ReadS’ (imported from Prelude)
+ghci> readPrec_to_S (choice [get, look >>= \s -> return 'L']) 0 "q"
+[('L',"q"),('q',"")]
+ghci> :t readMaybe
+readMaybe :: Read a => String -> Maybe a
+ghci> :t readPrec
+readPrec :: Read a => ReadPrec a
+ghci> :t lexP
+lexP :: ReadPrec Lexeme
+ghci> Ident "x" == Ident "x"
+True
+ghci> Symbol "+"
+Symbol "+"
+ghci> [Punc "(", EOF]
+[Punc "(",EOF]
+
+## 31. Data.Char beyond Latin-1
+
+ghci> import Data.Char
+ghci> generalCategory '\955'
+LowercaseLetter
+ghci> map generalCategory "a1 ,+\8364\8232\57344\888\55296"
+[LowercaseLetter,DecimalNumber,Space,OtherPunctuation,MathSymbol,CurrencySymbol,LineSeparator,PrivateUse,NotAssigned,Surrogate]
+ghci> filter isUpper "Ab\453\923\8544"
+"A\453\923"
+ghci> filter isUpperCase "Ab\453\923\8544"
+"A\923\8544"
+ghci> filter isLowerCase "aB\170\7468"
+"a\170\7468"
+ghci> map toUpper "stra\223e \955\453\1012"
+"STRA\223E \923\452\1012"
+ghci> map toLower "\304\923\453\8544"
+"i\955\454\8560"
+ghci> map toTitle "\454\455a\223"
+"\453\456A\223"
+ghci> isPrint '\57344'
+False
+ghci> isPrint '\8232'
+False
+ghci> isSpace '\12288'
+True
+ghci> isSpace '\8203'
+False
+ghci> isAlpha '\12354'
+True
+ghci> isAlphaNum '\1637'
+True
+ghci> isNumber '\8544'
+True
+ghci> isMark '\769'
+True
+ghci> isPunctuation '\12290'
+True
+ghci> isSymbol '\8364'
+True
+ghci> isSeparator '\8233'
+True
+ghci> isControl '\133'
+True
+ghci> [minBound .. maxBound :: GeneralCategory]
+[UppercaseLetter,LowercaseLetter,TitlecaseLetter,ModifierLetter,OtherLetter,NonSpacingMark,SpacingCombiningMark,EnclosingMark,DecimalNumber,LetterNumber,OtherNumber,ConnectorPunctuation,DashPunctuation,OpenPunctuation,ClosePunctuation,InitialQuote,FinalQuote,OtherPunctuation,MathSymbol,CurrencySymbol,ModifierSymbol,OtherSymbol,Space,LineSeparator,ParagraphSeparator,Control,Format,Surrogate,PrivateUse,NotAssigned]
+ghci> length (filter isAlpha ['\0'..'\8191'])
+5372
+ghci> length (filter isUpper ['\7680'..'\8191'])
+220
+ghci> sum (map (fromEnum . generalCategory) ['\0'..'\4095'])
+33407
+ghci> read "OtherLetter" :: GeneralCategory
+OtherLetter
+ghci> succ UppercaseLetter
+LowercaseLetter
+ghci> fromEnum NotAssigned
+29
+
+## 32. Handles and buffering
+
+ghci> import System.IO
+ghci> import System.Environment
+ghci> stdout
+{handle: <stdout>}
+ghci> stderr
+{handle: <stderr>}
+ghci> show stdin
+"{handle: <stdin>}"
+ghci> stdin == stdin
+True
+ghci> hGetBuffering stdout
+NoBuffering
+ghci> hSetBuffering stdout LineBuffering >> hGetBuffering stdout
+LineBuffering
+ghci> hGetBuffering stdout
+LineBuffering
+ghci> hPutStrLn stderr "to stderr"
+to stderr
+ghci> hPutStr stdout "no newline" >> hFlush stdout
+no newline
+ghci> hPrint stdout (Just 'x')
+Just 'x'
+ghci> hGetLine stdout
+*** Exception: <stdout>: hGetLine: illegal operation (handle is not open for reading)
+ghci> hPutStrLn stdin "x"
+*** Exception: <stdin>: hPutStr: illegal operation (handle is not open for writing)
+ghci> read "BlockBuffering (Just 4)" :: BufferMode
+BlockBuffering (Just 4)
+ghci> [ReadMode ..]
+[ReadMode,WriteMode,AppendMode,ReadWriteMode]
+ghci> getProgName
+"<interactive>"
+ghci> :t getContents
+getContents :: IO String
+ghci> :t interact
+interact :: (String -> String) -> IO ()
+

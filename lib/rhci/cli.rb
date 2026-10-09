@@ -94,7 +94,7 @@ module Rhci
     end
 
     def self.run(opts, stdin, stdout, stderr)
-      session = Session.new(stdout: stdout, stdin: stdin)
+      session = Session.new(stdout: stdout, stdin: stdin, stderr: stderr)
       result =
         if opts.mode == :pure
           session.run_pure(opts.expr, opts.args, interact: opts.interact)
@@ -107,10 +107,10 @@ module Rhci
     end
 
     def self.repl(opts, stdin, stdout, stderr)
-      session = Session.new(stdout: stdout, stdin: stdin)
+      session = Session.new(stdout: stdout, stdin: stdin, stderr: stderr)
       report(session.load(opts.files), stderr) unless opts.files.empty?
       loop do
-        input = read_input(stdin, stdout)
+        input = read_input(session, stdout)
         if input.nil?
           Shim.write(stdout, "\n")
           return EXIT_OK
@@ -125,14 +125,14 @@ module Rhci
 
     # One input: a line, or the lines between `:{` and `:}` joined with
     # newlines (layout intact). nil at end of input.
-    def self.read_input(stdin, stdout)
-      line = prompt_line(stdin, stdout, PROMPT)
+    def self.read_input(session, stdout)
+      line = prompt_line(session, stdout, PROMPT)
       return nil if line.nil?
       return line unless Rhci::Text.strip(line) == ':{'
 
       lines = []
       loop do
-        l = prompt_line(stdin, stdout, CONTINUATION_PROMPT)
+        l = prompt_line(session, stdout, CONTINUATION_PROMPT)
         return nil if l.nil?
         return lines.join("\n") if Rhci::Text.strip(l) == ':}'
 
@@ -140,10 +140,10 @@ module Rhci
       end
     end
 
-    def self.prompt_line(stdin, stdout, prompt)
+    def self.prompt_line(session, stdout, prompt)
       Shim.write(stdout, prompt)
       Shim.flush(stdout)
-      line = Shim.read_line(stdin)
+      line = session.read_line
       line&.chomp
     end
 

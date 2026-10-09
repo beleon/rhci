@@ -3,3 +3,5 @@ build/
 build.log
 *.lock
 mrbgems/rhci/mrblib/rhci.rb
+oracle/unicode/*.hi
+oracle/unicode/*.o

@@ -655,3 +655,214 @@ a + b
 1 + 1 -- comment
 {- block -} 2
 :t 1 -- comment
+
+## 27. Read: numbers, layout of the input, precedence
+read "42" :: Int
+read " ( -7 ) " :: Integer
+read "- 7" :: Int
+read "(-7)" :: Int
+read "((7))" :: Int
+read "7 " :: Int
+read "7x" :: Int
+read "+7" :: Int
+read "0x1F" :: Int
+read "0o17" :: Int
+read "0b101" :: Int
+read "1e3" :: Int
+read "1.0" :: Int
+read "9223372036854775808" :: Int
+read "123456789012345678901234567890" :: Integer
+read "3" :: Double
+read "3.5e2" :: Double
+read ".5" :: Double
+read "5." :: Double
+read "1e500" :: Double
+read "1e-500" :: Double
+read "-0.0" :: Double
+read "Infinity" :: Double
+read "-Infinity" :: Double
+read "NaN" :: Double
+read "0x10" :: Double
+read "2.5E-3" :: Double
+read "0.1" :: Double
+read "1e1000000000000" :: Double
+read "Just -3" :: Maybe Int
+read "Just (-3)" :: Maybe Int
+read "Just Just 3" :: Maybe (Maybe Int)
+read "Just (Just 3)" :: Maybe (Maybe Int)
+read "[Left 1, Right True]" :: [Either Int Bool]
+read "[1,2,3]" :: [Int]
+read "[ 1 , 2 ]" :: [Int]
+read "[]" :: [Int]
+read "[1,]" :: [Int]
+read "(1,\"a\\nb\",True)" :: (Int,String,Bool)
+read "( 1 , 2 )" :: (Int,Int)
+read "(1,2,3,4,5)" :: (Int,Int,Int,Int,Int)
+read "()"
+read " ( ) "
+read "3"
+read "True" :: Bool
+read "LT" :: Ordering
+read "GT " :: Ordering
+read "true" :: Bool
+
+## 28. Read: chars, strings, lex, reads
+import Data.Char
+read "'x'" :: Char
+read "'\\n'" :: Char
+read "'\\''" :: Char
+read "''" :: Char
+read "\"a\\SOHb\\^Ac\\1234\\&5\\x41\\o101\"" :: String
+read "\"a\\SO\\&H\"" :: String
+read "\"a\\   \\b\"" :: String
+read "['a','\\n']" :: String
+read "\"\\1114112\"" :: String
+read "'\\DEL'" :: Char
+reads "12 rest" :: [(Int,String)]
+reads "(12) rest" :: [(Int,String)]
+reads "x" :: [(Int,String)]
+reads "1.5" :: [(Int,String)]
+reads "  \"hi\" there" :: [(String,String)]
+reads "" :: [(Int,String)]
+lex " hello world"
+lex "'a' rest"
+lex "<= x"
+lex "1.5e3x"
+lex "0x1Fg"
+lex "\"str\" tail"
+lex ""
+lex "   "
+lex "(x)"
+lex "_foo'1 bar"
+lex "->x"
+lex "`f`"
+lex "1e"
+lex "1.e5"
+lex "\x3bb\&x y"
+readParen True reads "(5)" :: [(Int,String)]
+readParen False reads "5" :: [(Int,String)]
+readParen True reads "5" :: [(Int,String)]
+readLitChar "\\nabc"
+lexLitChar "\\nabc"
+lexLitChar "\\SOHx"
+readLitChar "\\SOx"
+:t read
+:t reads
+:t lex
+
+## 29. Read: derived instances
+data T = A | B Int | C { f :: Int, g :: Bool } | Int :+ Int | Int `Q` Int deriving (Show, Read)
+read " [A,B 3, C {f = 1, g = True}, 1 :+ 2, 3 `Q` 4, (B (-2))]" :: [T]
+read "B -2" :: T
+read "B 3" :: T
+read "(B 3)" :: T
+read "B (3)" :: T
+reads "A B" :: [(T, String)]
+read "C{f= -1,g=False}" :: T
+read "C {g = False, f = 1}" :: T
+read "C 1 True" :: T
+read "(:+) 1 2" :: T
+read "1 :+ 2 :+ 3" :: T
+read "Q 3 4" :: T
+show (3 `Q` 4)
+data U = U Int Int | V deriving (Show, Read, Eq)
+read "U 1 2" :: U
+read "U 1" :: U
+read "V" :: U
+read "V " == V
+data P a = P a a deriving (Show, Read)
+read "P (Just 1) Nothing" :: P (Maybe Int)
+read "P \"a\" \"b\"" :: P String
+read "[(1,P 'a' 'b')]" :: [(Int, P Char)]
+data E deriving Show
+data R = R { x :: Double } deriving (Show, Read)
+read "R {x = 1.5}" :: R
+read "R {x = -1.5}" :: R
+read "R { x = 2 }" :: R
+read "(R {x = 2})" :: R
+read "Just R {x = 2}" :: Maybe R
+
+## 30. Text.Read and readIO
+import Text.Read
+readMaybe "5" :: Maybe Int
+readMaybe "5 6" :: Maybe Int
+readMaybe " 5 " :: Maybe Int
+readEither "x" :: Either String Int
+readEither "12" :: Either String Integer
+readIO "5" :: IO Int
+readIO "x" :: IO Int
+readIO " 5  " :: IO Int
+read "x" :: Int
+read "1 2" :: Int
+fmap (+1) (readMaybe "41") :: Maybe Int
+readPrec_to_S (readPrec :: ReadPrec Int) 0 "12"
+readPrec_to_S lexP 0 "12 x"
+readPrec_to_S lexP 0 "1.5e3"
+readPrec_to_S lexP 0 "'c'"
+readPrec_to_S lexP 0 "\"s\""
+readPrec_to_S lexP 0 "->"
+readPrec_to_S lexP 0 ""
+readPrec_to_S (prec 5 (lift (return 'x'))) 6 ""
+readPrec_to_S (step (prec 5 (lift (return 'x')))) 5 ""
+readPrec_to_S (get +++ get) 0 "ab"
+readPrec_to_S (get <++ return 'z') 0 "ab"
+readPrec_to_S (return 'z' <++ get) 0 "ab"
+readPrec_to_S (parens (lift (return 1 :: ReadP Int))) 0 "(x)"
+readPrec_to_S (choice [get, look >>= \s -> return 'L']) 0 "q"
+:t readMaybe
+:t readPrec
+:t lexP
+Ident "x" == Ident "x"
+Symbol "+"
+[Punc "(", EOF]
+
+## 31. Data.Char beyond Latin-1
+import Data.Char
+generalCategory '\955'
+map generalCategory "a1 ,+\8364\8232\57344\888\55296"
+filter isUpper "Ab\453\923\8544"
+filter isUpperCase "Ab\453\923\8544"
+filter isLowerCase "aB\170\7468"
+map toUpper "stra\223e \955\453\1012"
+map toLower "\304\923\453\8544"
+map toTitle "\454\455a\223"
+isPrint '\57344'
+isPrint '\8232'
+isSpace '\12288'
+isSpace '\8203'
+isAlpha '\12354'
+isAlphaNum '\1637'
+isNumber '\8544'
+isMark '\769'
+isPunctuation '\12290'
+isSymbol '\8364'
+isSeparator '\8233'
+isControl '\133'
+[minBound .. maxBound :: GeneralCategory]
+length (filter isAlpha ['\0'..'\8191'])
+length (filter isUpper ['\7680'..'\8191'])
+sum (map (fromEnum . generalCategory) ['\0'..'\4095'])
+read "OtherLetter" :: GeneralCategory
+succ UppercaseLetter
+fromEnum NotAssigned
+
+## 32. Handles and buffering
+import System.IO
+import System.Environment
+stdout
+stderr
+show stdin
+stdin == stdin
+hGetBuffering stdout
+hSetBuffering stdout LineBuffering >> hGetBuffering stdout
+hGetBuffering stdout
+hPutStrLn stderr "to stderr"
+hPutStr stdout "no newline" >> hFlush stdout
+hPrint stdout (Just 'x')
+hGetLine stdout
+hPutStrLn stdin "x"
+read "BlockBuffering (Just 4)" :: BufferMode
+[ReadMode ..]
+getProgName
+:t getContents
+:t interact

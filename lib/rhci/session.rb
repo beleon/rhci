@@ -33,17 +33,18 @@ module Rhci
     # embedded, as the mruby binary does).
     # cwd: the directory :load resolves relative paths and module names in
     # (default: the process's working directory).
-    def initialize(stdout: nil, stdin: nil, limits: nil, prelude: :auto, cwd: nil)
+    def initialize(stdout: nil, stdin: nil, stderr: nil, limits: nil, prelude: :auto, cwd: nil)
       @prelude_mode = prelude
       @cwd = cwd
       @stdout = stdout
       @stdin = stdin
+      @stderr = stderr
       @limits = limits
       @names = NameEnv.new
       @tenv = {}
       @globals = {}
       @fixities = {}
-      @machine = VM::Machine.new(stdout, limits)
+      @machine = VM::Machine.new(stdout, limits, input: stdin, err: stderr)
       @prelude_loaded = false
     end
 
@@ -56,6 +57,18 @@ module Rhci
 
     def interrupt!
       @machine.interrupt!
+    end
+
+    # The next line of stdin for the REPL's own reader, which shares stdin
+    # with Haskell code (getLine, isEOF) as GHCi's does. nil at its end.
+    def read_line
+      pre = @machine.take_peeked
+      return pre if pre == "\n"
+
+      rest = Shim.read_line(@stdin)
+      return pre if rest.nil?
+
+      pre ? pre + rest : rest
     end
 
     # Evaluate one GHCi input (expression, declarations, `let`, command).
@@ -101,16 +114,17 @@ module Rhci
 
     # GHCi: `let it = e`, then `print it` -- or, when it is an IO action, run
     # it and print its result (unless that is (), or has no Show instance).
-    def eval_expression(expr, layer, raw_strings: false, arity_args: nil, want: nil)
+    def eval_expression(expr, layer, raw_strings: false, arity_args: nil, want: nil, internal: false)
       # `let it = e` is not recursive: `it` inside e is the previous one. So
       # the binding gets an internal name and becomes `it` once committed.
       @it_count = (@it_count || 0) + 1
-      internal = "rhci_it#{@it_count}"
-      it_decl = AST::FunEq.new(expr.tok, internal, [], AST::Rhs.new(expr.tok, expr, nil, nil))
-      rtop = Renamer.new(@names, fixity: fixity_lookup).repl(AST::ReplDecls.new(expr.tok, [it_decl]))
+      name_it = "rhci_it#{@it_count}"
+      it_decl = AST::FunEq.new(expr.tok, name_it, [], AST::Rhs.new(expr.tok, expr, nil, nil))
+      rtop = Renamer.new(@names, fixity: fixity_lookup, internal: internal)
+                    .repl(AST::ReplDecls.new(expr.tok, [it_decl]))
       tc = TypeChecker.new(@names, @tenv)
       tc.top(rtop)
-      it_name = rtop.values[internal]
+      it_name = rtop.values[name_it]
       plan = tc.print_plan(it_name, expr.tok)
       value_type = plan[:node].ty
       check_command_mode(plan, value_type, arity_args, want) if want
@@ -193,11 +207,11 @@ module Rhci
     # `rhci -c EXPR ARG...`: apply a pure EXPR to ARGs, each a Haskell
     # expression; a String result is written raw, anything else with show.
     def run_pure(expr, args, interact: false)
-      raise UnsupportedError, '-i is not implemented yet' if interact
-
-      e = command_expression(expr, args)
+      e = command_expression(expr, args, interact)
       load_prelude
-      eval_expression(e, nil, raw_strings: true, arity_args: args.length, want: :pure)
+      @machine.semi_close_stdin if interact
+      eval_expression(e, nil, raw_strings: true, arity_args: args.length + (interact ? 1 : 0), want: :pure,
+                              internal: interact)
     rescue Error => e
       failure(e)
     rescue VM::HsException => e
@@ -210,12 +224,11 @@ module Rhci
 
     # `rhci -x EXPR ARG...`: run an IO EXPR; ARGs are visible via getArgs.
     def run_io(expr, args, interact: false)
-      raise UnsupportedError, '-i is not implemented yet' if interact
-      raise UnsupportedError, 'getArgs is not implemented yet' unless args.empty?
-
-      e = Frontend.parse_expression(expr, @fixities)
+      @machine.args = args
+      e = command_expression(expr, [], interact)
       load_prelude
-      eval_expression(e, nil, raw_strings: true, want: :io)
+      @machine.semi_close_stdin if interact
+      eval_expression(e, nil, raw_strings: true, want: :io, internal: interact)
     rescue Error => e
       failure(e)
     rescue VM::HsException => e
@@ -226,11 +239,14 @@ module Rhci
       Result.new(:limit, e.message)
     end
 
-    def command_expression(expr, args)
+    # EXPR applied to ARGs (each a Haskell expression) and, with -i, to
+    # stdin as a lazy String.
+    def command_expression(expr, args, interact = false)
       e = Frontend.parse_expression(expr, @fixities)
-      return e if args.empty?
-
       arg_nodes = args.map { |a| AST::Paren.new(nil, Frontend.parse_expression(a, @fixities)) }
+      arg_nodes << AST::Var.new(e.tok, 'rhci_stdinContents') if interact
+      return e if arg_nodes.empty?
+
       AST::App.new(e.tok, AST::Paren.new(e.tok, e), arg_nodes)
     end
 

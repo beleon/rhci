@@ -248,8 +248,10 @@ module Rhci
     # where a name defined or imported there that clashes with one the
     # Prelude (or an explicitly imported base module) provides is ambiguous.
     # official: base modules the file imports; hidden: Prelude names it hides.
+    # internal: rhci_* names are visible (rhci's own synthesised inputs).
     def initialize(env, source = '<interactive>', prelude: false, fixity: nil, imported: nil,
-                   module_mode: false, official: [], hidden: [])
+                   module_mode: false, official: [], hidden: [], internal: false)
+      @internal = internal
       @env = env
       @fixity = fixity
       @imported = imported || { values: {}, types: {} }
@@ -305,7 +307,7 @@ module Rhci
 
     KNOWN_MODULES = {}
     %w[Prelude Data.List Data.Maybe Data.Char Data.Tuple Data.Function Data.Ord Data.Either
-       Control.Monad].each { |m| KNOWN_MODULES[m] = true }
+       Control.Monad System.IO System.Environment Text.Read].each { |m| KNOWN_MODULES[m] = true }
 
     private
 
@@ -336,7 +338,7 @@ module Rhci
 
         raise Error.new(:compile, "Ambiguous occurrence ‘#{str}’", nil, nil, @source)
       end
-      own || base || (@allow_internal && str.start_with?('rhci_') ? @env.internal[str] : nil)
+      own || base || ((@allow_internal || @internal) && str.start_with?('rhci_') ? @env.internal[str] : nil)
     end
 
     # A base module whose names count as imported by the file being renamed.

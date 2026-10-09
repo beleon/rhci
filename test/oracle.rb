@@ -86,7 +86,7 @@ module Oracle
       s = s[(k + 4)..-1]
     end
     names = {}
-    body = rename_tokens(type_tokens(s), names)
+    body = canonical(rename_tokens(type_tokens(s), names))
     constraints = []
     if ctx
       c = Rhci::Text.strip(ctx)
@@ -125,6 +125,82 @@ module Oracle
       end
     end
     out
+  end
+
+  # Type synonyms GHC keeps in :t output and rhci expands.
+  SYNONYMS = { 'ReadS' => 1, 'ShowS' => 0 }.freeze
+
+  # Tokens re-printed from a parse, with the synonyms above expanded, so
+  # redundant parentheses and synonym use do not matter.
+  def self.canonical(toks)
+    pos = [0]
+    t = parse_fun(toks, pos)
+    return toks unless pos[0] == toks.length
+
+    show_type(t, false).split(' ')
+  end
+
+  def self.parse_fun(toks, pos)
+    a = parse_app(toks, pos)
+    return a unless toks[pos[0]] == '->'
+
+    pos[0] += 1
+    [:fun, a, parse_fun(toks, pos)]
+  end
+
+  def self.parse_app(toks, pos)
+    parts = []
+    while pos[0] < toks.length && !['->', ')', ']', ','].include?(toks[pos[0]])
+      parts << parse_atom(toks, pos)
+    end
+    head = parts[0]
+    if head.is_a?(String) && SYNONYMS.key?(head) && parts.length == SYNONYMS[head] + 1
+      return expand(head, parts[1..])
+    end
+
+    parts.length == 1 ? parts[0] : [:app, parts]
+  end
+
+  def self.expand(name, args)
+    str = [:list, 'Char']
+    if name == 'ShowS' then [:fun, str, str]
+    else [:fun, str, [:list, [:tuple, [args[0], str]]]]
+    end
+  end
+
+  def self.parse_atom(toks, pos)
+    t = toks[pos[0]]
+    pos[0] += 1
+    if t == '['
+      inner = parse_fun(toks, pos)
+      pos[0] += 1
+      [:list, inner]
+    elsif t == '('
+      items = []
+      until toks[pos[0]] == ')' || pos[0] >= toks.length
+        items << parse_fun(toks, pos)
+        pos[0] += 1 if toks[pos[0]] == ','
+      end
+      pos[0] += 1
+      items.length == 1 ? items[0] : [:tuple, items]
+    else
+      t
+    end
+  end
+
+  def self.show_type(t, wrap)
+    return t if t.is_a?(String)
+
+    case t[0]
+    when :fun
+      s = "#{show_type(t[1], true)} -> #{show_type(t[2], false)}"
+      wrap ? "( #{s} )" : s
+    when :app
+      s = t[1].map { |x| x.is_a?(Array) && %i[fun app].include?(x[0]) ? "( #{show_type(x, false)} )" : show_type(x, true) }.join(' ')
+      wrap ? "( #{s} )" : s
+    when :list then "[ #{show_type(t[1], false)} ]"
+    else "( #{t[1].map { |x| show_type(x, false) }.join(' , ')} )"
+    end
   end
 
   def self.rename_tokens(toks, names)

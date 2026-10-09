@@ -8,7 +8,7 @@ module Rhci
   # Generated code calls only rhci_* names (Prelude-internal aliases), so a
   # user's own definitions (say, of `showString` or `.`) cannot capture it.
   module Derive
-    SUPPORTED = %w[Show Eq Ord Enum Bounded].freeze
+    SUPPORTED = %w[Show Read Eq Ord Enum Bounded].freeze
 
     # Instance declarations (AST) for a data declaration's deriving clause.
     # fixity: lookup of a constructor operator's [assoc, prec].
@@ -22,6 +22,7 @@ module Rhci
 
         case cls
         when 'Show' then derive_show(d, fixity)
+        when 'Read' then derive_read(d, fixity)
         when 'Eq' then derive_eq(d, fixity)
         when 'Ord' then derive_ord(d, fixity)
         when 'Enum' then derive_enum(d, fixity)
@@ -122,7 +123,8 @@ module Rhci
             "rhci_showParen (rhci_intGe d 11) #{compose(parts)}"
           elsif c.infix
             prec = fixity ? fixity.call(c.name)[1] : 9
-            parts = ["rhci_showsPrec #{prec + 1} x1", "rhci_showString #{str(" #{c.name} ")}",
+            op = operator?(c.name) ? c.name : "`#{c.name}`"
+            parts = ["rhci_showsPrec #{prec + 1} x1", "rhci_showString #{str(" #{op} ")}",
                      "rhci_showsPrec #{prec + 1} x2"]
             "rhci_showParen (rhci_intGt d #{prec}) #{compose(parts)}"
           else
@@ -137,6 +139,87 @@ module Rhci
       end
       out << "  showsPrec _ _ = rhci_showString \"\"\n" if d.cons.empty?
       out
+    end
+
+    # ---- Read --------------------------------------------------------------------
+    # GHC's derived Read (GHC.Tc.Deriv.Generate.gen_Read_binds): nullary
+    # constructors first, then the others, all under one `parens`.
+
+    def self.derive_read(d, fixity)
+      out = head('Read', d)
+      if d.cons.empty?
+        out << "  readPrec = rhci_pfailRP\n"
+      else
+        nullary = d.cons.select { |c| c.fields.empty? }
+        alts = []
+        if nullary.length == 1
+          alts << then_rp(match_con(nullary[0].name), "rhci_returnRP #{con_ref(nullary[0])}")
+        elsif nullary.length > 1
+          pairs = nullary.map { |c| "(#{str(c.name)}, rhci_returnRP #{con_ref(c)})" }
+          alts << "(rhci_choose [#{pairs.join(', ')}])"
+        end
+        d.cons.each { |c| alts << read_con(c, fixity) unless c.fields.empty? }
+        body = alts.reverse.inject { |acc, a| "(rhci_altRP #{a} #{acc})" }
+        out << "  readPrec = rhci_parens (#{body})\n"
+      end
+      out << "  readList = rhci_readListDefault\n  readListPrec = rhci_readListPrecDefault\n"
+    end
+
+    def self.read_con(c, fixity)
+      n = c.fields.length
+      args = (1..n).map { |i| "a#{i}" }
+      result = "rhci_returnRP (#{con_ref(c)} #{args.join(' ')})"
+      if c.infix
+        prec = fixity ? fixity.call(c.name)[1] : 9
+        infix = if operator?(c.name)
+                  [expect('rhci_symbolL', c.name)]
+                else
+                  [expect('rhci_puncL', '`'), expect('rhci_identL', c.name), expect('rhci_puncL', '`')]
+                end
+        second = "rhci_bindRP (rhci_step rhci_readPrec) (\\a2 -> #{result})"
+        "(rhci_prec #{prec} (rhci_bindRP (rhci_step rhci_readPrec) (\\a1 -> #{seq_rp(infix, second)})))"
+      elsif c.field_names
+        fields = []
+        c.field_names.each_with_index do |f, i|
+          reader = operator?(f) ? 'rhci_readSymField' : 'rhci_readField'
+          fields << ["#{reader} #{str(f)} (rhci_reset rhci_readPrec)", "a#{i + 1}"]
+        end
+        inner = "rhci_thenRP #{expect('rhci_puncL', '}')} (#{result})"
+        fields.reverse.each_with_index do |(reader, a), k|
+          inner = "rhci_bindRP (#{reader}) (\\#{a} -> #{inner})"
+          inner = "rhci_thenRP #{expect('rhci_puncL', ',')} (#{inner})" if k < fields.length - 1
+        end
+        "(rhci_prec 11 #{seq_rp(match_prefix(c.name) + [expect('rhci_puncL', '{')], inner)})"
+      else
+        inner = result
+        args.reverse.each { |a| inner = "rhci_bindRP (rhci_step rhci_readPrec) (\\#{a} -> #{inner})" }
+        "(rhci_prec 10 #{seq_rp(match_prefix(c.name), inner)})"
+      end
+    end
+
+    def self.expect(con, text)
+      "(rhci_expectP (#{con} #{str(text)}))"
+    end
+
+    # How a nullary constructor is matched: its bare name.
+    def self.match_con(name)
+      operator?(name) ? expect('rhci_symbolL', name) : expect('rhci_identL', name)
+    end
+
+    # How a constructor is matched in prefix position: (:+:) or Name.
+    def self.match_prefix(name)
+      return [expect('rhci_identL', name)] unless operator?(name)
+
+      [expect('rhci_puncL', '('), expect('rhci_symbolL', name), expect('rhci_puncL', ')')]
+    end
+
+    # stmts >> ... >> last, right-nested.
+    def self.seq_rp(stmts, last)
+      stmts.reverse.inject(last) { |acc, s| then_rp(s, acc) }
+    end
+
+    def self.then_rp(stmt, rest)
+      "(rhci_thenRP #{stmt} (#{rest}))"
     end
 
     # How a constructor's name appears in prefix position.

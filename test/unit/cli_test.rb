@@ -47,9 +47,9 @@ RT.suite 'CLI' do
     RT.eq "Hello\n", out.written
   end
 
-  RT.test 'what needs type classes is refused explicitly until implemented (exit 4)' do
+  RT.test 'what rhci cannot do exactly is refused explicitly (exit 4)' do
     err = RT::FakeIO.new
-    RT.eq 4, Rhci::CLI.main(['-c', 'read "1" :: Int'], stdin: RT::FakeIO.new, stdout: RT::FakeIO.new, stderr: err)
+    RT.eq 4, Rhci::CLI.main(['-c', '1.5 :: Float'], stdin: RT::FakeIO.new, stdout: RT::FakeIO.new, stderr: err)
     RT.ok err.written.start_with?('unsupported: '), err.written
   end
 

@@ -398,14 +398,22 @@ module Rhci
       NAN = 0.0 / 0.0
 
       attr_reader :steps
+      attr_writer :args
 
       # out: an IO-like object (write/flush). limits: Hash with optional
       # :steps, :stack (frames), :deadline (monotonic seconds).
-      def initialize(out = nil, limits = nil)
+      # input: stdin (gets/getc); err: stderr; args: what getArgs returns.
+      def initialize(out = nil, limits = nil, input: nil, err: nil, args: [])
         if limits && limits[:deadline] && Shim.now.nil?
           raise UnsupportedError, 'time limits need a clock, which this runtime lacks'
         end
 
+        @input = input
+        @err = err
+        @args = args
+        @peeked = nil
+        @stdin_state = :open
+        @buffering = {}
         @out = out
         @buf = ''.dup
         @stack = FrameStack.new
@@ -422,6 +430,20 @@ module Rhci
       # Start a new top-level evaluation: the step limit counts from here.
       def begin_evaluation
         @step_base = @steps
+      end
+
+      # A character read ahead by isEOF that the REPL's own line reader
+      # must see first (GHCi's prompt reads the same stdin), or nil.
+      def take_peeked
+        c = @peeked
+        @peeked = nil
+        c.nil? || c == :eof ? nil : ''.dup << c
+      end
+
+      # What `interact`/getContents does before handing out the String.
+      def semi_close_stdin(op = 'hGetContents')
+        stdin_usable(op)
+        @stdin_state = :semi
       end
 
       def flush_output
@@ -821,6 +843,34 @@ module Rhci
         unpack(StringThunk.build(s.codepoints, 0))
       end
 
+      # ---- input ---------------------------------------------------------------
+
+      # The next character's code point from stdin, or nil at end of input.
+      def next_char
+        if @peeked
+          c = @peeked
+          @peeked = nil
+          return c == :eof ? nil : c
+        end
+        flush_output
+        ch = @input ? Shim.read_char(@input) : nil
+        ch&.ord
+      end
+
+      def eof?
+        @peeked ||= (next_char || :eof)
+        @peeked == :eof
+      end
+
+      # stdin after getContents is semi-closed, and closed once the lazy
+      # String has reached its end; GHC's handle operations then fail.
+      def stdin_usable(op)
+        return if @stdin_state == :open
+
+        how = @stdin_state == :semi ? 'semi-closed' : 'closed'
+        raise HsException, "<stdin>: #{op}: illegal operation (handle is #{how})"
+      end
+
       def put_char(c)
         if c > 0x10FFFF || (c >= 0xD800 && c <= 0xDFFF)
           raise HsException, "<stdout>: hPutChar: invalid argument (cannot encode character '\\#{c}')"
@@ -883,8 +933,22 @@ module Rhci
       PRIM_METHODS[:doubleFromRational] = :p_doubleFromRational
       PRIM_METHODS[:doubleShow] = :p_doubleShow
       PRIM_METHODS[:chr] = :p_chr
+      PRIM_METHODS[:coerce] = :p_coerce
       PRIM_METHODS[:putChar] = :p_putChar
-      PRIM_METHODS[:charClass] = :p_charClass
+      PRIM_METHODS[:hPutChar] = :p_hPutChar
+      PRIM_METHODS[:hFlush] = :p_hFlush
+      PRIM_METHODS[:getChar] = :p_getChar
+      PRIM_METHODS[:getLine] = :p_getLine
+      PRIM_METHODS[:isEOF] = :p_isEOF
+      PRIM_METHODS[:readChar] = :p_readChar
+      PRIM_METHODS[:getArgs] = :p_getArgs
+      PRIM_METHODS[:getContents] = :p_getContents
+      PRIM_METHODS[:setBuffering] = :p_setBuffering
+      PRIM_METHODS[:getBuffering] = :p_getBuffering
+      PRIM_METHODS[:charCategory] = :p_charCategory
+      PRIM_METHODS[:charTitle] = :p_charTitle
+      PRIM_METHODS[:isUpperCase] = :p_isUpperCase
+      PRIM_METHODS[:isLowerCase] = :p_isLowerCase
       PRIM_METHODS[:charUpper] = :p_charUpper
       PRIM_METHODS[:charLower] = :p_charLower
       PRIM_METHODS[:intToInteger] = :p_intToInteger
@@ -1187,66 +1251,137 @@ module Rhci
         a0[0].tag
       end
 
-      # Unicode general categories of Latin-1, as classes:
-      # 0 Cc, 1 Lu, 2 Ll, 3 other letters, 4 N*, 5 P*, 6 S*, 7 Z*, 9 Cf.
-      LATIN1_CLASS = begin
-        t = Array.new(256, 5)
-        (0..0x1F).each { |i| t[i] = 0 }
-        (0x7F..0x9F).each { |i| t[i] = 0 }
-        t[0x20] = t[0xA0] = 7
-        (0x30..0x39).each { |i| t[i] = 4 }
-        (0x41..0x5A).each { |i| t[i] = 1 }
-        (0x61..0x7A).each { |i| t[i] = 2 }
-        [0x24, 0x2B, 0x3C, 0x3D, 0x3E, 0x5E, 0x60, 0x7C, 0x7E, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA8, 0xA9,
-         0xAC, 0xAE, 0xAF, 0xB0, 0xB1, 0xB4, 0xB8, 0xD7, 0xF7].each { |i| t[i] = 6 }
-        [0xAA, 0xBA].each { |i| t[i] = 3 }
-        [0xB2, 0xB3, 0xB9, 0xBC, 0xBD, 0xBE].each { |i| t[i] = 4 }
-        t[0xAD] = 9
-        t[0xB5] = 2
-        (0xC0..0xDE).each { |i| t[i] = 1 unless i == 0xD7 }
-        (0xDF..0xFF).each { |i| t[i] = 2 unless i == 0xF7 }
-        t.freeze
-      end
-
-      def latin1!(c)
-        return if c <= 0xFF
-
-        raise UnsupportedError, "Data.Char classification of '\\#{c}' (beyond Latin-1) is not supported yet"
-      end
-
-      def p_charClass(c)
-        latin1!(c)
-        LATIN1_CLASS[c]
+      # fromEnum of GHC's GeneralCategory.
+      def p_charCategory(c)
+        Unicode.category(c)
       end
 
       def p_charUpper(c)
-        latin1!(c)
-        return c - 32 if (c >= 0x61 && c <= 0x7A) || (c >= 0xE0 && c <= 0xFE && c != 0xF7)
-        return 0x39C if c == 0xB5
-        return 0x178 if c == 0xFF
-
-        c
+        Unicode.to_upper(c)
       end
 
       def p_charLower(c)
-        latin1!(c)
-        return c + 32 if (c >= 0x41 && c <= 0x5A) || (c >= 0xC0 && c <= 0xDE && c != 0xD7)
-
-        c
+        Unicode.to_lower(c)
       end
 
-      # GHC's isSpace: Latin-1 whitespace, else Unicode category Zs.
+      def p_charTitle(c)
+        Unicode.to_title(c)
+      end
+
+      def p_isUpperCase(c)
+        Builtins.bool(Unicode.uppercase?(c))
+      end
+
+      def p_isLowerCase(c)
+        Builtins.bool(Unicode.lowercase?(c))
+      end
+
+      # GHC's isSpace: Latin-1 whitespace, else the category Space.
       def p_isSpace(c)
         sp = if c <= 0x377
                c == 32 || (c >= 9 && c <= 13) || c == 0xA0
              else
-               c == 0x1680 || (c >= 0x2000 && c <= 0x200A) || c == 0x202F || c == 0x205F || c == 0x3000
+               Unicode.category(c) == 22
              end
         Builtins.bool(sp)
       end
 
+      # The identity at a different type (ReadP's rank-2 encoding).
+      def p_coerce(a0)
+        a0
+      end
+
       def p_charEq(a0, a1)
         Builtins.bool(a0 == a1)
+      end
+
+      # Write to a handle: 1 stdout (buffered), 2 stderr (stdout is flushed
+      # first, so the two interleave in program order).
+      def p_hPutChar(h, c)
+        if h == 2
+          flush_output
+          if c > 0x10FFFF || (c >= 0xD800 && c <= 0xDFFF)
+            raise HsException, "<stderr>: hPutChar: invalid argument (cannot encode character '\\#{c}')"
+          end
+          Shim.write(@err, ''.dup << c) if @err
+          Shim.flush(@err) if @err
+        elsif h == 1
+          put_char(c)
+        else
+          raise HsException, '<stdin>: hPutChar: illegal operation (handle is not open for writing)'
+        end
+        UNIT_V
+      end
+
+      def p_hFlush(h)
+        flush_output if h == 1
+        UNIT_V
+      end
+
+      def p_getChar(_)
+        stdin_usable('hGetChar')
+        c = next_char
+        raise HsException, '<stdin>: hGetChar: end of file' unless c
+
+        c
+      end
+
+      def p_getLine(_)
+        stdin_usable('hGetLine')
+        c = next_char
+        raise HsException, '<stdin>: hGetLine: end of file' unless c
+
+        line = ''.dup
+        while c && c != 10
+          line << c
+          c = next_char
+        end
+        str_value(line)
+      end
+
+      def p_isEOF(_)
+        stdin_usable('hIsEOF')
+        Builtins.bool(eof?)
+      end
+
+      def p_getContents(_)
+        semi_close_stdin
+        UNIT_V
+      end
+
+      # The next character of lazily read input, or -1 at its end (which
+      # closes stdin).
+      def p_readChar(_)
+        c = next_char
+        return c if c
+
+        @stdin_state = :closed
+        -1
+      end
+
+      # Buffering modes are remembered and reported, but output always
+      # appears in program order: stdout is flushed at each newline, before
+      # stderr is written, and before stdin is read.
+      def p_setBuffering(h, mode)
+        @buffering[h] = mode
+        UNIT_V
+      end
+
+      # The mode last set for handle h, or dflt (GHCi's NoBuffering).
+      def p_getBuffering(h, dflt)
+        @buffering[h] || dflt
+      end
+
+      def p_getArgs(_)
+        list = NIL_V
+        @args.reverse_each do |a|
+          d = ConValue.new(3)
+          d[0] = CONS
+          d[1] = str_value(a)
+          d[2] = list
+          list = d
+        end
+        list
       end
 
       def p_putChar(a0)

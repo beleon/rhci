@@ -4,7 +4,7 @@
 # modules rhci puts in scope by default. CRuby-only tool (needs podman).
 ROOT = File.expand_path('..', __dir__)
 MODULES = %w[Prelude Data.List Data.Maybe Data.Char Data.Tuple Data.Function Data.Ord Data.Either
-             Control.Monad].freeze
+             Control.Monad System.IO System.Environment Text.Read].freeze
 
 # Import everything first, so names print unqualified.
 script = MODULES.map { |m| "import #{m}\n" }.join +
@@ -47,7 +47,9 @@ MODULES.each_with_index do |mod, i|
       types[m[1]] ||= mod
     elsif (m = line.match(/\A(?:data|newtype) [^=]*= (.*)\z/))
       m[1].split(' | ').each do |alt|
-        con = alt.strip.split(/[ {]/).first
+        con = alt.strip.sub(/\Aforall [^.]*\.\s*/, '').split(/[ {]/).first
+        next if con.nil?
+
         con = con[1..-2] if con.start_with?('(')
         values[con] ||= mod unless con.include?('.') || con.include?('#')
       end
