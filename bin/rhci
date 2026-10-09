@@ -1,0 +1,6 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# CRuby launcher; the mruby build is build/rhci/bin/rhci.
+require_relative '../lib/rhci'
+exit Rhci::CLI.main(ARGV)

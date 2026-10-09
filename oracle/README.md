@@ -1,6 +1,6 @@
 # GHCi oracle
 
-Reference behaviour from real GHCi, recorded so rghci can be differentially
+Reference behaviour from real GHCi, recorded so rhci can be differentially
 tested against it.
 
 - `probes.txt`: the inputs, grouped into sections. Each section runs in a fresh GHCi session.
@@ -21,9 +21,9 @@ The aim is fidelity on what we cover, not breadth.
 - **Errors**: match the *kind* only (parse error, scope error, type error,
   or runtime exception) and the point where it happens. The wording,
   CallStacks, source spans and warnings are ignored.
-- **Imports**: rghci has the non-clashing base modules in scope already, so
+- **Imports**: rhci has the non-clashing base modules in scope already, so
   a probe that fails in GHCi only because of a missing import (`sort`,
-  `fromMaybe`) should succeed in rghci.
+  `fromMaybe`) should succeed in rhci.
 
 ## Properties the goldens pin down
 

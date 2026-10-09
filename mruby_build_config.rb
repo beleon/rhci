@@ -1,9 +1,14 @@
-# The mruby rghci targets. Kept deliberately lean: the core may only use
+# The mruby rhci targets. Kept deliberately lean: the core may only use
 # what is listed here, so anything missing fails loudly in the mruby tests.
 #
-# Build (from the repo root):
-#   MRUBY_CONFIG=$PWD/mruby_build_config.rb rake -f vendor/mruby/Rakefile -j8
-MRuby::Build.new do |conf|
+# Two builds share one gem list:
+#   host   -> build/mruby/bin/mruby  plain interpreter; runs test bundles from source
+#   rhci   -> build/rhci/bin/rhci    the standalone command, bundle compiled in
+#
+# Build through the project Rakefile (`rake mruby`), which generates the
+# bundle the rhci gem compiles before invoking mruby's own Rakefile.
+
+def rhci_common(conf)
   conf.toolchain :gcc
 
   # Haskell Strings are code-point sequences: String#length/[] must count
@@ -27,8 +32,17 @@ MRuby::Build.new do |conf|
   conf.gem core: 'mruby-kernel-ext'
   conf.gem core: 'mruby-error'
   conf.gem core: 'mruby-exit'
+end
+
+MRuby::Build.new do |conf|
+  rhci_common(conf)
   conf.gem core: 'mruby-compiler'
   conf.gem core: 'mruby-bin-mruby'
-
   conf.build_dir = File.expand_path('build/mruby', __dir__)
+end
+
+MRuby::Build.new('rhci') do |conf|
+  rhci_common(conf)
+  conf.gem File.expand_path('mrbgems/rhci', __dir__)
+  conf.build_dir = File.expand_path('build/rhci', __dir__)
 end

@@ -1,4 +1,4 @@
-# rghci architecture (draft for review)
+# rhci architecture (draft for review)
 
 Status: **proposal, nothing implemented.** The scope it serves is in
 `CLAUDE.md`: GHCi *semantics* (values, `show` output, what type-checks,
@@ -8,12 +8,12 @@ There are two deliverables from one source tree:
 - **CRuby library:** embedded in long-running Ruby programs. Startup time
   doesn't matter. Isolation, no global side effects, and host control over
   runaway evaluation do.
-- **mruby standalone command `rghci`:** built only with our own
+- **mruby standalone command `rhci`:** built only with our own
   `mruby_build_config.rb`. Startup must be similar to bash's
   (see §6). It targets laptops and desktops.
 
 **Fail, don't approximate.** If something can't be done with GHCi's exact
-semantics, rghci rejects it with an explicit "unsupported: …" error. It
+semantics, rhci rejects it with an explicit "unsupported: …" error. It
 never substitutes something close. This covers unsupported syntax and
 extensions, types we don't provide (`Float`), and numeric edge cases we
 can't reproduce exactly. A wrong answer that looks right is the worst
@@ -284,11 +284,11 @@ list?". Printing goes through the `Show` dictionary like any other code.
 ## 6. Deliverables
 
 ### CRuby library (embedding)
-- Everything lives under `module Rghci`. There are **no globals, no
+- Everything lives under `module Rhci`. There are **no globals, no
   core-class monkey patches, no signal traps, no `exit`**, and no writes to
   `$stdout`/`$stdin` except through the IO objects the host passes in.
 - **The API** is roughly:
-  - `Rghci::Session.new(stdout:, stdin:, limits:)`
+  - `Rhci::Session.new(stdout:, stdin:, limits:)`
   - `session.eval(input)` returns a result object: the output text and a
     status of ok, parse error, scope error, type error, runtime exception
     or limit hit.
@@ -304,11 +304,12 @@ list?". Printing goes through the `Show` dictionary like any other code.
   the same way a Ctrl-C at GHCi's prompt behaves. With no limits set,
   behaviour is GHCi's (`[1..]` prints forever).
 
-### mruby command `rghci`
-- **A static binary** is built from an mrbgem in this repo
-  (`mrbgems/rghci-bin`). It has a small C `main` that loads the
-  compiled bundle and the Prelude snapshot from **bytecode embedded in the
-  binary** (`mrbc -B`). Ruby source is never parsed at startup.
+### mruby command `rhci`
+- **A static binary** is built from the mrbgem `mrbgems/rhci`. The
+  generated bundle is that gem's `mrblib`, which mruby's build compiles to
+  bytecode and links in. `mrb_open()` loads it, and a small C `main` calls
+  `Rhci::CLI.main`. Ruby source is never parsed at startup. The Prelude
+  snapshot will be embedded the same way.
 - **Startup budget, measured on this machine:** `bash -c exit` takes
   about 1.5 ms. An empty mruby takes 1.3 ms. Loading 5k lines of Ruby
   takes 2.7 ms as bytecode but 10.7 ms as source. Lexing and parsing 2000
@@ -321,7 +322,7 @@ list?". Printing goes through the `Show` dictionary like any other code.
     snapshot. Anything typed while the snapshot decodes waits in the tty
     buffer, so Enter or Tab just run once it's done. No threads and no
     background loading are needed.
-  - **`rghci -c …` finishes in under 200 ms** end to end for a simple
+  - **`rhci -c …` finishes in under 200 ms** end to end for a simple
     expression.
   - Both are enforced by benchmark tests from build step 1 on.
   - Together these rule out parsing Ruby source at startup and compiling
@@ -330,14 +331,14 @@ list?". Printing goes through the `Show` dictionary like any other code.
     benchmarks force lazy, per-binding decoding.
 - **Line editor:** our own, because mruby has no readline. It has editing
   keys, history, and Tab completion of names in scope. Raw mode comes from
-  a tiny C gem (`mrbgems/rghci-term`: termios, window size) next to the C
+  a tiny C gem (`mrbgems/rhci-term`: termios, window size) next to the C
   `main`. It's mruby-command only; the CRuby library has no terminal code.
 - **Command-line modes:**
   | form | meaning |
   |---|---|
-  | `rghci -c EXPR [ARG…]` | **Pure evaluation.** Each ARG is itself a Haskell **expression**. The input is checked and run as `(EXPR) (ARG1) (ARG2) …`, with prompt rules (extended defaulting, no monomorphism restriction). |
-  | `rghci -x EXPR [ARG…]` | **IO.** EXPR must have type `IO t` and is run. The ARGs are plain `String`s, visible only through `getArgs`, and the program parses them itself. |
-  | `rghci -i …` | Combines with `-c`/`-x`: the result (after applying any ARGs) is applied to stdin as a lazy `String` (`String -> String`, or `String -> IO t` with `-x`), and output streams as it's produced. |
+  | `rhci -c EXPR [ARG…]` | **Pure evaluation.** Each ARG is itself a Haskell **expression**. The input is checked and run as `(EXPR) (ARG1) (ARG2) …`, with prompt rules (extended defaulting, no monomorphism restriction). |
+  | `rhci -x EXPR [ARG…]` | **IO.** EXPR must have type `IO t` and is run. The ARGs are plain `String`s, visible only through `getArgs`, and the program parses them itself. |
+  | `rhci -i …` | Combines with `-c`/`-x`: the result (after applying any ARGs) is applied to stdin as a lazy `String` (`String -> String`, or `String -> IO t` with `-x`), and output streams as it's produced. |
   - **`-c` arity and type rules.** EXPR must take exactly as many
     arguments as given. If the applied result still has a function type,
     that's an explicit arity error ("`(+)` expects 2 arguments, got 1").
@@ -345,12 +346,12 @@ list?". Printing goes through the `Show` dictionary like any other code.
     errors. `-c` with an `IO` type is an error that points at `-x`, and
     `-x` with a non-IO type is an error that points at `-c`.
   - **Examples:**
-    - `rghci -c '(+)' '3 :: Double' 10` checks
+    - `rhci -c '(+)' '3 :: Double' 10` checks
       `((+)) (3 :: Double) (10)` and prints `13.0`.
-    - `rghci -c '"Hello\n"'` writes `Hello` and a newline.
-    - `rghci -c 'map toUpper' hello` is a scope error (`hello` is a
+    - `rhci -c '"Hello\n"'` writes `Hello` and a newline.
+    - `rhci -c 'map toUpper' hello` is a scope error (`hello` is a
       variable). Write `'"hello"'`.
-    - `rghci -x 'getArgs >>= mapM_ putStrLn' a b` writes `a` and `b` on
+    - `rhci -x 'getArgs >>= mapM_ putStrLn' a b` writes `a` and `b` on
       separate lines.
   - **Output rule:** a result of type `String` is written raw with
     `putStr` (no quotes, escapes become real characters, no newline
@@ -362,11 +363,13 @@ list?". Printing goes through the `Show` dictionary like any other code.
 - `MRB_CALL_LEVEL_MAX=100000` is set in the build config (see below).
 
 ## 7. Dual-runtime discipline
-- **One source tree, one manifest.** `lib/rghci/manifest.rb` lists the
-  files in load order. CRuby loads them with `require_relative`. For mruby,
-  `tools/bundle.rb` concatenates them (Prelude `.hs` embedded as heredocs)
-  into `build/rghci.rb`, because mruby has no `require`.
-- **`lib/rghci/shim.rb` is the only file that may branch on runtime.** It
+- **One source tree, one manifest.** `lib/rhci/manifest.txt` lists the
+  files in load order. CRuby loads them through `lib/rhci.rb`, the only
+  file allowed to `require`. Because mruby has no `require`,
+  `tools/bundle.rb` concatenates them into `mrbgems/rhci/mrblib/rhci.rb`
+  (compiled into the binary) and, together with the harness and unit
+  tests, into `build/test_bundle.rb` (run by the plain `build/mruby/bin/mruby`).
+- **`lib/rhci/shim.rb` is the only file that may branch on runtime.** It
   covers reading lines, flushing, reading files, interrupts and `exit`.
 - **Coding rules,** checked by a lint script that greps for forbidden constructs:
   - No `Struct`, `Set`, `catch`/`throw`, `Fiber`, `format`/`sprintf`/`%`,
@@ -415,7 +418,7 @@ list?". Printing goes through the `Show` dictionary like any other code.
 Each step ends green on **both** runtimes before the next one starts.
 
 1. **Skeleton:** manifest, shim, bundler, test framework, lint, `rake test`
-   on both runtimes, the `rghci` static binary with embedded bytecode, and
+   on both runtimes, the `rhci` static binary with embedded bytecode, and
    the startup benchmark.
 2. **Lexer, layout, parser, fixity:** a parse-only pass over every probe,
    with error *class* matching the goldens for parse errors.

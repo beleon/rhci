@@ -2,3 +2,4 @@ vendor/
 build/
 build.log
 *.lock
+mrbgems/rhci/mrblib/rhci.rb
