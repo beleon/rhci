@@ -24,14 +24,22 @@ module Rhci
     # input, plus the Core of its expression (or nil).
     def top(rtop)
       @new_values = rtop.values
+      @new_types = rtop.types
       defs = []
       rtop.tyinfos.each { |ti| defs.concat(type_defs(ti)) unless ti.synonym }
-      rtop.groups.each { |scc| scc.each { |b| defs.concat(bind_defs(b)) } }
+      rtop.classes.each { |ci| defs.concat(class_defs(ci)) }
+      rtop.groups.each { |scc| defs.concat(scc_defs(scc)) }
+      rtop.instances.each { |inst| defs.concat(instance_defs(inst)) }
       [defs, rtop.expr ? expr(rtop.expr) : nil]
     end
 
     def expression(e)
       expr(e)
+    end
+
+    # show applied to arg, with the given Show evidence.
+    def show_call(ev, arg)
+      C::App.new(method_var('Show', 'show'), [ev_core(ev), arg])
     end
 
     # Core that matches value `var` against `pat`, then evaluates `success`.
@@ -52,7 +60,8 @@ module Rhci
 
     # A Prelude-internal name (pending while the Prelude itself compiles).
     def internal(str)
-      (@new_values && @new_values[str]) || @env.internal[str] || raise("desugar: the Prelude lacks #{str}")
+      (@new_values && @new_values[str]) || @env.internal[str] || @env.values[str] ||
+        raise("desugar: the Prelude lacks #{str}")
     end
 
     def core_name(n)
@@ -95,9 +104,132 @@ module Rhci
         n = b.name
         ps = Array.new(n.prim_arity) { fresh('p') }
         [[n.core, n.prim_arity.zero? ? prim_call(n.prim, []) : C::Lam.new(ps, prim_call(n.prim, ps.map { |p| var(p) }))]]
-      when :fun then [[b.name.core, fun_body(b)]]
+      when :fun
+        body = fun_body(b)
+        [[b.name.core, b.signed && !b.dicts.empty? ? C::Lam.new(b.dicts.map { |_, d| d }, body) : body]]
       else pattern_binding(b)
       end
+    end
+
+    # A dependency group. When the checker abstracted it over dictionaries,
+    # each binding becomes `\dicts -> letrec <group, monomorphic> in it`:
+    # the dictionary lambdas wrap the whole recursive knot, so recursion
+    # inside it shares (fibs = 0 : 1 : zipWith (+) fibs (tail fibs)).
+    def scc_defs(scc)
+      dicts = scc.find { |b| !b.signed }&.dicts || []
+      return scc.flat_map { |b| bind_defs(b) } if dicts.empty? || scc.all?(&:signed)
+
+      members = scc.reject(&:signed).flat_map(&:names)
+      saved = {}
+      members.each do |n|
+        saved[n.core] = @subst[n.core]
+        @subst[n.core] = "#{n.core}%mono"
+      end
+      inner = scc.reject(&:signed).flat_map { |b| bind_defs(b) }
+      inner = inner.map { |name, core| [@subst[name] || name, core] }
+      members.each { |n| saved[n.core].nil? ? @subst.delete(n.core) : @subst[n.core] = saved[n.core] }
+      params = dicts.map { |_, d| d }
+      out = members.map { |n| [n.core, C::Lam.new(params, C::Let.new(inner, var("#{n.core}%mono")))] }
+      out + scc.select(&:signed).flat_map { |b| bind_defs(b) }
+    end
+
+    # ---- classes and instances ---------------------------------------------------
+
+    # Method and superclass selectors, and default methods.
+    def class_defs(ci)
+      defs = []
+      con = ci.dict_con
+      n = con.arity
+      field = lambda do |i|
+        d = fresh('d')
+        vs = Array.new(n) { fresh('f') }
+        C::Lam.new([d], C::Case.new(var(d), nil, [C::Alt.new(:con, con, vs, var(vs[i]))]))
+      end
+      ci.supers.each_index { |i| defs << [super_selector(ci, i), field.call(i)] }
+      ci.methods.each_with_index { |m, i| defs << [m.core, field.call(ci.supers.length + i)] }
+      ci.defaults.each_value { |b| defs.concat(bind_defs(b)) }
+      defs
+    end
+
+    def super_selector(ci, i)
+      "sc%#{ci.name.core}%#{i}"
+    end
+
+    # Method implementations, and the dictionary: a value, or a function of
+    # the instance context's dictionaries.
+    def instance_defs(inst)
+      ci = inst.klass
+      defs = []
+      inst.binds.each_value { |b| defs.concat(bind_defs(b)) }
+      ctx = inst.context_dicts
+      self_name = ctx.empty? ? inst.dict_name.core : fresh('self')
+      fields = inst.super_evs.map { |ev| ev_core(ev) }
+      ci.methods.each do |m|
+        b = inst.binds[m]
+        fields << if b
+                    ctx.empty? ? var(b.name.core) : C::App.new(var(b.name.core), ctx.map { |c| var(c) })
+                  elsif (dm = ci.defaults[m])
+                    C::App.new(var(dm.name.core), [var(self_name)])
+                  else
+                    error_core(inst.tok, "No instance nor default method for class operation #{m.str}")
+                  end
+      end
+      dict = C::Con.new(ci.dict_con, fields)
+      defs << if ctx.empty?
+                [inst.dict_name.core, dict]
+              else
+                [inst.dict_name.core, C::Lam.new(ctx, C::Let.new([[self_name, dict]], var(self_name)))]
+              end
+      defs
+    end
+
+    # ---- evidence ----------------------------------------------------------------------
+
+    def ev_core(ev)
+      sol = ev.solution
+      raise "desugar: unsolved constraint #{ev.klass.name.str}" unless sol
+
+      case sol[0]
+      when :param then var(sol[1])
+      when :same then ev_core(sol[1])
+      when :inst
+        inst = sol[1]
+        subs = sol[2]
+        subs.empty? ? var(inst.dict_name.core) : C::App.new(var(inst.dict_name.core), subs.map { |e| ev_core(e) })
+      when :super
+        d = ev_core(sol[1])
+        k = sol[1].klass
+        sol[2].each do |i|
+          d = C::App.new(var(super_selector(k, i)), [d])
+          k = k.supers[i]
+        end
+        d
+      end
+    end
+
+    def evidence(node)
+      (node.ev || []).map { |e| ev_core(e) }
+    end
+
+    # The instance an Ev was solved by (following :same), or nil.
+    def solved_instance(ev)
+      sol = ev.solution
+      sol = sol[1].solution while sol && sol[0] == :same
+      sol && sol[0] == :inst ? sol[1] : nil
+    end
+
+    def method_var(class_str, method_str)
+      n = (@new_types && @new_types[class_str]) || @env.types[class_str]
+      raise "desugar: the Prelude lacks class #{class_str}" unless n && n.kind == :class
+
+      m = n.klass.methods.find { |x| x.str == method_str }
+      raise "desugar: class #{class_str} lacks #{method_str}" unless m
+
+      var(m.core)
+    end
+
+    def head_key(inst)
+      inst&.head&.key
     end
 
     # A primitive applied to all its arguments. Arguments are forced first
@@ -155,11 +287,7 @@ module Rhci
     # ---- binding groups -----------------------------------------------------------
 
     def groups(gs, body)
-      (gs || []).reverse_each do |scc|
-        binds = []
-        scc.each { |b| binds.concat(bind_defs(b)) }
-        body = C::Let.new(binds, body)
-      end
+      (gs || []).reverse_each { |scc| body = C::Let.new(scc_defs(scc), body) }
       body
     end
 
@@ -276,7 +404,19 @@ module Rhci
         chars = lit.value.map { |c| PLit.new(pat.tok, Lit.new(pat.tok, :char, c)) }
         list_pattern(v, chars, rest, success, fail)
       else
-        raise UnsupportedError.new('numeric literal patterns are not supported yet', pat.line, pat.col, @source)
+        eq, num = pat.ev
+        kind = known_num(num)
+        value = literal(pat.lit, num).value if kind
+        if kind && kind != :double
+          value = kind == :int ? Num.wrap_int(pat.negative ? -value : value) : (pat.negative ? -value : value)
+          return C::Case.new(var(v), nil, [C::Alt.new(:lit, value, [], mp(rest, success, fail)),
+                                           C::Alt.new(:default, nil, [], fail)])
+        end
+        lit_core = literal(pat.lit, num)
+        lit_core = C::App.new(method_var('Num', 'negate'), [ev_core(num), lit_core]) if pat.negative
+        test = C::App.new(method_var('Eq', '=='), [ev_core(eq), var(v), lit_core])
+        C::Case.new(test, nil, [C::Alt.new(:con, B::TRUE, [], mp(rest, success, fail)),
+                                C::Alt.new(:default, nil, [], fail)])
       end
     end
 
@@ -310,10 +450,14 @@ module Rhci
 
     def expr(e)
       case e
-      when Var then reference(e.ref)
+      when Var
+        ev = evidence(e)
+        ev.empty? ? reference(e.ref) : C::App.new(reference(e.ref), ev)
       when Con, TupleCon then constructor(e.ref, [])
-      when Lit
-        e.kind == :string ? C::Str.new(e.value) : C::Lit.new(e.value)
+      when Lit then literal(e)
+      when Neg then negation(e)
+      when ArithSeq then arith_seq(e)
+      when Do then do_block(e)
       when App then apply(e.fn, e.args.map { |a| expr(a) })
       when BinOp then apply(e.op, [expr(e.left), expr(e.right)])
       when Paren then expr(e.expr)
@@ -337,10 +481,114 @@ module Rhci
       when Tuple then C::Con.new(B.tuple(e.elems.length), e.elems.map { |x| expr(x) })
       when List then list_literal(e.elems.map { |x| expr(x) })
       when Comp then comprehension(e.quals, e.expr)
-      when Annot then expr(e.expr)
+      when Annot
+        givens = e.groups || []
+        return expr(e.expr) if givens.empty?
+
+        C::App.new(C::Lam.new(givens.map { |g| g.solution[1] }, expr(e.expr)), evidence(e))
       when RecCon then record_construction(e)
       when RecUpd then record_update(e)
       else raise "desugar: unexpected #{e.class}"
+      end
+    end
+
+    # ---- literals, negation, sequences, do --------------------------------------------
+
+    INT_KEYS = { 'Int' => :int, 'Integer' => :integer, 'Double' => :double }.freeze
+
+    # The machine type of a numeric literal's instance: :int, :integer,
+    # :double, or nil (go through fromInteger/fromRational).
+    def known_num(ev)
+      inst = solved_instance(ev)
+      inst && INT_KEYS[inst.head.key]
+    end
+
+    def literal(e, ev = nil)
+      case e.kind
+      when :string then return C::Str.new(e.value)
+      when :char then return C::Lit.new(e.value)
+      end
+      ev ||= e.ev[0]
+      kind = known_num(ev)
+      if e.kind == :integer
+        case kind
+        when :int then C::Lit.new(Num.wrap_int(e.value))
+        when :integer then C::Lit.new(e.value)
+        when :double then C::Lit.new(Num.integer_to_double(e.value))
+        else C::App.new(method_var('Num', 'fromInteger'), [ev_core(ev), C::Lit.new(e.value)])
+        end
+      else
+        m, x = e.value
+        if kind == :double
+          C::Lit.new(Num.literal_to_double(m, x))
+        else
+          C::App.new(method_var('Fractional', 'fromRational'), [ev_core(ev), rational(m, x)])
+        end
+      end
+    end
+
+    # mantissa * 10**exp10 as a reduced Ratio Integer.
+    def rational(m, x)
+      n = x >= 0 ? m * 10**x : m
+      d = x >= 0 ? 1 : 10**-x
+      g = n.gcd(d)
+      ratio = internal(':%')
+      C::Con.new(ratio.con, [C::Lit.new(n / g), C::Lit.new(d / g)])
+    end
+
+    def negation(e)
+      x = e.expr
+      x = x.expr while x.is_a?(Paren)
+      if x.is_a?(Lit) && x.kind != :char && x.kind != :string
+        kind = known_num(e.ev[0])
+        if kind
+          v = literal(x, e.ev[0]).value
+          neg = case kind
+                when :int then Num.wrap_int(-v)
+                when :double then Num.negate_double(v)
+                else -v
+                end
+          return C::Lit.new(neg)
+        end
+      end
+      C::App.new(method_var('Num', 'negate'), [ev_core(e.ev[0]), expr(e.expr)])
+    end
+
+    def arith_seq(e)
+      d = ev_core(e.ev[0])
+      args = [e.from, e.thn, e.to].compact.map { |x| expr(x) }
+      name = if e.thn
+               e.to ? 'enumFromThenTo' : 'enumFromThen'
+             else
+               e.to ? 'enumFromTo' : 'enumFrom'
+             end
+      C::App.new(method_var('Enum', name), [d] + args)
+    end
+
+    def do_block(e)
+      dict = ev_core(e.ev[0])
+      do_stmts(e.stmts, dict, e)
+    end
+
+    def do_stmts(stmts, dict, node)
+      s = stmts[0]
+      rest = stmts[1..-1]
+      return expr(s.expr) if rest.empty?
+
+      case s
+      when BindStmt
+        x = fresh('b')
+        fail = if s.ev && !s.ev.empty?
+                 msg = "Pattern match failure in `do' block at #{@source}:#{s.tok.line}:#{s.tok.col}"
+                 C::App.new(method_var('MonadFail', 'fail'), [ev_core(s.ev[0]), C::Str.new(msg.codepoints)])
+               else
+                 error_core(s.tok, 'Irrefutable pattern failed')
+               end
+        k = C::Lam.new([x], mp([[x, s.pat]], -> { do_stmts(rest, dict, node) }, fail))
+        C::App.new(method_var('Monad', '>>='), [dict, expr(s.expr), k])
+      when LetStmt then groups(s.groups, do_stmts(rest, dict, node))
+      else
+        C::App.new(method_var('Monad', '>>'), [dict, expr(s.expr), do_stmts(rest, dict, node)])
       end
     end
 

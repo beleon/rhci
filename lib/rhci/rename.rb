@@ -14,7 +14,9 @@ module Rhci
     attr_accessor :con, :tyinfo, :prim, :fields, :strict, :field_cons, :global
     # field_types: a constructor's field types as (renamed) AST types.
     # prim_arity: number of arguments of a primitive.
-    attr_accessor :field_types, :prim_arity
+    # klass: the ClassInfo of a class Name; method_of: the ClassInfo a
+    # method belongs to.
+    attr_accessor :field_types, :prim_arity, :klass, :method_of
 
     def initialize(str, uid, kind)
       @str = str
@@ -45,12 +47,76 @@ module Rhci
     end
   end
 
+  # A type class (Haskell 98: one parameter, superclasses, defaults).
+  class ClassInfo
+    attr_reader :name, :tyvar, :methods, :tok
+    # supers: superclass ClassInfos, in declaration order. sigs: method
+    # Name => TypeSig. defaults: method Name => RBind (the default's own
+    # Name is the RBind's name). context_ast: [[class str, tyvar str]].
+    # Filled by the checker: dict_con (the dictionary's ConInfo),
+    # var_arity (number of type arguments the class variable takes),
+    # instances (head key => InstInfo), method_schemes.
+    attr_accessor :supers, :sigs, :defaults, :context_ast, :dict_con, :var_arity, :instances,
+                  :method_schemes, :super_names
+
+    def initialize(name, tyvar, tok)
+      @name = name
+      @tyvar = tyvar
+      @tok = tok
+      @methods = []
+      @supers = []
+      @sigs = {}
+      @defaults = {}
+      @instances = {}
+      @method_schemes = {}
+    end
+
+    # All superclasses, transitively, as [ClassInfo, path of indices].
+    def ancestors
+      out = []
+      work = []
+      @supers.each_with_index { |c, i| work << [c, [i]] }
+      until work.empty?
+        c, path = work.shift
+        next if out.any? { |o, _| o.equal?(c) }
+
+        out << [c, path]
+        c.supers.each_with_index { |sc, i| work << [sc, path + [i]] }
+      end
+      out
+    end
+  end
+
+  # An instance declaration. type_ast: the instance head type; context_ast:
+  # [[class str, tyvar str]]; binds: method Name => RBind of the
+  # implementation. Filled by the checker: head (TCon), tyvars, context
+  # ([[ClassInfo, tyvar index]]), dict_name (the global holding the
+  # dictionary, or the function building it from context dictionaries).
+  class InstInfo
+    attr_reader :klass, :tok, :binds
+    attr_accessor :type_ast, :context_ast, :head, :tyvars, :context, :dict_name, :derived
+    # context_dicts: parameter names of the dictionary function (one per
+    # context constraint); super_evs: evidence for the superclass fields.
+    attr_accessor :context_dicts, :super_evs
+
+    def initialize(klass, tok, type_ast, context_ast)
+      @klass = klass
+      @tok = tok
+      @type_ast = type_ast
+      @context_ast = context_ast
+      @binds = {}
+    end
+  end
+
   # One binding of a declaration group. kind :fun (name, eqs) or :pat
   # (pat, rhs, names). sigs: Name => TypeSig. deps: Names of the group it
   # refers to.
   class RBind
     attr_reader :kind, :name, :eqs, :pat, :rhs, :names, :sigs, :tok
-    attr_accessor :deps
+    # dicts: [[Ev, core name], ...] -- dictionary parameters the checker
+    # abstracted the binding over: shared by an unsigned group, or the
+    # binding's own when checked against a signature (signed: true).
+    attr_accessor :deps, :dicts, :signed
 
     def initialize(kind, tok, name: nil, eqs: nil, pat: nil, rhs: nil, names: [])
       @kind = kind
@@ -67,11 +133,13 @@ module Rhci
 
   # A renamed top-level input (REPL entry or module).
   class RTop
-    attr_accessor :expr, :bind_pat, :groups, :tyinfos, :values, :types, :prims, :import
+    attr_accessor :expr, :bind_pat, :groups, :tyinfos, :values, :types, :prims, :import, :classes, :instances
 
     def initialize
       @groups = []
       @tyinfos = []
+      @classes = []
+      @instances = []
       @values = {}
       @types = {}
       @prims = []
@@ -126,14 +194,19 @@ module Rhci
       end
     end
 
-    def commit(top)
+    # prelude: names GHC's default-scope modules do not export stay internal.
+    def commit(top, prelude: false)
       top.types.each do |s, n|
+        if prelude && !BASE_TYPES.key?(s)
+          @internal["type:#{s}"] = n
+          next
+        end
         @types[s] = n
         @refused.delete(s)
       end
       top.values.each do |s, n|
         @refused.delete(s)
-        if s.start_with?('rhci_')
+        if s.start_with?('rhci_') || (prelude && !BASE_VALUES.key?(s))
           @internal[s] = n
         else
           @values[s] = n
@@ -167,8 +240,10 @@ module Rhci
       'IORes' => [VM::Builtins::IORES]
     }.freeze
 
-    def initialize(env, source = '<interactive>', prelude: false)
+    # fixity: lookup of an operator's [assoc, prec] (for derived Show).
+    def initialize(env, source = '<interactive>', prelude: false, fixity: nil)
       @env = env
+      @fixity = fixity
       @source = source
       @prelude = prelude
       @scopes = []
@@ -237,7 +312,7 @@ module Rhci
 
         i -= 1
       end
-      @top.values[str] || @env.values[str]
+      @top.values[str] || @env.values[str] || (@allow_internal && str.start_with?('rhci_') ? @env.internal[str] : nil)
     end
 
     def resolve_value(node, str, qual, what)
@@ -253,6 +328,8 @@ module Rhci
     end
 
     def lookup_type(tok, str)
+      return @env.tuple_con(str.length - 1).tyinfo.name if str.start_with?('(,')
+
       n = @top.types[str] || @env.types[str]
       unless n
         not_yet(tok, str, BASE_TYPES[str])
@@ -285,26 +362,124 @@ module Rhci
     # ---- top-level declarations ----------------------------------------------------
 
     def top_decls(decls)
+      derived = []
       decls.each do |d|
         case d
-        when ClassDecl then unsupported(d.tok, 'class declarations')
-        when InstDecl then unsupported(d.tok, 'instance declarations')
-        when DataDecl then register_data(d)
+        when ClassDecl then register_class(d)
+        when DataDecl then derived.concat(register_data(d))
         when TypeSyn then register_synonym(d)
         end
       end
+      @top.classes.each { |ci| resolve_class(ci) }
       @top.tyinfos.each { |ti| resolve_tyinfo(ti) }
-      value_decls = decls.reject { |d| d.is_a?(DataDecl) || d.is_a?(TypeSyn) }
+      instances = decls.select { |d| d.is_a?(InstDecl) }
+      value_decls = decls.reject do |d|
+        d.is_a?(DataDecl) || d.is_a?(TypeSyn) || d.is_a?(ClassDecl) || d.is_a?(InstDecl)
+      end
       binds = collect_binds(value_decls, true)
       binds.each { |b| b.names.each { |n| n.global = true; @top.values[n.str] = n } } # rubocop:disable Style/Semicolon
       @top.groups = rename_group(binds, @top.values)
+      @top.classes.each { |ci| rename_defaults(ci) }
+      instances.each { |d| register_instance(d, false) }
+      derived.each { |d| register_instance(d, true) }
+    end
+
+    # ---- classes and instances ------------------------------------------------------
+
+    def register_class(d)
+      err(:compile, d.tok, "Multiple declarations of ‘#{d.name}’") if @top.types.key?(d.name)
+      cname = @env.fresh(d.name, :class)
+      ci = ClassInfo.new(cname, d.tyvar, d.tok)
+      cname.klass = ci
+      ci.context_ast = d.context.map do |c, t|
+        unsupported(t.tok, 'superclass constraints other than `C a`') unless t.is_a?(TVar) && t.name == d.tyvar
+        [c, t]
+      end
+      @top.types[d.name] = cname
+      @top.classes << ci
+      d.decls.each do |x|
+        next unless x.is_a?(TypeSig)
+
+        x.names.each do |m|
+          err(:compile, x.tok, "Multiple declarations of ‘#{m}’") if @top.values.key?(m) || ci.methods.any? { |n| n.str == m }
+          mn = @env.fresh(m, :var)
+          mn.global = true
+          mn.method_of = ci
+          ci.methods << mn
+          ci.sigs[mn] = x
+          @top.values[m] = mn
+        end
+      end
+      @class_decls ||= {}
+      @class_decls[ci] = d
+    end
+
+    def resolve_class(ci)
+      ci.supers = ci.context_ast.map do |c, t|
+        n = lookup_type(t.tok, c)
+        err(:compile, t.tok, "‘#{c}’ is not a class") unless n.kind == :class
+        n.klass
+      end
+      ci.sigs.each_value { |sig| type(sig.type) }
+    end
+
+    # Default method implementations in a class body.
+    def rename_defaults(ci)
+      d = @class_decls[ci]
+      eqs = d.decls.select { |x| x.is_a?(FunEq) || x.is_a?(PatBind) }
+      method_binds(eqs, ci, d.tok).each { |m, b| ci.defaults[m] = b }
+    end
+
+    # Group a class/instance body's equations by method; each gets a fresh
+    # implementation Name. Returns {method Name => RBind}.
+    def method_binds(decls, ci, tok)
+      out = {}
+      decls.each do |x|
+        err(:parse, x.tok, 'pattern bindings are not allowed in class or instance declarations') unless x.is_a?(FunEq)
+        m = ci.methods.find { |n| n.str == x.name }
+        err(:compile, x.tok, "‘#{x.name}’ is not a (visible) method of class ‘#{ci.name.str}’") unless m
+        b = out[m]
+        if b
+          if b.eqs[0].pats.length != x.pats.length
+            err(:compile, x.tok, "Equations for ‘#{x.name}’ have different numbers of arguments")
+          end
+          b.eqs << x
+        else
+          impl = @env.fresh(x.name, :var)
+          impl.global = true
+          out[m] = RBind.new(:fun, x.tok, name: impl, eqs: [x], names: [impl])
+        end
+      end
+      out.each_value do |b|
+        b.eqs.each { |eq| equation(eq, b.name) }
+      end
+      out
+    end
+
+    def register_instance(d, derived)
+      cn = lookup_type(d.tok, d.name)
+      err(:compile, d.tok, "‘#{d.name}’ is not a class") unless cn.kind == :class
+      ci = cn.klass
+      type(d.type)
+      ctx = d.context.map do |c, t|
+        unsupported(t.tok, 'instance contexts other than `C a`') unless t.is_a?(TVar)
+        n = lookup_type(t.tok, c)
+        err(:compile, t.tok, "‘#{c}’ is not a class") unless n.kind == :class
+        [n.klass, t.name]
+      end
+      inst = InstInfo.new(ci, d.tok, d.type, ctx)
+      inst.derived = derived
+      @allow_internal = derived
+      begin
+        method_binds(d.decls, ci, d.tok).each { |m, b| inst.binds[m] = b }
+      ensure
+        @allow_internal = false
+      end
+      @top.instances << inst
     end
 
     def register_data(d)
       err(:compile, d.tok, "Multiple declarations of ‘#{d.name}’") if @top.types.key?(d.name)
-      unless d.deriving.empty?
-        unsupported(d.tok, 'deriving clauses (they need type classes)')
-      end
       tname = @env.fresh(d.name, :tycon)
       tcon = Types::TCon.new(d.name, d.tyvars.length, "#{d.name}%#{tname.uid}")
       ti = TyInfo.new(tname, tcon, d.tyvars, [], d.newtype)
@@ -344,6 +519,7 @@ module Rhci
       end
       @data_decls ||= {}
       @data_decls[ti] = d
+      Derive.instances(d, @source, @fixity)
     end
 
     def register_synonym(d)
@@ -386,7 +562,12 @@ module Rhci
       when TList then type(t.elem, scoped)
       when TTuple then t.elems.each { |e| type(e, scoped) }
       when TQual
-        unsupported(t.tok, 'class constraints') unless t.context.empty?
+        t.ref = t.context.map do |c, ct|
+          n = lookup_type(ct.tok, c)
+          err(:compile, ct.tok, "‘#{c}’ is not a class") unless n.kind == :class
+          type(ct, scoped)
+          [n.klass, ct]
+        end
         type(t.type, scoped)
       end
     end
@@ -402,7 +583,7 @@ module Rhci
         case d
         when FunEq
           last = binds.last
-          if last && last.kind == :fun && last.name.str == d.name
+          if last && last.kind == :fun && last.name.str == d.name && !d.pats.empty?
             if last.eqs[0].pats.length != d.pats.length
               err(:compile, d.tok, "Equations for ‘#{d.name}’ have different numbers of arguments")
             end

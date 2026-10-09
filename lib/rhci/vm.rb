@@ -419,6 +419,11 @@ module Rhci
         @interrupted = true
       end
 
+      # Start a new top-level evaluation: the step limit counts from here.
+      def begin_evaluation
+        @step_base = @steps
+      end
+
       def flush_output
         return if @buf.empty?
 
@@ -464,6 +469,11 @@ module Rhci
         s = ''.dup
         list_to_a(v).each { |c| s << c }
         s
+      end
+
+      # A Ruby String as a Haskell String value.
+      def haskell_string(s)
+        str_value(s)
       end
 
       def exception_message(e)
@@ -797,7 +807,7 @@ module Rhci
           raise LimitExceeded, 'Interrupted.'
         end
         max = @limits[:steps]
-        raise LimitExceeded, "step limit (#{max}) exceeded" if max && @steps > max
+        raise LimitExceeded, "step limit (#{max}) exceeded" if max && @steps - (@step_base || 0) > max
 
         max = @limits[:stack]
         raise LimitExceeded, "stack limit (#{max} frames) exceeded" if max && @stack.length > max
@@ -874,6 +884,29 @@ module Rhci
       PRIM_METHODS[:doubleShow] = :p_doubleShow
       PRIM_METHODS[:chr] = :p_chr
       PRIM_METHODS[:putChar] = :p_putChar
+      PRIM_METHODS[:charClass] = :p_charClass
+      PRIM_METHODS[:charUpper] = :p_charUpper
+      PRIM_METHODS[:charLower] = :p_charLower
+      PRIM_METHODS[:intToInteger] = :p_intToInteger
+      PRIM_METHODS[:ord] = :p_ord
+      PRIM_METHODS[:doubleAbs] = :p_doubleAbs
+      PRIM_METHODS[:doubleSin] = :p_doubleSin
+      PRIM_METHODS[:doubleCos] = :p_doubleCos
+      PRIM_METHODS[:doubleTan] = :p_doubleTan
+      PRIM_METHODS[:doubleAsin] = :p_doubleAsin
+      PRIM_METHODS[:doubleAcos] = :p_doubleAcos
+      PRIM_METHODS[:doubleAtan] = :p_doubleAtan
+      PRIM_METHODS[:doubleSinh] = :p_doubleSinh
+      PRIM_METHODS[:doubleCosh] = :p_doubleCosh
+      PRIM_METHODS[:doubleTanh] = :p_doubleTanh
+      PRIM_METHODS[:doubleAsinh] = :p_doubleAsinh
+      PRIM_METHODS[:doubleAcosh] = :p_doubleAcosh
+      PRIM_METHODS[:doubleAtanh] = :p_doubleAtanh
+      PRIM_METHODS[:doubleFloor] = :p_doubleFloor
+      PRIM_METHODS[:doubleCeiling] = :p_doubleCeiling
+      PRIM_METHODS[:doubleRound] = :p_doubleRound
+      PRIM_METHODS[:doubleEncode] = :p_doubleEncode
+      PRIM_METHODS[:conTag] = :p_conTag
       PRIM_METHODS[:isSpace] = :p_isSpace
       PRIM_METHODS[:charEq] = :p_charEq
       PRIM_METHODS[:raise] = :p_raise
@@ -991,7 +1024,7 @@ module Rhci
       end
 
       def p_doubleNegate(a0)
-        -a0
+        Num.negate_double(a0)
       end
 
       def p_doubleEq(a0, a1)
@@ -1062,6 +1095,142 @@ module Rhci
       def p_chr(a0)
         c = a0
         raise HsException, "Prelude.chr: bad argument: #{c}" if c < 0 || c > 0x10FFFF
+
+        c
+      end
+
+      def p_intToInteger(a0)
+        a0
+      end
+
+      def p_ord(a0)
+        a0
+      end
+
+      def p_doubleAbs(a0)
+        a0.abs
+      end
+
+      def p_doubleSin(a0)
+        Math.sin(a0)
+      end
+
+      def p_doubleCos(a0)
+        Math.cos(a0)
+      end
+
+      def p_doubleTan(a0)
+        Math.tan(a0)
+      end
+
+      def p_doubleAsin(a0)
+        a0 < -1.0 || a0 > 1.0 ? NAN : Math.asin(a0)
+      end
+
+      def p_doubleAcos(a0)
+        a0 < -1.0 || a0 > 1.0 ? NAN : Math.acos(a0)
+      end
+
+      def p_doubleAtan(a0)
+        Math.atan(a0)
+      end
+
+      def p_doubleSinh(a0)
+        Math.sinh(a0)
+      end
+
+      def p_doubleCosh(a0)
+        Math.cosh(a0)
+      end
+
+      def p_doubleTanh(a0)
+        Math.tanh(a0)
+      end
+
+      def p_doubleAsinh(a0)
+        Math.asinh(a0)
+      end
+
+      def p_doubleAcosh(a0)
+        a0 < 1.0 ? NAN : Math.acosh(a0)
+      end
+
+      def p_doubleAtanh(a0)
+        a0 < -1.0 || a0 > 1.0 ? NAN : Math.atanh(a0)
+      end
+
+      def p_doubleFloor(a0)
+        Num.floor_double(finite!(a0))
+      end
+
+      def p_doubleCeiling(a0)
+        Num.ceiling_double(finite!(a0))
+      end
+
+      def p_doubleRound(a0)
+        Num.round_double(finite!(a0))
+      end
+
+      # encodeFloat m e: m * 2^e, correctly rounded.
+      def p_doubleEncode(a0, a1)
+        a1 >= 0 ? Num.integer_to_double(a0 << a1) : Num.rational_to_double(a0, 1 << -a1)
+      end
+
+      def finite!(x)
+        return x unless Num.nan?(x) || Num.infinite?(x)
+
+        Num.truncate_double(x) # raises the unsupported error for NaN/Infinity
+      end
+
+      # The constructor index of an evaluated constructor value.
+      def p_conTag(a0)
+        a0[0].tag
+      end
+
+      # Unicode general categories of Latin-1, as classes:
+      # 0 Cc, 1 Lu, 2 Ll, 3 other letters, 4 N*, 5 P*, 6 S*, 7 Z*, 9 Cf.
+      LATIN1_CLASS = begin
+        t = Array.new(256, 5)
+        (0..0x1F).each { |i| t[i] = 0 }
+        (0x7F..0x9F).each { |i| t[i] = 0 }
+        t[0x20] = t[0xA0] = 7
+        (0x30..0x39).each { |i| t[i] = 4 }
+        (0x41..0x5A).each { |i| t[i] = 1 }
+        (0x61..0x7A).each { |i| t[i] = 2 }
+        [0x24, 0x2B, 0x3C, 0x3D, 0x3E, 0x5E, 0x60, 0x7C, 0x7E, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA8, 0xA9,
+         0xAC, 0xAE, 0xAF, 0xB0, 0xB1, 0xB4, 0xB8, 0xD7, 0xF7].each { |i| t[i] = 6 }
+        [0xAA, 0xBA].each { |i| t[i] = 3 }
+        [0xB2, 0xB3, 0xB9, 0xBC, 0xBD, 0xBE].each { |i| t[i] = 4 }
+        t[0xAD] = 9
+        t[0xB5] = 2
+        (0xC0..0xDE).each { |i| t[i] = 1 unless i == 0xD7 }
+        (0xDF..0xFF).each { |i| t[i] = 2 unless i == 0xF7 }
+        t.freeze
+      end
+
+      def latin1!(c)
+        return if c <= 0xFF
+
+        raise UnsupportedError, "Data.Char classification of '\\#{c}' (beyond Latin-1) is not supported yet"
+      end
+
+      def p_charClass(c)
+        latin1!(c)
+        LATIN1_CLASS[c]
+      end
+
+      def p_charUpper(c)
+        latin1!(c)
+        return c - 32 if (c >= 0x61 && c <= 0x7A) || (c >= 0xE0 && c <= 0xFE && c != 0xF7)
+        return 0x39C if c == 0xB5
+        return 0x178 if c == 0xFF
+
+        c
+      end
+
+      def p_charLower(c)
+        latin1!(c)
+        return c + 32 if (c >= 0x41 && c <= 0x5A) || (c >= 0xC0 && c <= 0xDE && c != 0xD7)
 
         c
       end

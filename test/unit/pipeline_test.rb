@@ -39,7 +39,8 @@ RT.suite 'pipeline' do
     RT.eq :compile_error, pl_type("'a' : 'b'")[0]
     RT.eq :compile_error, pl_type('not "x"')[0]
     RT.eq :scope_error, pl_type('nosuchthing')[0]
-    RT.eq :unsupported, pl_type('1')[0]
+    RT.eq 'Num a => a', pl_type('1')
+    RT.eq :unsupported, pl_type('read')[0]
   end
 
   RT.test 'definitions, mutual recursion, and signatures' do

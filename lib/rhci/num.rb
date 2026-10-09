@@ -48,6 +48,12 @@ module Rhci
       !x.nan? && (x - x).nan? # inf - inf is NaN
     end
 
+    # IEEE negation. mruby's unary minus on a Float is 0 - x, which turns
+    # -0.0 into 0.0; multiplying by -1.0 is exact and keeps the sign.
+    def self.negate_double(x)
+      x * -1.0
+    end
+
     # IEEE equality: NaN equals nothing, -0.0 equals 0.0.
     def self.double_eq(a, b)
       !a.nan? && !b.nan? && a == b
@@ -57,9 +63,9 @@ module Rhci
     # x == mantissa * 2**exponent and |mantissa| in [2^52, 2^53) (0 -> [0, 0]).
     def self.decode_double(x)
       return [0, 0] if x.zero?
-      if nan?(x) || infinite?(x)
-        raise UnsupportedError, 'decodeFloat of NaN or Infinity is not supported'
-      end
+      return [x < 0 ? -HIDDEN : HIDDEN, 972] if infinite?(x) # GHC's decodeFloat of ±Infinity
+      # GHC's answer for NaN depends on its sign bit, which Ruby cannot see.
+      raise UnsupportedError, 'decodeFloat of NaN is not supported' if nan?(x)
 
       fr, ex = Math.frexp(x.abs)
       m = Math.ldexp(fr, MANT_BITS).to_i # < 2^53: exact on both runtimes

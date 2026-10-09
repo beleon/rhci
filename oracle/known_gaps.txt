@@ -1,3 +1,9 @@
 # Probes where rhci knowingly differs from the GHCi goldens.
 # Format: stage | exact probe input | reason
 # Stages: frontend (parse-error class), ... (more as later stages land)
+semantics | sort [3, 1, 4, 1, 5] | rhci puts Data.List in scope without an import (user decision)
+semantics | nub [1, 1, 2, 3, 3, 2] | rhci puts Data.List in scope without an import (user decision)
+semantics | fromMaybe 0 (Just 42) | rhci puts Data.Maybe in scope without an import (user decision)
+semantics | fromMaybe 0 Nothing | rhci puts Data.Maybe in scope without an import (user decision)
+semantics | fromMaybe 0 (Just "x") | Data.Maybe in scope without an import: rhci reports the type error GHCi would after importing it
+semantics | fromJust Nothing | rhci puts Data.Maybe in scope without an import (user decision)

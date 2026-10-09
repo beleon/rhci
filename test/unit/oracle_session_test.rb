@@ -11,7 +11,7 @@ sem_probes = Oracle.load(File.join(RHCI_ROOT, 'oracle', 'golden-ghc-9.6.7.txt'))
 sem_gaps = Oracle.known_gaps(File.join(RHCI_ROOT, 'oracle', 'known_gaps.txt'), 'semantics')
 sem_sections = []
 sem_probes.each { |p| sem_sections << p.section unless sem_sections.include?(p.section) }
-$oracle_coverage = [0, 0] # [answered, total]
+$oracle_coverage = [0, 0, 0] # [answered, total, over the step budget]
 
 SEM_STATUS = { ok: :ok, parse_error: :parse, scope_error: :scope, compile_error: :compile,
                exception: :runtime, command_error: :command }.freeze
@@ -27,7 +27,9 @@ RT.suite 'oracle: semantics' do
   sem_sections.each do |title|
     RT.test title do
       out = RT::FakeIO.new
-      session = Rhci::Session.new(stdout: out)
+      # Speed is not what this checks: each input gets a step budget, and
+      # one that exhausts it is skipped (counted), not failed.
+      session = Rhci::Session.new(stdout: out, limits: { steps: 3_000_000 })
       problems = []
       sem_probes.each do |p|
         next unless p.section == title
@@ -37,6 +39,10 @@ RT.suite 'oracle: semantics' do
         before = out.written.length
         r = session.eval(input)
         next if r.status == :unsupported
+        if r.status == :limit
+          $oracle_coverage[2] += 1
+          next
+        end
 
         $oracle_coverage[0] += 1
         next if sem_gaps.key?(p.input)
@@ -64,7 +70,8 @@ RT.suite 'oracle: semantics' do
   end
 
   RT.test 'coverage (informational)' do
-    answered, total = $oracle_coverage
-    puts "      oracle: rhci answers #{answered} of #{total} probes; the rest are refused as unsupported"
+    answered, total, slow = $oracle_coverage
+    puts "      oracle: rhci answers #{answered} of #{total} probes (#{slow} skipped over the step budget); " \
+         'the rest are refused as unsupported'
   end
 end

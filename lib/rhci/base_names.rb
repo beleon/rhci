@@ -18,6 +18,7 @@ module Rhci
     "+" => "Prelude",
     "++" => "Prelude",
     "-" => "Prelude",
+    "." => "Prelude",
     "/" => "Prelude",
     "/=" => "Prelude",
     "<" => "Prelude",

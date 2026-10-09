@@ -17,5 +17,6 @@ base_names
 rename
 typecheck
 desugar
+derive
 session
 cli

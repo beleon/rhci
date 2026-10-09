@@ -53,6 +53,7 @@ module Rhci
 
     # Evaluate one GHCi input (expression, declarations, `let`, command).
     def eval(input)
+      @machine.begin_evaluation
       return command(input) if Rhci::Text.lstrip(input).start_with?(':')
 
       node, layer = Frontend.parse_repl(input, @fixities)
@@ -75,58 +76,121 @@ module Rhci
     end
 
     def eval_node(node, layer)
-
       load_prelude
-      rtop = Renamer.new(@names).repl(node)
-      return Result.new(:ok) if rtop.import
-
-      tc = TypeChecker.new(@names, @tenv)
-      t = tc.top(rtop)
-      if node.is_a?(AST::ReplExpr)
-        check_printable(t, node)
-        defs, core = Desugar.new(@names).top(rtop)
-        commit(rtop, tc, defs, layer)
-        run_expression(core, t)
-      elsif node.is_a?(AST::ReplBind)
-        result_ok = io_result_type(t)
-        raise UnsupportedError, 'binding the result of an IO action needs type classes' unless result_ok
-
-        defs, core = Desugar.new(@names).top(rtop)
-        commit(rtop, tc, defs, layer)
-        bind_io_result(core, node, rtop)
+      case node
+      when AST::ReplExpr then eval_expression(node.expr, layer)
+      when AST::ReplBind then eval_bind(node, layer)
       else
+        rtop = Renamer.new(@names, fixity: fixity_lookup).repl(node)
+        return Result.new(:ok) if rtop.import
+
+        tc = TypeChecker.new(@names, @tenv)
+        tc.top(rtop)
         defs, = Desugar.new(@names).top(rtop)
         commit(rtop, tc, defs, layer)
         Result.new(:ok)
       end
     end
 
+    # GHCi: `let it = e`, then `print it` -- or, when it is an IO action, run
+    # it and print its result (unless that is (), or has no Show instance).
+    def eval_expression(expr, layer, raw_strings: false, arity_args: nil, want: nil)
+      # `let it = e` is not recursive: `it` inside e is the previous one. So
+      # the binding gets an internal name and becomes `it` once committed.
+      @it_count = (@it_count || 0) + 1
+      internal = "rhci_it#{@it_count}"
+      it_decl = AST::FunEq.new(expr.tok, internal, [], AST::Rhs.new(expr.tok, expr, nil, nil))
+      rtop = Renamer.new(@names, fixity: fixity_lookup).repl(AST::ReplDecls.new(expr.tok, [it_decl]))
+      tc = TypeChecker.new(@names, @tenv)
+      tc.top(rtop)
+      it_name = rtop.values[internal]
+      plan = tc.print_plan(it_name, expr.tok)
+      value_type = plan[:node].ty
+      check_command_mode(plan, value_type, arity_args, want) if want
+      defs, = Desugar.new(@names).top(rtop)
+      ds = Desugar.new(@names)
+      it_core = ds.expression(plan[:node])
+      commit(rtop, tc, defs, layer)
+      @names.values['it'] = it_name
+      @names.refused.delete('it')
+      if plan[:io]
+        value = run_io_value(eval_core(it_core))
+        result_type = Types.spine(value_type)[1][0]
+        bind_it(value, result_type) unless unit_type?(result_type)
+        print_value(ds, plan[:show], value_cell(value), result_type, raw_strings) if plan[:show]
+      else
+        print_value(ds, plan[:show], it_core, value_type, raw_strings)
+      end
+      Result.new(:ok)
+    end
+
+    def check_command_mode(plan, t, arity_args, want)
+      if want == :pure
+        if plan[:io]
+          raise Error.new(:compile, 'the expression is an IO action; use rhci -x to run it')
+        end
+        if Types.split_fn(t)
+          raise Error.new(:compile, "the function expects more arguments than the #{arity_args} given")
+        end
+      elsif !plan[:io]
+        raise Error.new(:compile, 'the expression is not an IO action; use rhci -c to evaluate it')
+      end
+    end
+
+    # Write show v (or a String raw) followed by a newline, as it is produced.
+    def print_value(ds, show_ev, core, type, raw_strings)
+      if raw_strings && string_type?(type)
+        write_string(eval_core(core))
+        return
+      end
+      raise Error.new(:compile, 'no Show instance') unless show_ev
+
+      write_string(eval_core(ds.show_call(show_ev, core)))
+      write_text("\n")
+    end
+
+    def value_cell(value)
+      cell = VM::Cell.new("it%value%#{@globals.length}", value)
+      @globals = @globals.merge(cell.name => cell)
+      Core::Var.new(cell.name)
+    end
+
+    # After an IO statement, `it` is its result.
+    def bind_it(value, type)
+      name = @names.fresh('it', :var)
+      name.global = true
+      cell = VM::Cell.new(name.core, value)
+      @globals = @globals.merge(cell.name => cell)
+      @names.values['it'] = name
+      @tenv[name] = Types.mono(type)
+    end
+
+    # pat <- action
+    def eval_bind(node, layer)
+      rtop = Renamer.new(@names, fixity: fixity_lookup).repl(node)
+      tc = TypeChecker.new(@names, @tenv)
+      tc.top(rtop)
+      defs, core = Desugar.new(@names).top(rtop)
+      commit(rtop, tc, defs, layer)
+      value = run_io_value(eval_core(core))
+      cell = value_cell(value)
+      ds = Desugar.new(@names)
+      fail = Core::Prim.new(:raise, [value_cell(@machine.haskell_string('Irrefutable pattern failed'))])
+      bind_defs = rtop.values.values.map do |n|
+        [n.core, ds.match_value(cell.name, node.pat, Core::Var.new(n.core), fail)]
+      end
+      install(bind_defs)
+      Result.new(:ok)
+    end
+
     # `rhci -c EXPR ARG...`: apply a pure EXPR to ARGs, each a Haskell
-    # expression.
+    # expression; a String result is written raw, anything else with show.
     def run_pure(expr, args, interact: false)
       raise UnsupportedError, '-i is not implemented yet' if interact
 
-      e = Frontend.parse_expression(expr, @fixities)
-      arg_nodes = args.map { |a| Frontend.parse_expression(a, @fixities) }
-      e = AST::App.new(e.tok, AST::Paren.new(e.tok, e), arg_nodes.map { |a| AST::Paren.new(a.tok, a) }) unless args.empty?
+      e = command_expression(expr, args)
       load_prelude
-      Renamer.new(@names).expression(e)
-      tc = TypeChecker.new(@names, @tenv)
-      s = tc.expression_scheme(e)
-      t = s.type
-      if Types.split_fn(t)
-        raise Error.new(:compile, "#{expr} expects more arguments than the #{args.length} given")
-      end
-      if io_type?(t)
-        raise Error.new(:compile, "#{expr} is an IO action; use rhci -x to run it")
-      end
-      unless string_type?(t)
-        raise UnsupportedError, 'printing values other than Strings needs type classes, which are not implemented yet'
-      end
-
-      core = Desugar.new(@names).expression(e)
-      write_string(eval_core(core))
-      Result.new(:ok)
+      eval_expression(e, nil, raw_strings: true, arity_args: args.length, want: :pure)
     rescue Error => e
       failure(e)
     rescue VM::HsException => e
@@ -144,13 +208,7 @@ module Rhci
 
       e = Frontend.parse_expression(expr, @fixities)
       load_prelude
-      Renamer.new(@names).expression(e)
-      t = TypeChecker.new(@names, @tenv).expression_scheme(e).type
-      raise Error.new(:compile, "#{expr} is not an IO action; use rhci -c to evaluate it") unless io_type?(t)
-      raise UnsupportedError, 'printing the result of an IO action needs type classes' unless io_result_type(t)
-
-      run_io_value(eval_core(Desugar.new(@names).expression(e)))
-      Result.new(:ok)
+      eval_expression(e, nil, raw_strings: true, want: :io)
     rescue Error => e
       failure(e)
     rescue VM::HsException => e
@@ -159,6 +217,14 @@ module Rhci
     rescue VM::LimitExceeded => e
       @machine.flush_output
       Result.new(:limit, e.message)
+    end
+
+    def command_expression(expr, args)
+      e = Frontend.parse_expression(expr, @fixities)
+      return e if args.empty?
+
+      arg_nodes = args.map { |a| AST::Paren.new(nil, Frontend.parse_expression(a, @fixities)) }
+      AST::App.new(e.tok, AST::Paren.new(e.tok, e), arg_nodes)
     end
 
     # `:load PATH...` / `rhci PATH...`: replace the loaded modules.
@@ -177,6 +243,11 @@ module Rhci
 
     private
 
+    def fixity_lookup
+      table = @fixities
+      ->(op) { table[op] || FixityResolver::BASE[op] || FixityResolver::DEFAULT }
+    end
+
     # ---- the Prelude -----------------------------------------------------------
 
     def load_prelude
@@ -188,7 +259,7 @@ module Rhci
       tc = TypeChecker.new(@names, @tenv, '<Prelude>')
       tc.top(rtop)
       defs, = Desugar.new(@names, '<Prelude>').top(rtop)
-      commit(rtop, tc, defs, nil)
+      commit(rtop, tc, defs, nil, prelude: true)
     rescue StandardError => e
       @prelude_loaded = false
       raise "rhci: the Prelude failed to load: #{e.message}"
@@ -196,7 +267,15 @@ module Rhci
 
     # ---- committing and running --------------------------------------------------
 
-    def commit(rtop, tc, defs, layer)
+    def commit(rtop, tc, defs, layer, prelude: false)
+      install(defs)
+      @names.commit(rtop, prelude: prelude)
+      tc.pending.each { |n, s| @tenv[n] = s if n.global || n.kind != :var }
+      tc.new_instances.each { |(klass, key), inst| klass.instances[key] = inst }
+      layer&.each { |k, v| @fixities[k] = v }
+    end
+
+    def install(defs)
       cells = defs.map { |name, _| VM::Cell.new(name) }
       table = @globals.dup
       cells.each { |c| table[c.name] = c }
@@ -204,9 +283,6 @@ module Rhci
       values = defs.map { |name, core| lower.global_value(name, core) }
       cells.each_with_index { |c, i| c.value = values[i] }
       @globals = table
-      @names.commit(rtop)
-      tc.pending.each { |n, s| @tenv[n] = s if n.global || n.kind != :var }
-      layer&.each { |k, v| @fixities[k] = v }
     end
 
     def eval_core(core)
@@ -214,12 +290,7 @@ module Rhci
       @machine.eval_code(code)
     end
 
-    def run_expression(core, _type)
-      run_io_value(eval_core(core))
-      Result.new(:ok)
-    end
-
-    # A String result is written raw (no quotes), as it is produced.
+    # A String result, written as it is produced.
     def write_string(v)
       cell = @machine.whnf(v)
       while cell[0].equal?(VM::Builtins::CONS)
@@ -241,25 +312,15 @@ module Rhci
       res[1]
     end
 
-    def bind_io_result(core, node, rtop)
-      value = run_io_value(eval_core(core))
-      cell = VM::Cell.new('it%result', value)
-      @globals = @globals.merge(cell.name => cell)
-      ds = Desugar.new(@names)
-      defs = rtop.values.values.map do |n|
-        sel = ds.match_value(cell.name, node.pat, Core::Var.new(n.core),
-                             Core::Prim.new(:raise, [Core::Var.new('it%msg')]))
-        [n.core, sel]
-      end
-      msg = VM::Cell.new('it%msg', @machine.send(:str_value, 'Irrefutable pattern failed'))
-      @globals = @globals.merge(msg.name => msg)
-      cells = defs.map { |name, _| VM::Cell.new(name) }
-      table = @globals.dup
-      cells.each { |c| table[c.name] = c }
-      lower = Lower.new(table)
-      cells.each_with_index { |c, i| c.value = lower.global_value(c.name, defs[i][1]) }
-      @globals = table
-      Result.new(:ok)
+    # ---- types ---------------------------------------------------------------------
+
+    def unit_type?(t)
+      Types.prune(t).equal?(Types::UNIT)
+    end
+
+    def string_type?(t)
+      h, args = Types.spine(t)
+      h.equal?(Types::LIST) && Types.prune(args[0]).equal?(Types::CHAR)
     end
 
     # The names an input would have defined, so that their later uses are
@@ -300,34 +361,6 @@ module Rhci
       when AST::PRec then p.fields.each { |_, a| collect_binders(a, acc) }
       when AST::POpSeq then p.items.each { |a| collect_binders(a, acc) }
       end
-    end
-
-    # ---- types ---------------------------------------------------------------------
-
-    # At the prompt only IO () runs for now: printing any value (even a
-    # String, which GHCi shows quoted) needs Show.
-    def check_printable(t, _node)
-      return if io_type?(t) && io_result_type(t)
-
-      raise UnsupportedError, 'printing values needs type classes, which are not implemented yet'
-    end
-
-    def io_type?(t)
-      h, args = Types.spine(t)
-      io = @names.types['IO']
-      h.is_a?(Types::TCon) && io && h.key == io.tyinfo.tcon.key && args.length == 1
-    end
-
-    # True if an IO action's result needs no printing (it is ()).
-    def io_result_type(t)
-      _, args = Types.spine(t)
-      r = Types.prune(args[0])
-      r.is_a?(Types::TCon) && r.equal?(Types::UNIT)
-    end
-
-    def string_type?(t)
-      h, args = Types.spine(t)
-      h.equal?(Types::LIST) && Types.prune(args[0]).equal?(Types::CHAR)
     end
 
     # ---- commands --------------------------------------------------------------------

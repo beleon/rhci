@@ -24,6 +24,7 @@ RULES = [
   [/=~|\.match\(|\bRegexp\b|\.(sub|gsub|scan)\(\s*\//, 'no Regexp in the mruby build'],
   [/^\s*in\s/, 'case/in pattern matching is not used'],
   [/\.to_s\b.*Float|Float.*\.to_s\b/, 'never print Floats with Ruby (mruby uses %.15g)'],
+  [/[^_]\bsend\(/, 'Module#send is missing on mruby; dispatch explicitly'],
   [/\$!/, 'mruby leaves $! nil inside a rescue modifier; use begin/rescue => e'],
   [/(?<!Text)\.(strip|lstrip|rstrip)\b/, 'mruby rstrip/strip leave trailing spaces on non-ASCII strings; use Rhci::Text'],
   [/^\s*raise\s*$/, 'a bare `raise` does not re-raise on mruby; use `rescue => e` and `raise e`'],
@@ -44,7 +45,11 @@ problems = []
 (files - exempt).sort.each do |path|
   File.readlines(path).each_with_index do |line, i|
     code = line.sub(/#.*\z/m, '') # crude: drops comments (and anything after a # in strings)
-    next if line.include?('# lint:ok')
+    # `lint:ok` cannot silence the blockless-enumerator rule: a chained
+    # `.each_with_index.map {}` has a block, but not on each_with_index.
+    if line.include?('# lint:ok') && !code.match?(/\.(each_with_index|each_char|each_slice|each_cons)\.\w/)
+      next
+    end
 
     RULES.each do |re, why|
       problems << "#{path.sub("#{ROOT}/", '')}:#{i + 1}: #{why}\n    #{line.strip}" if code =~ re

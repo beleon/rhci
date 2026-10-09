@@ -150,7 +150,7 @@ module Rhci
         body = type(t)
         return body if s.preds.empty?
 
-        ctx = s.preds.map { |c, ty| "#{c} #{type(ty, 2)}" }
+        ctx = s.preds.map { |c, ty| "#{c.respond_to?(:name) ? c.name.str : c} #{type(ty, 2)}" }
         ctx = ctx.length == 1 ? ctx[0] : "(#{ctx.join(', ')})"
         "#{ctx} => #{body}"
       end

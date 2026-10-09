@@ -59,4 +59,14 @@ RT.suite 'runtime assumptions' do
     RT.eq 'λ é', Rhci::Text.strip("  λ é \t\n")
     RT.eq '', Rhci::Text.strip(" \n")
   end
+
+  RT.test 'the embedded Prelude source is byte-identical to prelude/Prelude.hs' do
+    RT.eq File.read(File.join(RHCI_ROOT, 'prelude', 'Prelude.hs')), Rhci::PRELUDE_SOURCE
+  end
+
+  RT.test 'unary minus loses -0.0 on mruby; Num.negate_double does not' do
+    z = 0.0
+    RT.eq Rhci::Shim::MRUBY, (1.0 / -z) > 0, 'documents the quirk'
+    RT.ok (1.0 / Rhci::Num.negate_double(z)) < 0, 'negate_double keeps the sign'
+  end
 end

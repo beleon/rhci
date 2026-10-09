@@ -35,7 +35,9 @@ module Rhci
       # Filled in by later passes: `ref` (the renamer's Name for a
       # variable, constructor or binder), `ty` (the checker's type), and
       # `groups` (dependency-ordered binding groups of a let/where/top level).
-      attr_accessor :ref, :ty, :groups
+      # `ev`: class-constraint evidence (Ev objects) this node needs, in the
+      # order the desugarer applies the dictionaries.
+      attr_accessor :ref, :ty, :groups, :ev
 
       def line
         @tok&.line

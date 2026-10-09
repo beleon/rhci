@@ -18,6 +18,12 @@ end
 chunks = out.split("@@MODULE-END@@\n")
 raise "expected #{MODULES.length} modules, got #{chunks.length}" if chunks.length < MODULES.length
 
+# M.x or M.+ (a module prefix), as opposed to an operator such as `.`.
+def qualified?(name)
+  i = name.index('.')
+  !i.nil? && i.positive? && name[0] >= 'A' && name[0] <= 'Z'
+end
+
 values = {}
 types = {}
 MODULES.each_with_index do |mod, i|
@@ -36,7 +42,7 @@ MODULES.each_with_index do |mod, i|
     if (m = line.match(/\A\s*(\(.+?\)|[a-z_][A-Za-z0-9_']*) ::/))
       name = m[1]
       name = name[1..-2] if name.start_with?('(')
-      values[name] ||= mod unless name.include?('.')
+      values[name] ||= mod unless qualified?(name)
     elsif (m = line.match(/\Atype ([A-Z][A-Za-z0-9_']*) ::/))
       types[m[1]] ||= mod
     elsif (m = line.match(/\A(?:data|newtype) [^=]*= (.*)\z/))
