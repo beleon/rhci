@@ -310,6 +310,7 @@ module Rhci
       decls.each do |d|
         case d
         when FunEq then bound[d.name] = true
+        when ForeignPrim then bound[d.name] = true
         when PatBind then pat_vars(d.pat).each { |n| bound[n] = true }
         when FixityDecl then d.ops.each { |o| fix[o] = [d.assoc, d.prec] }
         when DataDecl

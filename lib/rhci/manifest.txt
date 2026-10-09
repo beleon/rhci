@@ -1,5 +1,6 @@
 version
 shim
+text
 errors
 num
 lexer
@@ -11,5 +12,10 @@ frontend
 core
 vm
 lower
+types
+base_names
+rename
+typecheck
+desugar
 session
 cli

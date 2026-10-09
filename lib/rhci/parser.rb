@@ -17,8 +17,10 @@ module Rhci
 
     MAX_DEPTH = 400
 
-    def initialize(src, source = '<interactive>')
+    # prelude: allow `foreign import prim` (the Prelude's primitives).
+    def initialize(src, source = '<interactive>', prelude: false)
       @source = source
+      @prelude = prelude
       @c = Cursor.new(Lexer.tokenize(src, source), source)
       @depth = 0
     end
@@ -255,7 +257,10 @@ module Rhci
         when 'instance' then return parse_instance
         when 'infix', 'infixl', 'infixr' then return parse_fixity
         when 'default' then unsupported(t, 'default declarations')
-        when 'foreign' then unsupported(t, 'foreign declarations')
+        when 'foreign'
+          return parse_foreign_prim if @prelude
+
+          unsupported(t, 'foreign declarations')
         when 'deriving' then unsupported(t, 'standalone deriving declarations')
         when 'import' then error_at(t, 'import declarations must come first')
         when 'let'
@@ -294,6 +299,20 @@ module Rhci
         return BindStmt.new(t, to_pat(e), parse_exp)
       end
       ExprStmt.new(t, e)
+    end
+
+    def parse_foreign_prim
+      t = advance # foreign
+      error_at(peek) unless at_kw?('import')
+      advance
+      error_at(peek) unless at?(:varid, 'prim')
+      advance
+      op = advance
+      error_at(op) unless op.kind == :string
+      name = advance
+      error_at(name) unless name.kind == :varid
+      expect_op('::')
+      ForeignPrim.new(t, AST.cps_to_s(op.value), name.text, parse_qual_type)
     end
 
     # A declaration inside let/where/class/instance (no statements).

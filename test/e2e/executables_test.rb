@@ -27,8 +27,12 @@ EXECUTABLES.each do |label, cmd|
       RT.ok err.start_with?('rhci: -c requires an expression'), err
     end
 
-    RT.test '-c is refused explicitly until implemented' do
-      RT.eq ['', "unsupported: evaluation is not implemented yet\n", 4], run_exe(cmd, ['-c', '"Hello"'])
+    RT.test '-c writes a String result raw; -x runs an IO action' do
+      RT.eq ['Hello', '', 0], run_exe(cmd, ['-c', '"Hello"'])
+      RT.eq ["hi λ\n", '', 0], run_exe(cmd, ['-x', 'putStrLn "hi \\955"'])
+      _, err, code = run_exe(cmd, ['-c', 'putStrLn "x"'])
+      RT.eq 3, code
+      RT.ok err.include?('use rhci -x'), err
     end
 
     RT.test 'REPL quits on :q' do
@@ -45,17 +49,17 @@ EXECUTABLES.each do |label, cmd|
     end
 
     RT.test ':{ :} groups lines with their layout; :qu abbreviates :quit' do
-      out, err, code = run_exe(cmd, [], ":{\nlet a = 1\n    b = 2\n:}\n:qu\n")
+      out, err, code = run_exe(cmd, [], ":{\nlet a = \"x\"\n    b = a\n:}\nputStrLn b\n:qu\n")
       RT.eq 0, code
-      RT.eq 'rhci> rhci| rhci| rhci| rhci> ', out
-      RT.eq "unsupported: evaluation is not implemented yet\n", err
+      RT.eq "rhci> rhci| rhci| rhci| rhci> x\nrhci> ", out
+      RT.eq '', err
     end
 
     RT.test 'unknown commands; :t parses its argument' do
-      _, err, = run_exe(cmd, [], ":foo\n:t 1 +\n:t 1\n")
+      out, err, = run_exe(cmd, [], ":foo\n:t 1 +\n:t 'x'\n")
       RT.eq "unknown command ':foo'\nuse :? for help.\n" \
-            "<interactive>:1:4: parse error (possibly incorrect indentation or mismatched brackets)\n" \
-            "unsupported: type inference is not implemented yet\n", err
+            "<interactive>:1:4: parse error (possibly incorrect indentation or mismatched brackets)\n", err
+      RT.ok out.include?("'x' :: Char\n"), out
     end
   end
 end

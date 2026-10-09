@@ -115,7 +115,7 @@ module Rhci
           Shim.write(stdout, "\n")
           return EXIT_OK
         end
-        next if input.strip.empty?
+        next if Rhci::Text.blank?(input)
         return EXIT_OK if quit?(input)
 
         report(session.eval(input), stderr)
@@ -128,13 +128,13 @@ module Rhci
     def self.read_input(stdin, stdout)
       line = prompt_line(stdin, stdout, PROMPT)
       return nil if line.nil?
-      return line unless line.strip == ':{'
+      return line unless Rhci::Text.strip(line) == ':{'
 
       lines = []
       loop do
         l = prompt_line(stdin, stdout, CONTINUATION_PROMPT)
         return nil if l.nil?
-        return lines.join("\n") if l.strip == ':}'
+        return lines.join("\n") if Rhci::Text.strip(l) == ':}'
 
         lines << l
       end
@@ -148,7 +148,7 @@ module Rhci
     end
 
     def self.quit?(input)
-      s = input.strip
+      s = Rhci::Text.strip(input)
       return false unless s.start_with?(':') && !s.include?(' ')
 
       Session.command_name(s[1..-1]) == 'quit'

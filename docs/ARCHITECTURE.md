@@ -33,12 +33,14 @@ outcome. Runtime performance is best effort, with no target.
     │        dependency analysis (SCCs) of binding groups,
     │        `deriving` expanded into ordinary instance declarations
     ▼
+ Type checker ──► HM + type classes over the renamed source; records
+    │             types and (step 5) dictionary evidence; defaulting;
+    │             answers :t
+    ▼
  Desugarer ──► Core: λ, app, var, lit, con, letrec groups, flat case
     │          (match compiler; guards, where, if, comprehensions,
-    │           sections, ranges, literals → class methods)
-    ▼
- Type checker ──► HM + type classes; elaborates Core with explicit
-    │             dictionary λ/app; defaulting; answers :t
+    │           sections, ranges), with explicit dictionaries, and
+    │           primitive operations where the types are known
     ▼
  Lowering ──► machine Core: A-normal form, env slots resolved
     ▼
@@ -48,6 +50,11 @@ outcome. Runtime performance is best effort, with no target.
 ```
 
 Every input is checked in full before anything runs or any binding is added.
+
+**Decided in build step 4: type-check before desugaring** (as GHC does),
+not after. The desugarer then knows the types, which lets it insert
+dictionaries and turn arithmetic at known types into single primitive
+operations, the main remaining performance lever (§6).
 A type error leaves the session unchanged, as in GHCi.
 
 ## 2. Front end

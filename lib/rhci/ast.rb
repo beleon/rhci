@@ -32,6 +32,10 @@ module Rhci
 
     class Node
       attr_reader :tok
+      # Filled in by later passes: `ref` (the renamer's Name for a
+      # variable, constructor or binder), `ty` (the checker's type), and
+      # `groups` (dependency-ordered binding groups of a let/where/top level).
+      attr_accessor :ref, :ty, :groups
 
       def line
         @tok&.line
@@ -749,6 +753,22 @@ module Rhci
 
       def sexp
         AST.s('sig', @names.map { |n| AST.op_name(n) }, @type)
+      end
+    end
+
+    # `foreign import prim "op" name :: type` -- Prelude only.
+    class ForeignPrim < Node
+      attr_reader :op, :name, :type
+
+      def initialize(tok, op, name, type)
+        @tok = tok
+        @op = op
+        @name = name
+        @type = type
+      end
+
+      def sexp
+        AST.s('prim', @op, @name, @type)
       end
     end
 

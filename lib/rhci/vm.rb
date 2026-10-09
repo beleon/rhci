@@ -351,7 +351,7 @@ module Rhci
 
     module Builtins
       UNIT, = Core.data_type('()', [['()', 0]])
-      FALSE, TRUE = Core.data_type('Bool', [['False', 0], ['True', 1]])
+      FALSE, TRUE = Core.data_type('Bool', [['False', 0], ['True', 0]])
       NIL, CONS = Core.data_type('[]', [['[]', 0], [':', 2]])
       LT, EQ, GT = Core.data_type('Ordering', [['LT', 0], ['EQ', 0], ['GT', 0]])
       IORES, = Core.data_type('IORes', [['IORes', 1]])
@@ -874,6 +874,8 @@ module Rhci
       PRIM_METHODS[:doubleShow] = :p_doubleShow
       PRIM_METHODS[:chr] = :p_chr
       PRIM_METHODS[:putChar] = :p_putChar
+      PRIM_METHODS[:isSpace] = :p_isSpace
+      PRIM_METHODS[:charEq] = :p_charEq
       PRIM_METHODS[:raise] = :p_raise
 
       def p_integerAdd(a0, a1)
@@ -1062,6 +1064,20 @@ module Rhci
         raise HsException, "Prelude.chr: bad argument: #{c}" if c < 0 || c > 0x10FFFF
 
         c
+      end
+
+      # GHC's isSpace: Latin-1 whitespace, else Unicode category Zs.
+      def p_isSpace(c)
+        sp = if c <= 0x377
+               c == 32 || (c >= 9 && c <= 13) || c == 0xA0
+             else
+               c == 0x1680 || (c >= 0x2000 && c <= 0x200A) || c == 0x202F || c == 0x205F || c == 0x3000
+             end
+        Builtins.bool(sp)
+      end
+
+      def p_charEq(a0, a1)
+        Builtins.bool(a0 == a1)
       end
 
       def p_putChar(a0)

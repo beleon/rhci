@@ -4,12 +4,14 @@ module Rhci
   # A failure attributable to the Haskell input rather than to rhci.
   # `kind` maps onto Result statuses: :parse, :scope, :compile, :unsupported.
   class Error < StandardError
-    attr_reader :kind, :line, :col
+    # detail: the message without its source location prefix.
+    attr_reader :kind, :line, :col, :detail
 
     def initialize(kind, message, line = nil, col = nil, source = '<interactive>')
       @kind = kind
       @line = line
       @col = col
+      @detail = message
       super(line ? "#{source}:#{line}:#{col}: #{message}" : message)
     end
   end

@@ -15,8 +15,8 @@ module Rhci
       FixityResolver.new(fixities, source).expr(e)
     end
 
-    def self.parse_module(src, source)
-      m = Parser.new(src, source).parse_module
+    def self.parse_module(src, source, prelude: false)
+      m = Parser.new(src, source, prelude: prelude).parse_module
       FixityResolver.new(nil, source).module_decl(m)
     end
   end

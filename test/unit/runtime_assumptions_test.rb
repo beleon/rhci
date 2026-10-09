@@ -53,4 +53,10 @@ RT.suite 'runtime assumptions' do
     RT.ok Rhci::Num.double_eq(0.0, -0.0), 'double_eq(0.0, -0.0) is true'
     RT.eq Rhci::Shim::MRUBY, n == n, 'mruby says NaN == NaN; CRuby does not' # documents the quirk
   end
+
+  RT.test 'String#rstrip on non-ASCII is broken on mruby; Rhci::Text is not' do
+    RT.eq Rhci::Shim::MRUBY, "é \n".rstrip != 'é', 'documents the quirk' # lint:ok (the quirk itself)
+    RT.eq 'λ é', Rhci::Text.strip("  λ é \t\n")
+    RT.eq '', Rhci::Text.strip(" \n")
+  end
 end

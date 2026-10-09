@@ -6,3 +6,6 @@
 File.read(File.join(__dir__, 'rhci', 'manifest.txt')).split("\n").each do |name|
   require_relative File.join('rhci', name)
 end
+
+# The Prelude's Haskell source (the mruby bundle embeds it instead).
+Rhci::PRELUDE_SOURCE = File.read(File.join(__dir__, '..', 'prelude', 'Prelude.hs')).freeze

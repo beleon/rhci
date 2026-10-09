@@ -25,6 +25,7 @@ RULES = [
   [/^\s*in\s/, 'case/in pattern matching is not used'],
   [/\.to_s\b.*Float|Float.*\.to_s\b/, 'never print Floats with Ruby (mruby uses %.15g)'],
   [/\$!/, 'mruby leaves $! nil inside a rescue modifier; use begin/rescue => e'],
+  [/(?<!Text)\.(strip|lstrip|rstrip)\b/, 'mruby rstrip/strip leave trailing spaces on non-ASCII strings; use Rhci::Text'],
   [/^\s*raise\s*$/, 'a bare `raise` does not re-raise on mruby; use `rescue => e` and `raise e`'],
   [/^\s*class (Range|Array|Hash|String|Integer|Float|Proc|Method|Module|Class|Struct|Symbol|Comparable|Kernel|Data|Set|Time|IO|File)\b/,
    'mruby resolves this to the core class inside includers; pick another name']
@@ -36,7 +37,8 @@ end
 files += [File.join(ROOT, 'test', 'harness.rb'), File.join(ROOT, 'test', 'oracle.rb'),
           File.join(ROOT, 'test', 'core_sexp.rb')] +
          Dir[File.join(ROOT, 'test', 'unit', '*_test.rb')]
-exempt = [File.join(ROOT, 'lib', 'rhci', 'shim.rb')]
+exempt = [File.join(ROOT, 'lib', 'rhci', 'shim.rb'), File.join(ROOT, 'lib', 'rhci', 'text.rb'),
+          File.join(ROOT, 'lib', 'rhci', 'base_names.rb')] # generated data
 
 problems = []
 (files - exempt).sort.each do |path|

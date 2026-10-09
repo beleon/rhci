@@ -230,12 +230,12 @@ module Rhci
     # Pragmas are comments to us, except those that change the language:
     # those would silently change semantics, so they are refused.
     def check_pragma(body, line, col)
-      words = body.strip.split(' ')
+      words = Rhci::Text.strip(body).split(' ')
       return if words.empty?
 
       kind = words[0].upcase
       if kind == 'LANGUAGE'
-        raise UnsupportedError.new("LANGUAGE pragmas are not supported: #{body.strip}", line, col, @source)
+        raise UnsupportedError.new("LANGUAGE pragmas are not supported: #{Rhci::Text.strip(body)}", line, col, @source)
       end
       return unless kind == 'OPTIONS_GHC' || kind == 'OPTIONS'
 
