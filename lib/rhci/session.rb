@@ -60,15 +60,23 @@ module Rhci
     end
 
     # The next line of stdin for the REPL's own reader, which shares stdin
-    # with Haskell code (getLine, isEOF) as GHCi's does. nil at its end.
+    # with Haskell code (getLine, isEOF) as GHCi's does. nil at its end,
+    # :interrupt if Ctrl-C ended the read.
     def read_line
       pre = @machine.take_peeked
       return pre if pre == "\n"
 
       rest = Shim.read_line(@stdin)
+      return rest if rest == :interrupt
       return pre if rest.nil?
 
       pre ? pre + rest : rest
+    end
+
+    # Characters a Ctrl-C-free Haskell read left in the machine's look-ahead
+    # (isEOF): the line editor must see them first.
+    def pending_input
+      @machine.take_peeked
     end
 
     # Evaluate one GHCi input (expression, declarations, `let`, command).
@@ -283,6 +291,30 @@ module Rhci
 
       write_text("Ok, no modules loaded.\n")
       Result.new(:ok)
+    end
+
+    # Tab completion for the text before the cursor: [start, candidates],
+    # where start is the index the completed word begins at. Commands after
+    # a leading ':', file names after :load, else names in scope.
+    def completions(before)
+      start = before.length
+      start -= 1 while start.positive? && completion_char?(before[start - 1])
+      word = before[start..-1]
+      lead = Text.lstrip(before)
+      if lead.start_with?(':')
+        cmd_end = lead.index(' ')
+        if cmd_end.nil?
+          return [start, (COMMANDS + %w[quit]).uniq.select { |c| c.start_with?(word) && c != '?' }.sort]
+        end
+        return file_completions(before) if %w[load reload].include?(Session.command_name(lead[1...cmd_end]))
+      end
+      return [start, []] if word.empty? || !AST.ident_start?(word[0])
+
+      load_prelude
+      found = {}
+      @names.values.each_key { |n| found[n] = true if n.start_with?(word) && !n.start_with?('rhci_') }
+      @names.types.each_key { |n| found[n] = true if n.start_with?(word) }
+      [start, found.keys.sort]
     end
 
     # The type of an expression, as :type prints it.
@@ -578,6 +610,31 @@ module Rhci
       res = @machine.apply(io, [VM::Builtins::UNIT_V])
       @machine.flush_output
       res[1]
+    end
+
+    def completion_char?(c)
+      AST.ident_start?(c) || (c >= '0' && c <= '9') || c == "'" || c == '_'
+    end
+
+    # The path being typed after `:load `: entries of its directory.
+    def file_completions(before)
+      start = before.rindex(' ') + 1
+      path = before[start..-1]
+      slash = path.rindex('/')
+      dir = slash ? path[0..slash] : ''
+      base = slash ? path[(slash + 1)..-1] : path
+      look = dir.empty? ? '.' : dir
+      look = "#{@cwd}/#{look}" if @cwd && !look.start_with?('/')
+      names = Shim.dir_entries(look) || []
+      out = []
+      names.each do |n|
+        next unless n.start_with?(base)
+        next if n.start_with?('.') && !base.start_with?('.')
+
+        sub = Shim.dir_entries(look == '.' ? n : "#{look}/#{n}")
+        out << "#{dir}#{n}#{sub ? '/' : ''}"
+      end
+      [start, out.sort]
     end
 
     # ---- types ---------------------------------------------------------------------

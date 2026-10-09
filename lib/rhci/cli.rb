@@ -108,14 +108,15 @@ module Rhci
 
     def self.repl(opts, stdin, stdout, stderr)
       session = Session.new(stdout: stdout, stdin: stdin, stderr: stderr)
+      editor = line_editor(session, stdin, stdout)
       report(session.load(opts.files), stderr) unless opts.files.empty?
       loop do
-        input = read_input(session, stdout)
+        input = read_input(session, stdout, editor)
         if input.nil?
           Shim.write(stdout, "\n")
           return EXIT_OK
         end
-        next if Rhci::Text.blank?(input)
+        next if input == :interrupt || Rhci::Text.blank?(input)
         return EXIT_OK if quit?(input)
 
         report(session.eval(input), stderr)
@@ -124,27 +125,80 @@ module Rhci
     end
 
     # One input: a line, or the lines between `:{` and `:}` joined with
-    # newlines (layout intact). nil at end of input.
-    def self.read_input(session, stdout)
-      line = prompt_line(session, stdout, PROMPT)
-      return nil if line.nil?
+    # newlines (layout intact). nil at end of input; :interrupt when Ctrl-C
+    # abandoned it.
+    def self.read_input(session, stdout, editor = nil)
+      line = prompt_line(session, stdout, PROMPT, editor)
+      return line if line.nil? || line == :interrupt
       return line unless Rhci::Text.strip(line) == ':{'
 
       lines = []
       loop do
-        l = prompt_line(session, stdout, CONTINUATION_PROMPT)
-        return nil if l.nil?
+        l = prompt_line(session, stdout, CONTINUATION_PROMPT, editor)
+        return l if l.nil? || l == :interrupt
         return lines.join("\n") if Rhci::Text.strip(l) == ':}'
 
         lines << l
       end
     end
 
-    def self.prompt_line(session, stdout, prompt)
+    def self.prompt_line(session, stdout, prompt, editor)
+      return edit_line(session, prompt, editor) if editor
+
       Shim.write(stdout, prompt)
       Shim.flush(stdout)
       line = session.read_line
+      if line == :interrupt
+        Shim.write(stdout, "\n")
+        return line
+      end
       line&.chomp
+    end
+
+    # ---- the interactive terminal ----------------------------------------------
+
+    # A line editor when stdin and stdout are a terminal, else nil (input is
+    # then read line by line, as from a pipe). Also routes Ctrl-C during
+    # evaluation to the session.
+    def self.line_editor(session, stdin, stdout)
+      return nil unless Shim.tty?(stdin) && Shim.tty?(stdout)
+
+      Shim.trap_interrupt { session.interrupt! }
+      @history_path = history_path
+      completer = ->(text) { session.completions(text) }
+      LineEditor.new(LineEditor::Tty.new(stdin, stdout), history: load_history, completer: completer)
+    end
+
+    def self.edit_line(session, prompt, editor)
+      editor.term.raw
+      line = begin
+        editor.read_line(prompt, session.pending_input)
+      ensure
+        editor.term.cooked
+      end
+      save_history(line) if line.is_a?(String)
+      line
+    end
+
+    def self.history_path
+      home = Shim.getenv('HOME')
+      home.nil? || home.empty? ? nil : "#{home}/.rhci_history"
+    end
+
+    def self.load_history
+      text = @history_path ? Shim.read_file(@history_path) : nil
+      return [] if text.nil?
+
+      lines = text.split("\n")
+      lines.length > LineEditor::HISTORY_MAX ? lines[-LineEditor::HISTORY_MAX..-1] : lines
+    end
+
+    def self.save_history(line)
+      return if @history_path.nil? || Rhci::Text.blank?(line)
+
+      Shim.append_file(@history_path, "#{line}\n")
+    rescue StandardError
+      @history_path = nil # an unwritable history file is not worth an error
     end
 
     def self.quit?(input)

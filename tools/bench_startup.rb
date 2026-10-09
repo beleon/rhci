@@ -6,8 +6,12 @@
 # Medians over several runs; exits non-zero when a budget is exceeded.
 require 'pty'
 require 'io/wait'
+require 'tmpdir'
 
 EXE = ARGV.fetch(0)
+# The REPL keeps its history in $HOME; the benchmark must not touch the real one.
+HOME = Dir.mktmpdir('rhci-bench')
+at_exit { FileUtils.rm_rf(HOME) }
 PROMPT = 'rhci> '
 RUNS = 30
 
@@ -22,7 +26,7 @@ end
 
 def time_to_prompt
   t0 = now
-  PTY.spawn(EXE) do |r, w, pid|
+  PTY.spawn({ 'HOME' => HOME }, EXE) do |r, w, pid|
     seen = +''
     until seen.include?(PROMPT)
       raise "no prompt within 5 s (got #{seen.inspect})" unless r.wait_readable(5)

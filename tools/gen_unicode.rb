@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# Generates lib/rhci/unicode.rb from oracle/unicode/tables.txt, which is
+# Generates lib/rhci/unicode_data.rb from oracle/unicode/tables.txt, which is
 # GHC's own view of Unicode (oracle/unicode/Tables.hs, run in the oracle
 # container):
 #

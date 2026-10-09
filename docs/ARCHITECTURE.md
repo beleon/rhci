@@ -159,8 +159,14 @@ modes are needed, and they have to be tested separately:
   and instance heads of the form `C (T a1 … an)` with contexts. That covers
   Eq, Ord, Show, Enum, Bounded, Num, Real, Integral, Fractional, Floating,
   RealFrac, RealFloat, Semigroup, Monoid, Functor, Applicative, Monad,
-  Foldable, Traversable, and Read (for `read`, matching GHC's `reads`
-  exactly), plus user-declared classes.
+  Foldable, Traversable, and Read, plus user-declared classes.
+  - `Read` is a port of base's ReadP, ReadPrec, Text.Read.Lex and GHC.Read,
+    so what parses, what is ambiguous and what `reads` leaves over are
+    GHC's by construction, and derived Read is GHC's generated code.
+    ReadP's type is rank-2 (`forall b. (a -> P b) -> P b`); rhci fixes `b`
+    to `()` and coerces at the three places that instantiate it otherwise
+    (running a parser, `<++`, `gather`). The machine is untyped, so the
+    `coerce` primitive is the identity.
   - `Show` includes **`showList`**. That is the Report's trick that makes
     `"hi"` and `[['a'],"b"]` print as strings, so we use the class as
     specified rather than special-casing the printer.
@@ -242,8 +248,14 @@ list?". Printing goes through the `Show` dictionary like any other code.
 ### Prelude
 - **Written in Haskell** (`prelude/*.hs`), ported from base where possible.
   Ruby supplies only primitives: arithmetic and comparison per numeric
-  type, char/code point conversion, `showDouble`, `error`, `seq`, `putChar`
-  and `getLine`.
+  type, char/code point conversion and classification, `showDouble`,
+  `error`, `seq`, and handle IO (`hPutChar`, `getChar`, `getLine`, `isEOF`,
+  a lazily read stdin, `getArgs`, buffering modes).
+- **Data.Char is GHC's Unicode.** General categories, simple case
+  mappings and the Uppercase/Lowercase properties come from GHC itself:
+  `oracle/unicode/Tables.hs` dumps them in the oracle container and
+  `tools/gen_unicode.rb` packs them into `lib/rhci/unicode_data.rb`,
+  decoded on first use.
 - **Never compiled at startup.** A build step runs the Prelude through the
   whole pipeline and writes a **snapshot**: the type environment, class and
   instance tables, and the elaborated machine Core.
@@ -284,9 +296,25 @@ list?". Printing goes through the `Show` dictionary like any other code.
     because it's just an `IO ()` expression.
 - **Error classes:** parse, scope, type and runtime. The text is GHC-like
   but not GHC-exact, for example `*** Exception: Prelude.head: empty list`.
-- **Ctrl-C:** on CRuby an `INT` trap sets a flag the machine polls, and
-  GHCi prints `Interrupted.`. mruby has no signal handling, so Ctrl-C ends
-  the process there. That goes behind the runtime shim.
+- **stdin is shared** by Haskell code and the REPL, as in GHCi: a line
+  read by `getLine` is not seen by the prompt, and a character `isEOF`
+  looked ahead at is handed back to it. `getContents` is lazy and leaves
+  stdin semi-closed (later reads fail as in GHC), closed once the String
+  reaches its end. Buffering modes are remembered and reported (GHCi
+  starts with `NoBuffering`), but output always appears in program
+  order: stdout is flushed at each newline, before stderr is written and
+  before stdin is read.
+- **Ctrl-C** during evaluation prints `Interrupted.` and returns to the
+  prompt; thunks under evaluation are reset, so they can be demanded
+  again. The CLI installs the handler (the library never does):
+  - CRuby: an `INT` trap calls `Session#interrupt!`, whose flag the
+    machine polls every 4096 steps; a trap during a blocked stdin read
+    raises into the read instead.
+  - mruby: a C handler sets a flag (`Rhci::Term.take_sigint`) that the
+    machine polls the same way. mruby-io retries reads interrupted by a
+    signal, so the binary reads stdin itself, one byte at a time through
+    `Rhci::Term.read_byte`, which returns when Ctrl-C arrives.
+  Ctrl-C at the prompt abandons the line.
 
 ## 6. Deliverables
 
@@ -385,10 +413,15 @@ list?". Printing goes through the `Show` dictionary like any other code.
     the Prelude at startup (an estimated 0.5–1.5 s). Bytecode and the
     snapshot are mandatory. The snapshot is decoded eagerly unless the
     benchmarks force lazy, per-binding decoding.
-- **Line editor:** our own, because mruby has no readline. It has editing
-  keys, history, and Tab completion of names in scope. Raw mode comes from
-  a tiny C gem (`mrbgems/rhci-term`: termios, window size) next to the C
-  `main`. It's mruby-command only; the CRuby library has no terminal code.
+- **Line editor:** our own (`lib/rhci/line_editor.rb`), because mruby has
+  no readline. Emacs keys, xterm arrow/Home/End/Delete sequences, history
+  (`~/.rhci_history`, the last 1000 lines), and Tab completion of names in
+  scope, commands, and paths after `:load`. A line wider than the terminal
+  scrolls horizontally. Both executables use it when stdin and stdout are
+  a terminal; it talks to the terminal only through the shim, which uses
+  io/console on CRuby and the C helpers in `mrbgems/rhci/src/term.c`
+  (termios, window size, unbuffered reads, SIGINT, getenv, directory
+  listing) on mruby. Embedding code never reaches it.
 - **Command-line modes:**
   | form | meaning |
   |---|---|

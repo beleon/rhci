@@ -430,6 +430,8 @@ module Rhci
       # Start a new top-level evaluation: the step limit counts from here.
       def begin_evaluation
         @step_base = @steps
+        @interrupted = false
+        Shim.interrupt_pending? # a Ctrl-C from before this input is stale
       end
 
       # A character read ahead by isEOF that the REPL's own line reader
@@ -824,7 +826,7 @@ module Rhci
 
       def check_limits
         @next_check = @steps + CHECK_EVERY
-        if @interrupted
+        if @interrupted || Shim.interrupt_pending?
           @interrupted = false
           raise LimitExceeded, 'Interrupted.'
         end
@@ -854,6 +856,8 @@ module Rhci
         end
         flush_output
         ch = @input ? Shim.read_char(@input) : nil
+        raise LimitExceeded, 'Interrupted.' if ch == :interrupt
+
         ch&.ord
       end
 
