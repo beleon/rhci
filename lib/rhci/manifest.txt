@@ -18,5 +18,6 @@ rename
 typecheck
 desugar
 derive
+snapshot
 session
 cli

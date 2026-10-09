@@ -20,12 +20,26 @@ prelude = File.read(File.join(ROOT, 'prelude', 'Prelude.hs'))
 # An escaped literal, not a quoted heredoc: mruby still processes \\ and \'
 # inside <<'X' heredocs, which would alter the Haskell source.
 lib += "# ---- prelude/Prelude.hs\nRhci::PRELUDE_SOURCE = #{prelude.inspect}.freeze\n"
-File.write(File.join(ROOT, 'mrbgems', 'rhci', 'mrblib', 'rhci.rb'), header + lib)
+
+# The compiled Prelude (tools/snapshot.rb), regenerated on every bundle so it
+# cannot go stale; only the mruby binary embeds it.
+snap_path = File.join(ROOT, 'build', 'prelude.snapshot')
+system(RbConfig.ruby, File.join(ROOT, 'tools', 'snapshot.rb'), snap_path, exception: true)
+# mrbc rejects very long string literals, so it is embedded in pieces.
+text = File.read(snap_path)
+parts = []
+i = 0
+while i < text.length
+  parts << text[i, 30_000].inspect
+  i += 30_000
+end
+snapshot = "# ---- build/prelude.snapshot\nRhci::PRELUDE_SNAPSHOT_PARTS = [\n#{parts.join(",\n")}\n].freeze\n"
+File.write(File.join(ROOT, 'mrbgems', 'rhci', 'mrblib', 'rhci.rb'), header + lib + snapshot)
 
 tests = [File.join(ROOT, 'test', 'harness.rb'), File.join(ROOT, 'test', 'oracle.rb'),
          File.join(ROOT, 'test', 'core_sexp.rb')] +
         Dir[File.join(ROOT, 'test', 'unit', '*_test.rb')].sort
 Dir.mkdir(File.join(ROOT, 'build')) unless Dir.exist?(File.join(ROOT, 'build'))
 File.write(File.join(ROOT, 'build', 'test_bundle.rb'),
-           header + "RHCI_ROOT = #{ROOT.inspect}\n" + lib + tests.map { |t| section(t) }.join +
+           header + "RHCI_ROOT = #{ROOT.inspect}\n" + lib + snapshot + tests.map { |t| section(t) }.join +
            "exit(RT.run ? 0 : 1)\n")

@@ -37,6 +37,7 @@ def rhci_common(conf)
   conf.gem core: 'mruby-kernel-ext'
   conf.gem core: 'mruby-error'
   conf.gem core: 'mruby-exit'
+  conf.gem core: 'mruby-metaprog'    # instance_variable_set: the Prelude snapshot decoder only
 end
 
 MRuby::Build.new do |conf|

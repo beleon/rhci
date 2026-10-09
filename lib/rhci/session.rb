@@ -28,7 +28,11 @@ module Rhci
     # `:type`). :quit is the CLI's business.
     COMMANDS = %w[? help load quit reload type].freeze
 
-    def initialize(stdout: nil, stdin: nil, limits: nil)
+    # prelude: :source (compile prelude/Prelude.hs), :snapshot (decode the
+    # build-time snapshot), or :auto (the snapshot when this runtime has one
+    # embedded, as the mruby binary does).
+    def initialize(stdout: nil, stdin: nil, limits: nil, prelude: :auto)
+      @prelude_mode = prelude
       @stdout = stdout
       @stdin = stdin
       @limits = limits
@@ -243,6 +247,25 @@ module Rhci
 
     private
 
+    # The build-time snapshot text, if this runtime has one embedded.
+    # Lets a host (or a test) supply snapshot text explicitly.
+    def self.snapshot_text=(text)
+      @embedded_snapshot = text
+    end
+
+    def self.embedded_snapshot
+      return @embedded_snapshot if @embedded_snapshot
+      return PRELUDE_SNAPSHOT if Rhci.const_defined?(:PRELUDE_SNAPSHOT)
+      return nil unless Rhci.const_defined?(:PRELUDE_SNAPSHOT_PARTS)
+
+      @embedded_snapshot ||= PRELUDE_SNAPSHOT_PARTS.join
+    end
+
+    # What the snapshot captures after the Prelude has loaded.
+    def prelude_state
+      [@names, @tenv, @globals]
+    end
+
     def fixity_lookup
       table = @fixities
       ->(op) { table[op] || FixityResolver::BASE[op] || FixityResolver::DEFAULT }
@@ -254,6 +277,13 @@ module Rhci
       return if @prelude_loaded
 
       @prelude_loaded = true
+      snapshot = Session.embedded_snapshot
+      if @prelude_mode == :snapshot || (@prelude_mode == :auto && snapshot)
+        raise 'no Prelude snapshot is available' unless snapshot
+
+        @names, @tenv, @globals = Snapshot.decode(snapshot)
+        return
+      end
       m = Frontend.parse_module(PRELUDE_SOURCE, '<Prelude>', prelude: true)
       rtop = Renamer.new(@names, '<Prelude>', prelude: true).module_decls(m)
       tc = TypeChecker.new(@names, @tenv, '<Prelude>')
