@@ -108,4 +108,14 @@ RT.suite 'pipeline' do
                   'putStrLn (unlines (lines "x\\ny"))')
     RT.eq "café λ\nd bc a\nx\ny\n\n", out
   end
+
+  RT.test 'strict folds and multi-clause recursion run in constant stack' do
+    out = RT::FakeIO.new
+    s = Rhci::Session.new(stdout: out, limits: { stack: 500 })
+    %w[last\ [1..20000] sum\ [1..20000] length\ [1..20000] maximum\ [1..20000]].each do |e|
+      r = s.eval(e)
+      RT.ok r.ok?, "#{e}: #{r.status} #{r.message}"
+    end
+    RT.eq "20000\n200010000\n20000\n20000\n", out.written
+  end
 end

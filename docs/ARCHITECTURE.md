@@ -356,6 +356,22 @@ list?". Printing goes through the `Show` dictionary like any other code.
     mruby. The remaining big levers are fewer steps (better Core from the
     desugarer, unboxed arithmetic on known types) or a C machine for the
     mruby binary.
+  - **Through the real Prelude (step 5):** `sum [1..1000000]` first took
+    37 s on CRuby and 101 s on mruby, with memory growing with the list.
+    - **The memory growth was a tail-call bug.** Pattern-match failure
+      continuations were let-bound *thunks*, so a recursive call from a
+      later clause ran under the thunk's update frame. They are now
+      functions of a dummy argument.
+    - **Method calls at a known instance** now go straight to that
+      instance's implementation, and implementations that merely alias a
+      primitive are inlined (`x + y` at Integer is a single primitive
+      step). That took the cost from 39 to 28 steps per element.
+    - **Now:** about 26 s on CRuby and 46 s on mruby, in constant memory.
+- **Prelude snapshot (step 5):** compiling the ~1900-line Prelude takes
+  0.23 s on CRuby and about 0.34 s on mruby. Decoding the whole snapshot
+  eagerly was *slower* on mruby (0.54 s), so decoding is lazy: names and
+  types up front, each global's code on first use. `rhci -c '"Hello"'`
+  now takes about 44 ms.
   - **Interactive: a usable prompt in under 10 ms**, meaning the prompt is
     printed and keystrokes are accepted. The order is: load bytecode, put
     the terminal in raw mode, print the prompt, *then* decode the Prelude

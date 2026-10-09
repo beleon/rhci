@@ -116,7 +116,9 @@ module Rhci
     # dicts: [[Ev, core name], ...] -- dictionary parameters the checker
     # abstracted the binding over: shared by an unsigned group, or the
     # binding's own when checked against a signature (signed: true).
-    attr_accessor :deps, :dicts, :signed
+    # prim_alias: for a method implementation that is just `m = prim`, the
+    # primitive's Name (the desugarer then inlines saturated calls).
+    attr_accessor :deps, :dicts, :signed, :prim_alias
 
     def initialize(kind, tok, name: nil, eqs: nil, pat: nil, rhs: nil, names: [])
       @kind = kind
@@ -452,6 +454,11 @@ module Rhci
       end
       out.each_value do |b|
         b.eqs.each { |eq| equation(eq, b.name) }
+        eq = b.eqs[0]
+        body = eq.rhs.body
+        if b.eqs.length == 1 && eq.pats.empty? && body.is_a?(Var) && !eq.rhs.where && body.ref&.prim
+          b.prim_alias = body.ref
+        end
       end
       out
     end

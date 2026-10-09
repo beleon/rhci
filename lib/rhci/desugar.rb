@@ -211,6 +211,24 @@ module Rhci
       (node.ev || []).map { |e| ev_core(e) }
     end
 
+    # A method occurrence whose class constraint was solved by an instance
+    # that implements the method: [implementation RBind, the dictionaries to
+    # pass it (the instance context's, then the method's own)]. The
+    # dictionary is then never built or searched at run time.
+    def known_method(node)
+      m = node.ref
+      return nil unless m.is_a?(Name) && m.method_of && node.ev && !node.ev.empty?
+
+      sol = node.ev[0].solution
+      sol = sol[1].solution while sol && sol[0] == :same
+      return nil unless sol && sol[0] == :inst
+
+      b = sol[1].binds[m]
+      return nil unless b
+
+      [b, sol[2].map { |e| ev_core(e) } + node.ev[1..-1].map { |e| ev_core(e) }]
+    end
+
     # The instance an Ev was solved by (following :same), or nil.
     def solved_instance(ev)
       sol = ev.solution
@@ -295,10 +313,10 @@ module Rhci
       inner = if r.body
                 expr(r.body)
               else
-                f = fresh('fail')
-                acc = var(f)
+                bind, call = fail_continuation(fail)
+                acc = call
                 r.guards.reverse_each { |quals, e| acc = guard(quals, expr_thunk(e), acc) }
-                C::Let.new([[f, fail]], acc)
+                C::Let.new([bind], acc)
               end
       groups(r.groups, inner)
     end
@@ -327,14 +345,25 @@ module Rhci
 
     # ---- pattern matching ------------------------------------------------------------
 
+    # A failure continuation: a function of a dummy argument, not a thunk.
+    # Trying the next clause must be a tail call -- as a thunk, every
+    # recursive call made from a later clause would run under that thunk's
+    # update frame, so `last (_:xs) = last xs` would grow the stack.
+    # Returns [let binding, Core that invokes it].
+    def fail_continuation(core)
+      f = fresh('fail')
+      u = fresh('u')
+      [[f, C::Lam.new([u], core)], C::App.new(var(f), [C::Con.new(B::UNIT, [])])]
+    end
+
     # clauses: [[pats, payload], ...]; the block turns a payload into Core
     # given the failure Core. Clause k's failure tries clauses k+1...
     def match_clauses(vars, clauses, fail, &body)
       acc = fail
       clauses.reverse_each do |pats, payload|
-        f = fresh('fail')
-        clause = mp(vars.zip(pats), -> { body.call(payload, var(f)) }, var(f))
-        acc = C::Let.new([[f, acc]], clause)
+        bind, call = fail_continuation(acc)
+        clause = mp(vars.zip(pats), -> { body.call(payload, call) }, call)
+        acc = C::Let.new([bind], clause)
       end
       acc
     end
@@ -451,6 +480,11 @@ module Rhci
     def expr(e)
       case e
       when Var
+        if (km = known_method(e))
+          b, dicts = km
+          return dicts.empty? ? var(b.name.core) : C::App.new(var(b.name.core), dicts)
+        end
+
         ev = evidence(e)
         ev.empty? ? reference(e.ref) : C::App.new(reference(e.ref), ev)
       when Con, TupleCon then constructor(e.ref, [])
@@ -620,6 +654,13 @@ module Rhci
       ref = fn.respond_to?(:ref) ? fn.ref : nil
       if (fn.is_a?(Var) || fn.is_a?(Con) || fn.is_a?(TupleCon)) && ref.is_a?(Name)
         return constructor(ref, args) if ref.kind == :con
+
+        km = fn.is_a?(Var) ? known_method(fn) : nil
+        if km && km[1].empty? && (p = km[0].prim_alias) && args.length >= p.prim_arity
+          head = prim_call(p.prim, args[0, p.prim_arity])
+          extra = args[p.prim_arity..-1]
+          return extra.empty? ? head : C::App.new(head, extra)
+        end
         if ref.prim && args.length >= ref.prim_arity
           head = prim_call(ref.prim, args[0, ref.prim_arity])
           extra = args[ref.prim_arity..-1]
