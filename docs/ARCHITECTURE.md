@@ -152,7 +152,8 @@ modes are needed, and they have to be tested separately:
   and instance heads of the form `C (T a1 … an)` with contexts. That covers
   Eq, Ord, Show, Enum, Bounded, Num, Real, Integral, Fractional, Floating,
   RealFrac, RealFloat, Semigroup, Monoid, Functor, Applicative, Monad,
-  Foldable, Traversable, plus user-declared classes.
+  Foldable, Traversable, and Read (needed by `rghci -a`, and it must
+  match GHC's `reads` exactly), plus user-declared classes.
   - `Show` includes **`showList`**. That is the Report's trick that makes
     `"hi"` and `[['a'],"b"]` print as strings, so we use the class as
     specified rather than special-casing the printer.
@@ -308,18 +309,45 @@ list?". Printing goes through the `Show` dictionary like any other code.
   (`mrbgems/rghci-bin`). It has a small C `main` that loads the
   compiled bundle and the Prelude snapshot from **bytecode embedded in the
   binary** (`mrbc -B`). Ruby source is never parsed at startup.
-- **Startup budget, measured on this machine:** `bash -c exit` and
-  `bash --norc -i -c exit` take about **1.5 ms**. An empty mruby takes
-  1.3 ms. Loading 5k lines of Ruby takes **2.7 ms as bytecode** but
-  **10.7 ms as source**.
-  - **Target:** `rghci` reaches its prompt in **under 10 ms on this
-    machine** (measured with `echo :q | rghci`). It's enforced by a
-    benchmark test from build step 1 on, so every later step is held to it.
-  - The budget rules out two things: parsing Ruby source at startup (the
-    bundle will be well over 5k lines), and compiling the Prelude at
-    startup. Bytecode and the snapshot stay. Lazy decoding of the snapshot
-    and moving setup work behind first use are tools to reach for only if
-    the measurement says so.
+- **Startup budget, measured on this machine:** `bash -c exit` takes
+  about 1.5 ms. An empty mruby takes 1.3 ms. Loading 5k lines of Ruby
+  takes 2.7 ms as bytecode but 10.7 ms as source. Lexing and parsing 2000
+  lines of Haskell with the old front end took 550 ms. Allocating an
+  object costs about 0.5 µs, and a 20k-node snapshot written as Ruby code
+  loads in 11.6 ms.
+  - **Interactive: a usable prompt in under 10 ms**, meaning the prompt is
+    printed and keystrokes are accepted. The order is: load bytecode, put
+    the terminal in raw mode, print the prompt, *then* decode the Prelude
+    snapshot. Anything typed while the snapshot decodes waits in the tty
+    buffer, so Enter or Tab just run once it's done. No threads and no
+    background loading are needed.
+  - **`rghci -c …` finishes in under 200 ms** end to end for a simple
+    expression.
+  - Both are enforced by benchmark tests from build step 1 on.
+  - Together these rule out parsing Ruby source at startup and compiling
+    the Prelude at startup (an estimated 0.5–1.5 s). Bytecode and the
+    snapshot are mandatory. The snapshot is decoded eagerly unless the
+    benchmarks force lazy, per-binding decoding.
+- **Line editor:** our own, because mruby has no readline. It has editing
+  keys, history, and Tab completion of names in scope. Raw mode comes from
+  a tiny C gem (`mrbgems/rghci-term`: termios, window size) next to the C
+  `main`. It's mruby-command only; the CRuby library has no terminal code.
+- **Command-line modes.** The flag letters are tentative. The axes are
+  orthogonal:
+  | flag | meaning |
+  |---|---|
+  | `-c EXPR` | EXPR is a **pure value**. An `IO` type is an error that points at `-x`. |
+  | `-x EXPR` | EXPR is an **IO action** and is run. A non-IO type is an error. |
+  | `-a ARGS…` | **Typed application:** EXPR is a function, and each argument is parsed with `Read` at the inferred parameter type. `String` parameters are taken verbatim. The arity must equal the argument count. Ambiguous parameter types default as at the prompt, so `rghci -c '(+)' -a 3 4.5` fails with a parse error on `4.5`, as `read "4.5" :: Integer` does. |
+  | `-g ARGS…` | The arguments are only visible to `getArgs` (`System.Environment`). Useful with `-x`. |
+  | `-i` | **interact:** after any `-a` arguments, EXPR is applied to stdin as a lazy `String` (`String -> String`, or `String -> IO t` with `-x`). Output streams as it's produced. |
+  - **Output rule:** a result of type `String` is written raw with
+    `putStr` (no quotes, escapes become real characters, no newline
+    added), so `-c '"Hello\n"'` writes `Hello` and a newline. Any other
+    type is written with `print` (`show` plus newline). For `-x`, the
+    result of the action is written by the same rule unless it's `()`.
+  - **Exit status:** 0 on success. Distinct non-zero codes for a parse,
+    scope or type error, an uncaught exception, and a usage error.
 - `MRB_CALL_LEVEL_MAX=100000` is set in the build config (see below).
 
 ## 7. Dual-runtime discipline
