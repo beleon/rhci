@@ -13,6 +13,7 @@ core
 unicode_data
 unicode
 vm
+simplify
 lower
 types
 base_names

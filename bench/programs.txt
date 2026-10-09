@@ -1,0 +1,13 @@
+# name | expression (run with rhci -c; one line each)
+sum        | sum [1..100000]
+sumInt     | sum [1..100000 :: Int]
+foldl'     | foldl' (+) 0 [1..100000 :: Int]
+mapfilter  | length (filter even (map (*3) [1..100000]))
+fib        | let fib :: Int -> Int; fib n = if n < 2 then n else fib (n-1) + fib (n-2) in fib 20
+queens     | let q n = foldr (\_ bs -> [b ++ [c] | b <- bs, c <- [1..n], safe c b]) [[]] [1..n]; safe c b = and [c /= x && abs (c - x) /= d | (d, x) <- zip [length b, length b - 1 ..] b] in length (q (7 :: Int))
+sort       | sum (take 10 (sort [ (i * 7919) `mod` 10007 | i <- [1..5000 :: Int] ]))
+show       | length (unwords (map show [1..20000 :: Int]))
+read       | sum (map read (words (unwords (map show [1..1000 :: Int])))) :: Int
+double     | sum (map sqrt [1..50000 :: Double])
+words      | length (words (concat (replicate 2000 "hello world, foo bar ")))
+integer    | length (show (product [1..2000 :: Integer]))

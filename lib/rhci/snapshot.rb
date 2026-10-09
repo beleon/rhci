@@ -32,7 +32,11 @@ module Rhci
         'Rhci::VM::XLocal' => VM::XLocal, 'Rhci::VM::XEnv' => VM::XEnv, 'Rhci::VM::XGlobal' => VM::XGlobal,
         'Rhci::VM::XValue' => VM::XValue, 'Rhci::VM::XApp' => VM::XApp, 'Rhci::VM::XLet' => VM::XLet,
         'Rhci::VM::XCase' => VM::XCase, 'Rhci::VM::XCon' => VM::XCon, 'Rhci::VM::XPrim' => VM::XPrim,
-        'Rhci::VM::XStr' => VM::XStr
+        'Rhci::VM::XStr' => VM::XStr,
+        'Rhci::Core::Var' => Core::Var, 'Rhci::Core::Lit' => Core::Lit, 'Rhci::Core::Str' => Core::Str,
+        'Rhci::Core::App' => Core::App, 'Rhci::Core::Lam' => Core::Lam, 'Rhci::Core::Let' => Core::Let,
+        'Rhci::Core::Case' => Core::Case, 'Rhci::Core::Alt' => Core::Alt, 'Rhci::Core::Con' => Core::Con,
+        'Rhci::Core::Prim' => Core::Prim
       }.each { |k, v| CLASSES[k] = v }
     end
 
@@ -57,7 +61,7 @@ module Rhci
       @singletons = s
     end
 
-    # Session state from encoded text: [NameEnv, tenv, globals]. Only what
+    # Session state from encoded text: [NameEnv, tenv, globals, unfoldings]. Only what
     # renaming and type checking need is decoded now; each global's value
     # (its compiled code) is decoded when the machine first reads it.
     def self.decode(text)

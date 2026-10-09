@@ -595,6 +595,21 @@ module Rhci
                   if sv.is_a?(Thunk)
                     sv = sv[0] == :value ? sv[1] : nil
                   end
+                elsif so == OP_PRIM && sc.strict
+                  # A primitive scrutinee needs no frame: its operands are
+                  # already values.
+                  pa = sc.args
+                  a = pa[0]
+                  x = a.is_a?(Integer) ? (a >= 0 ? locals[a] : env[-a - 1]) : a.value
+                  if pa.length == 2
+                    a = pa[1]
+                    y = a.is_a?(Integer) ? (a >= 0 ? locals[a] : env[-a - 1]) : a.value
+                    bad_operand(sc) if x.is_a?(Thunk) || y.is_a?(Thunk)
+                    sv = __send__(sc.meth, x, y)
+                  else
+                    bad_operand(sc) if x.is_a?(Thunk)
+                    sv = __send__(sc.meth, x)
+                  end
                 end
                 if sv.nil?
                   stack.push(env)

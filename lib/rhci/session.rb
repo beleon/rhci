@@ -43,6 +43,13 @@ module Rhci
       @names = NameEnv.new
       @tenv = {}
       @globals = {}
+      # Simplified Core of small global functions and constants, for
+      # inlining across definitions (name => VM::Cell holding Core); the
+      # Core of dictionary-abstracted functions, for specialisation; and the
+      # specialisations made so far (key => global name).
+      @unfoldings = {}
+      @full_cores = {}
+      @specs = {}
       @fixities = {}
       @machine = VM::Machine.new(stdout, limits, input: stdin, err: stderr)
       @prelude_loaded = false
@@ -531,7 +538,7 @@ module Rhci
 
     # What the snapshot captures after the Prelude has loaded.
     def prelude_state
-      [@names, @tenv, @globals]
+      [@names, @tenv, @globals, @unfoldings, @full_cores, @specs]
     end
 
     def fixity_lookup
@@ -549,7 +556,7 @@ module Rhci
       if @prelude_mode == :snapshot || (@prelude_mode == :auto && snapshot)
         raise 'no Prelude snapshot is available' unless snapshot
 
-        @names, @tenv, @globals = Snapshot.decode(snapshot)
+        @names, @tenv, @globals, @unfoldings, @full_cores, @specs = Snapshot.decode(snapshot)
         capture_baseline
         return
       end
@@ -577,16 +584,72 @@ module Rhci
 
     def install(defs)
       cells = defs.map { |name, _| VM::Cell.new(name) }
-      table = @globals.dup
-      cells.each { |c| table[c.name] = c }
-      lower = Lower.new(table)
-      values = defs.map { |name, core| lower.global_value(name, core) }
+      cells.each { |c| @globals[c.name] = c }
+      values = defs.map { |name, core| compile_global(name, core) }
       cells.each_with_index { |c, i| c.value = values[i] }
-      @globals = table
+    end
+
+    # Simplified, recorded for inlining and specialisation, and lowered.
+    def compile_global(name, core)
+      core = lift_fields(name, simplifier.run(core))
+      u = Simplify.unfolding(name, core)
+      @unfoldings[name] = VM::Cell.new(name, u) if u
+      if core.is_a?(Core::Lam) && core.params[0].to_s.start_with?('dict%')
+        @full_cores[name] = VM::Cell.new(name, core)
+      end
+      Lower.new(@globals).global_value(name, core)
+    end
+
+    # A top-level constructor application (a dictionary, mostly) with
+    # non-atomic fields gets each such field as a global of its own, so the
+    # value is a constant the simplifier can see through.
+    def lift_fields(name, core)
+      return core unless core.is_a?(Core::Con)
+
+      args = []
+      core.args.each do |a|
+        if a.is_a?(Core::Var) || a.is_a?(Core::Lit)
+          args << a
+          next
+        end
+        field = "#{name}$#{args.length}"
+        cell = VM::Cell.new(field)
+        @globals[field] = cell
+        cell.value = compile_global(field, a)
+        args << Core::Var.new(field)
+      end
+      Core::Con.new(core.con, args)
+    end
+
+    def simplifier
+      Simplify.new(@unfoldings, ->(name, dicts) { specialize(name, dicts) })
+    end
+
+    SPEC_LIMIT = 5000
+
+    # The global specialising `name` to the dictionaries `dicts` (closed
+    # Core), made on first request; nil if `name` cannot be specialised.
+    def specialize(name, dicts)
+      key = "#{name}@#{dicts.map { |d| Simplify.key(d) }.join(',')}"
+      return @specs[key] if @specs.key?(key)
+
+      full = @full_cores[name]&.value
+      return nil unless full.is_a?(Core::Lam) && @specs.length < SPEC_LIMIT
+
+      n = dicts.length
+      n = full.params.length if n > full.params.length
+      binds = []
+      n.times { |i| binds << [full.params[i], dicts[i]] }
+      body = n < full.params.length ? Core::Lam.new(full.params[n..-1], full.body) : full.body
+      @specs[key] = key
+      cell = VM::Cell.new(key)
+      @globals[key] = cell
+      cell.value = compile_global(key, Core::Let.new(binds, body))
+      key
     end
 
     def eval_core(core)
-      code = Lower.new(@globals).expression(core)
+      code = Lower.new(@globals).expression(simplifier.run(core))
       @machine.eval_code(code)
     end
 

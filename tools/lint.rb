@@ -25,6 +25,7 @@ RULES = [
   [/^\s*in\s/, 'case/in pattern matching is not used'],
   [/\.to_s\b.*Float|Float.*\.to_s\b/, 'never print Floats with Ruby (mruby uses %.15g)'],
   [/[^_]\bsend\(/, 'Module#send is missing on mruby; dispatch explicitly'],
+  [/\bmethod\(:/, 'Object#method is missing on mruby; use a lambda'],
   [/\$!/, 'mruby leaves $! nil inside a rescue modifier; use begin/rescue => e'],
   [/(?<!Text)\.(strip|lstrip|rstrip)\b/, 'mruby rstrip/strip leave trailing spaces on non-ASCII strings; use Rhci::Text'],
   [/^\s*raise\s*$/, 'a bare `raise` does not re-raise on mruby; use `rescue => e` and `raise e`'],
