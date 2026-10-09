@@ -239,11 +239,10 @@ list?". Printing goes through the `Show` dictionary like any other code.
 - **Never compiled at startup.** A build step runs the Prelude through the
   whole pipeline and writes a **snapshot**: the type environment, class and
   instance tables, and the elaborated machine Core.
-  - The snapshot is stored **per binding, in a compact encoded form,
-    materialised lazily** on first reference. Startup then costs
-    nothing per Prelude definition, and a session pays only for what it
-    uses. `:t map` decodes one type, and `sum [1..10]` decodes the
-    handful of bindings it reaches.
+  - The snapshot is stored **per binding**, so it *can* be decoded lazily
+    on first reference (`:t map` would decode one type). Start with eager
+    decoding, and switch to lazy only if the startup benchmark says the
+    eager version doesn't fit the budget.
   - Compiled code and types are shared and read-only. **CAFs (top-level
     thunks) are instantiated per session**, because evaluating one mutates
     it, and two embedded sessions must never share mutable heap.
@@ -313,13 +312,14 @@ list?". Printing goes through the `Show` dictionary like any other code.
   `bash --norc -i -c exit` take about **1.5 ms**. An empty mruby takes
   1.3 ms. Loading 5k lines of Ruby takes **2.7 ms as bytecode** but
   **10.7 ms as source**.
-  - **Target:** `rghci` reaching its prompt (measured with
-    `echo :q | rghci`) costs **at most 2× `bash --norc -i -c exit`** on the
-    same machine. It's enforced by a benchmark test from build step 1 on,
-    so every later step is held to it.
-  - That is why the Prelude snapshot is lazy (§4). It's also why
-    load-time work in the bundle (big constant tables, eager class
-    setup) gets measured and moved behind first use.
+  - **Target:** `rghci` reaches its prompt in **under 10 ms on this
+    machine** (measured with `echo :q | rghci`). It's enforced by a
+    benchmark test from build step 1 on, so every later step is held to it.
+  - The budget rules out two things: parsing Ruby source at startup (the
+    bundle will be well over 5k lines), and compiling the Prelude at
+    startup. Bytecode and the snapshot stay. Lazy decoding of the snapshot
+    and moving setup work behind first use are tools to reach for only if
+    the measurement says so.
 - `MRB_CALL_LEVEL_MAX=100000` is set in the build config (see below).
 
 ## 7. Dual-runtime discipline
