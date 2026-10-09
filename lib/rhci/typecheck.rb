@@ -1018,8 +1018,8 @@ module Rhci
 
     def infer_inner(e)
       case e
+      when Con, TupleCon then con_type(e, e.ref) # before Var: Con is a subclass of Var
       when Var then var_type(e, e.ref)
-      when Con, TupleCon then con_type(e, e.ref)
       when Lit then lit_type(e, e)
       when App
         f = infer(e.fn)

@@ -15,6 +15,13 @@ module Rhci
       Process.clock_gettime(Process::CLOCK_MONOTONIC)
     end
 
+    # Contents of a file, or nil if it does not exist.
+    def self.read_file(path)
+      return nil unless File.exist?(path)
+
+      File.read(path)
+    end
+
     def self.read_line(io)
       io.gets
     end

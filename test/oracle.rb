@@ -70,7 +70,7 @@ module Oracle
     return :command if t.start_with?('unknown command') || t.include?('not an expression')
     return :scope if t.include?('not in scope') || t.include?('Not in scope')
     return :runtime if t.include?('*** Exception')
-    return :compile if t.include?('error:') || t.include?('error: [')
+    return :compile if t.include?('error:') || t.include?('Module graph contains a cycle')
 
     :ok
   end

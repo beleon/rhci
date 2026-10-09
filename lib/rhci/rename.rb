@@ -243,9 +243,20 @@ module Rhci
     }.freeze
 
     # fixity: lookup of an operator's [assoc, prec] (for derived Show).
-    def initialize(env, source = '<interactive>', prelude: false, fixity: nil)
+    # imported: {values:, types:} visible from local modules a file imports
+    # (a value may be an Array of Names: ambiguous). module_mode: a file,
+    # where a name defined or imported there that clashes with one the
+    # Prelude (or an explicitly imported base module) provides is ambiguous.
+    # official: base modules the file imports; hidden: Prelude names it hides.
+    def initialize(env, source = '<interactive>', prelude: false, fixity: nil, imported: nil,
+                   module_mode: false, official: [], hidden: [])
       @env = env
       @fixity = fixity
+      @imported = imported || { values: {}, types: {} }
+      @module_mode = module_mode
+      @official = official
+      @hidden = {}
+      hidden.each { |h| @hidden[h] = true }
       @source = source
       @prelude = prelude
       @scopes = []
@@ -285,10 +296,12 @@ module Rhci
     end
 
     def check_import(imp)
-      return if KNOWN_MODULES.key?(imp.module_name)
+      return if KNOWN_MODULES.key?(imp.module_name) || @imported_modules&.include?(imp.module_name)
 
       raise Error.new(:scope, "Could not find module ‘#{imp.module_name}’", imp.tok.line, imp.tok.col, @source)
     end
+
+    attr_writer :imported_modules
 
     KNOWN_MODULES = {}
     %w[Prelude Data.List Data.Maybe Data.Char Data.Tuple Data.Function Data.Ord Data.Either
@@ -314,13 +327,34 @@ module Rhci
 
         i -= 1
       end
-      @top.values[str] || @env.values[str] || (@allow_internal && str.start_with?('rhci_') ? @env.internal[str] : nil)
+      own = @top.values[str] || @imported[:values][str]
+      base = @hidden.key?(str) ? nil : @env.values[str]
+      if @module_mode && own
+        candidates = own.is_a?(Array) ? own.dup : [own]
+        candidates << base if base && official?(BASE_VALUES[str]) && !candidates.include?(base)
+        return candidates[0] if candidates.length == 1
+
+        raise Error.new(:compile, "Ambiguous occurrence ‘#{str}’", nil, nil, @source)
+      end
+      own || base || (@allow_internal && str.start_with?('rhci_') ? @env.internal[str] : nil)
+    end
+
+    # A base module whose names count as imported by the file being renamed.
+    def official?(mod)
+      mod == 'Prelude' || @official.include?(mod)
     end
 
     def resolve_value(node, str, qual, what)
       unsupported(node.tok, 'qualified names') if qual
-      n = lookup_value(str)
+      begin
+        n = lookup_value(str)
+      rescue Error => e
+        raise Error.new(e.kind, e.detail, node.tok&.line, node.tok&.col, @source)
+      end
       if n.nil?
+        if what == :con && (@top.types[str] || @imported[:types][str] || @env.types[str])
+          err(:compile, node.tok, "Illegal term-level use of the type constructor or class ‘#{str}’")
+        end
         not_yet(node.tok, str, BASE_VALUES[str])
         msg = what == :con ? "Data constructor not in scope: #{str}" : "Variable not in scope: #{str}"
         err(:scope, node.tok, msg)
@@ -332,7 +366,7 @@ module Rhci
     def lookup_type(tok, str)
       return @env.tuple_con(str.length - 1).tyinfo.name if str.start_with?('(,')
 
-      n = @top.types[str] || @env.types[str]
+      n = @top.types[str] || @imported[:types][str] || (@hidden.key?(str) ? nil : @env.types[str])
       unless n
         not_yet(tok, str, BASE_TYPES[str])
         err(:scope, tok, "Not in scope: type constructor or class ‘#{str}’")
@@ -800,8 +834,8 @@ module Rhci
 
     def expr(e)
       case e
+      when Con then e.ref = con_ref(e) # before Var: Con is a subclass of Var
       when Var then e.ref = resolve_value(e, e.name, e.qual, :var)
-      when Con then e.ref = con_ref(e)
       when TupleCon then e.ref = @env.tuple_con(e.arity)
       when Lit, Hole then nil
       when Wildcard then err(:compile, e.tok, 'Found hole: _')

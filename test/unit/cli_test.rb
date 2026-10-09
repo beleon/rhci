@@ -56,6 +56,6 @@ RT.suite 'CLI' do
   RT.test 'files given to the REPL are not silently ignored' do
     err = RT::FakeIO.new
     RT.eq 0, Rhci::CLI.main(['Foo.hs'], stdin: RT::FakeIO.new(":q\n"), stdout: RT::FakeIO.new, stderr: err)
-    RT.eq "unsupported: :load is not implemented yet\n", err.written
+    RT.eq "can't find file: Foo.hs\nFailed, no modules loaded.\n", err.written
   end
 end

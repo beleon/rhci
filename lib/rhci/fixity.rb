@@ -116,6 +116,40 @@ module Rhci
       end
     end
 
+    # Fixities of the names one declaration group binds.
+    def group_layer(decls)
+      bound = {}
+      fix = {}
+      decls.each do |d|
+        case d
+        when FunEq then bound[d.name] = true
+        when ForeignPrim then bound[d.name] = true
+        when PatBind then pat_vars(d.pat).each { |n| bound[n] = true }
+        when FixityDecl then d.ops.each { |o| fix[o] = [d.assoc, d.prec] }
+        when DataDecl
+          d.cons.each do |c|
+            bound[c.name] = true
+            c.field_names&.each { |f| bound[f] = true }
+          end
+        when ClassDecl
+          d.decls.each do |x|
+            x.names.each { |n| bound[n] = true } if x.is_a?(TypeSig)
+            x.ops.each { |o| fix[o] = [x.assoc, x.prec] } if x.is_a?(FixityDecl)
+          end
+        end
+      end
+      layer = {}
+      bound.each_key { |n| layer[n] = fix[n] || DEFAULT }
+      fix.each_key do |n|
+        next if bound.key?(n)
+
+        tok = decls.find { |d| d.is_a?(FixityDecl) && d.ops.include?(n) }&.tok
+        raise Error.new(:compile, "The fixity signature for ‘#{n}’ lacks an accompanying binding",
+                        tok&.line, tok&.col, @source)
+      end
+      layer
+    end
+
     private
 
     def error(tok, msg)
@@ -303,39 +337,7 @@ module Rhci
       pushed.times { @scopes.pop } if pushed
     end
 
-    # Fixities of the names one declaration group binds.
-    def group_layer(decls)
-      bound = {}
-      fix = {}
-      decls.each do |d|
-        case d
-        when FunEq then bound[d.name] = true
-        when ForeignPrim then bound[d.name] = true
-        when PatBind then pat_vars(d.pat).each { |n| bound[n] = true }
-        when FixityDecl then d.ops.each { |o| fix[o] = [d.assoc, d.prec] }
-        when DataDecl
-          d.cons.each do |c|
-            bound[c.name] = true
-            c.field_names&.each { |f| bound[f] = true }
-          end
-        when ClassDecl
-          d.decls.each do |x|
-            x.names.each { |n| bound[n] = true } if x.is_a?(TypeSig)
-            x.ops.each { |o| fix[o] = [x.assoc, x.prec] } if x.is_a?(FixityDecl)
-          end
-        end
-      end
-      layer = {}
-      bound.each_key { |n| layer[n] = fix[n] || DEFAULT }
-      fix.each_key do |n|
-        next if bound.key?(n)
 
-        tok = decls.find { |d| d.is_a?(FixityDecl) && d.ops.include?(n) }&.tok
-        raise Error.new(:compile, "The fixity signature for ‘#{n}’ lacks an accompanying binding",
-                        tok&.line, tok&.col, @source)
-      end
-      layer
-    end
 
     def pats_vars(pats)
       names = []

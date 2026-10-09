@@ -7,7 +7,9 @@
 #   outcome    ok / parse / scope / compile / runtime error class
 #   output     identical stdout when both succeed
 # Refusals are counted, not hidden: see the coverage line printed below.
-sem_probes = Oracle.load(File.join(RHCI_ROOT, 'oracle', 'golden-ghc-9.6.7.txt'))
+sem_probes = Oracle.load(File.join(RHCI_ROOT, 'oracle', 'golden-ghc-9.6.7.txt')) +
+             Oracle.load(File.join(RHCI_ROOT, 'oracle', 'golden-load-ghc-9.6.7.txt'))
+SEM_FILES = File.join(RHCI_ROOT, 'oracle', 'files')
 sem_gaps = Oracle.known_gaps(File.join(RHCI_ROOT, 'oracle', 'known_gaps.txt'), 'semantics')
 sem_sections = []
 sem_probes.each { |p| sem_sections << p.section unless sem_sections.include?(p.section) }
@@ -29,7 +31,7 @@ RT.suite 'oracle: semantics' do
       out = RT::FakeIO.new
       # Speed is not what this checks: each input gets a step budget, and
       # one that exhausts it is skipped (counted), not failed.
-      session = Rhci::Session.new(stdout: out, limits: { steps: 3_000_000 })
+      session = Rhci::Session.new(stdout: out, limits: { steps: 3_000_000 }, cwd: SEM_FILES)
       problems = []
       sem_probes.each do |p|
         next unless p.section == title
@@ -51,7 +53,11 @@ RT.suite 'oracle: semantics' do
         want = Oracle.outcome(p.text)
         got_out = out.written[before..-1]
         word, arg = p.input[1..-1].to_s.split(' ', 2)
-        if p.input.start_with?(':') && Rhci::Session.command_name(word.to_s) == 'type' && want == :ok
+        command = p.input.start_with?(':') ? Rhci::Session.command_name(word.to_s) : nil
+        if %w[load reload].include?(command)
+          # GHCi ran with -v0 (no "Ok, ... loaded."): compare the outcome only.
+          problems << "#{p.input.inspect}: GHCi #{want}, rhci #{ours} (#{r.message})" if ours != want
+        elsif command == 'type' && want == :ok
           if ours != :ok
             problems << "#{p.input}: GHCi gives a type, rhci #{ours}: #{r.message}"
             next

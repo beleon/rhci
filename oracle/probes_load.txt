@@ -1,0 +1,61 @@
+## L1. Loading a module with an export list
+:load Geometry
+area (Circle 1)
+perimeter (Rect 2 3)
+scale 2 (Rect 1 1)
+helper
+:t area
+Circle 1 == Circle 1
+
+## L2. A main module importing a local module
+:load Main
+main
+shapes
+:t shapes
+area (Rect 2 2)
+
+## L3. Prompt bindings are discarded by :load
+x = 5
+x
+:load Geometry
+x
+
+## L4. The monomorphism restriction and defaulting in files
+:load Mono
+:t plus
+:t n
+:t pair
+:t twice
+:t avg
+big
+plus 2 3
+:t big
+
+## L5. A clash with Prelude, and hiding
+:load Clash
+:load Hiding
+test
+lookup 2
+
+## L6. A failed load leaves only the Prelude
+:load Geometry
+:load Broken
+area (Circle 1)
+map (+1) [1, 2]
+
+## L7. Import cycles, missing modules
+:load CycA
+:load NoSuchModule
+
+## L8. Hierarchical modules and abstract types
+:load UseStack
+top
+toList' s3
+:t s3
+Stack [1]
+
+## L9. :reload
+:load Geometry
+:reload
+area (Rect 3 3)
+:r

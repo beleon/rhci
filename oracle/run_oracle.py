@@ -6,7 +6,9 @@ Probe file format:
   :{ ... :}       a multi-line input, sent as one probe
   anything else   one GHCi input line
 
-Usage: uv run --no-project python run_oracle.py probes.txt > golden.txt
+Usage: uv run --no-project python run_oracle.py probes.txt [--files DIR] > golden.txt
+
+With --files, DIR is mounted as GHCi's working directory (for :load).
 """
 import subprocess
 import sys
@@ -39,13 +41,17 @@ def parse(path):
     return sections
 
 
+FILES = None
+
+
 def run_section(inputs):
     script = []
     for inp in inputs:
         script.append(inp)
         script.append(f":! echo {SEP}")
+    mount = ["-v", f"{FILES}:/w:Z", "-w", "/w"] if FILES else []
     proc = subprocess.run(
-        ["podman", "run", "--rm", "-i", IMAGE, "sh", "-c",
+        ["podman", "run", "--rm", "-i", *mount, IMAGE, "sh", "-c",
          "timeout 120 ghci -ignore-dot-ghci -v0 -fdiagnostics-color=never 2>&1"],
         input="\n".join(script) + "\n", capture_output=True, text=True,
     )
@@ -54,6 +60,10 @@ def run_section(inputs):
 
 
 def main():
+    global FILES
+    if "--files" in sys.argv:
+        import os
+        FILES = os.path.abspath(sys.argv[sys.argv.index("--files") + 1])
     for sec in parse(sys.argv[1]):
         inputs = [t for k, t in sec["items"] if k == "in"]
         outs = iter(run_section(inputs))

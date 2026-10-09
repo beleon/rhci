@@ -479,6 +479,7 @@ module Rhci
 
     def expr(e)
       case e
+      when Con, TupleCon then constructor(e.ref, []) # before Var: Con is a subclass of Var
       when Var
         if (km = known_method(e))
           b, dicts = km
@@ -487,7 +488,6 @@ module Rhci
 
         ev = evidence(e)
         ev.empty? ? reference(e.ref) : C::App.new(reference(e.ref), ev)
-      when Con, TupleCon then constructor(e.ref, [])
       when Lit then literal(e)
       when Neg then negation(e)
       when ArithSeq then arith_seq(e)

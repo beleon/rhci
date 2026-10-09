@@ -57,10 +57,11 @@ module Rhci
     def parse_module
       t = peek
       name = 'Main'
+      exports = nil
       if at_kw?('module')
         advance
         name = parse_modid
-        skip_export_list if at_special?('(')
+        exports = parse_export_list if at_special?('(')
         expect_kw('where')
       end
       imports = []
@@ -76,7 +77,7 @@ module Rhci
         nil
       end
       expect_eof
-      ModuleDecl.new(t, name, nil, imports, decls)
+      ModuleDecl.new(t, name, exports, imports, decls)
     end
 
     private
@@ -1099,15 +1100,21 @@ module Rhci
       advance.text
     end
 
-    def skip_export_list
-      depth = 0
-      loop do
-        t = advance
-        error_at(t) if t.kind == :eof
-        depth += 1 if t.is?(:special, '(')
-        depth -= 1 if t.is?(:special, ')')
-        break if depth.zero?
+    # ( x, (op), T, T(..), T(A, b), module M ) -> [[name, subs] | [:module, M]]
+    def parse_export_list
+      advance # (
+      items = []
+      until at_special?(')')
+        if at_kw?('module')
+          advance
+          items << [:module, parse_modid]
+        else
+          items.concat(parse_import_item)
+        end
+        break unless accept_special(',')
       end
+      expect_special(')')
+      items
     end
 
     # import [qualified] M [qualified] [as N] [hiding] [(items)]
@@ -1141,41 +1148,54 @@ module Rhci
       advance # (
       items = []
       until at_special?(')')
-        t = peek
-        if t.kind == :varid
-          advance
-          items << [t.text, nil]
-        elsif t.is?(:special, '(')
-          advance
-          op = advance
-          error_at(op) unless op.kind == :varsym || op.kind == :consym
-          expect_special(')')
-          items << [op.text, nil]
-        elsif t.kind == :conid
-          advance
-          subs = nil
-          if accept_special('(')
-            if accept_op('..')
-              subs = :all
-            else
-              subs = []
-              until at_special?(')')
-                s = advance
-                error_at(s) unless s.kind == :varid || s.kind == :conid
-                subs << s.text
-                break unless accept_special(',')
-              end
-            end
-            expect_special(')')
-          end
-          items << [t.text, subs]
-        else
-          error_at(t)
-        end
+        items.concat(parse_import_item)
         break unless accept_special(',')
       end
       expect_special(')')
       items
+    end
+
+    # One import/export item: x, (op), T, T(..), T(A, b, (:+)).
+    def parse_import_item
+      t = peek
+      if t.kind == :varid
+        advance
+        [[t.text, nil]]
+      elsif t.is?(:special, '(')
+        advance
+        op = advance
+        error_at(op) unless op.kind == :varsym || op.kind == :consym
+        expect_special(')')
+        [[op.text, nil]]
+      elsif t.kind == :conid
+        advance
+        subs = nil
+        if accept_special('(')
+          if accept_op('..')
+            subs = :all
+          else
+            subs = []
+            until at_special?(')')
+              if accept_special('(')
+                s = advance
+                error_at(s) unless s.kind == :consym || s.kind == :varsym
+                expect_special(')')
+              else
+                s = advance
+                error_at(s) unless s.kind == :varid || s.kind == :conid
+              end
+              subs << s.text
+              break unless accept_special(',')
+            end
+          end
+          expect_special(')')
+        end
+        [[t.text, subs]]
+      elsif t.kind == :qvarid || t.kind == :qconid
+        unsupported(t, 'qualified names in import and export lists')
+      else
+        error_at(t)
+      end
     end
   end
 end

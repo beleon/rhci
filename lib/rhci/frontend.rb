@@ -15,6 +15,16 @@ module Rhci
       FixityResolver.new(fixities, source).expr(e)
     end
 
+    # A module, parsed but with operators unresolved: imported fixities are
+    # only known once its imports are loaded (see resolve_module).
+    def self.parse_module_raw(src, source)
+      Parser.new(src, source).parse_module
+    end
+
+    def self.resolve_module(m, fixities, source)
+      FixityResolver.new(fixities, source).module_decl(m)
+    end
+
     def self.parse_module(src, source, prelude: false)
       m = Parser.new(src, source, prelude: prelude).parse_module
       FixityResolver.new(nil, source).module_decl(m)
