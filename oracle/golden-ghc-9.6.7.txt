@@ -1,0 +1,1519 @@
+## 1. Numeric literals and defaulting
+
+-- An unannotated literal at the prompt defaults to Integer (or to Double if Fractional is needed).
+ghci> 42
+42
+ghci> 2 ^ 10
+1024
+ghci> 2 ^ 64
+18446744073709551616
+ghci> product [1..25]
+15511210043330985984000000
+ghci> 10 / 3
+3.3333333333333335
+ghci> 7 / 2
+3.5
+ghci> 2 + 3.0
+5.0
+ghci> fromIntegral (3 :: Int) / 2
+1.5
+ghci> sqrt 144
+12.0
+ghci> floor (sqrt 144)
+12
+ghci> pi
+3.141592653589793
+ghci> exp 1
+2.718281828459045
+ghci> 2 ** 0.5
+1.4142135623730951
+ghci> :t floor (sqrt 144)
+floor (sqrt 144) :: Integral b => b
+
+## 2. Int vs Integer, bounds and overflow
+
+ghci> maxBound :: Int
+9223372036854775807
+ghci> minBound :: Int
+-9223372036854775808
+ghci> (maxBound :: Int) + 1
+-9223372036854775808
+ghci> 2 ^ 63 :: Int
+-9223372036854775808
+ghci> 2 ^ 63 :: Integer
+9223372036854775808
+ghci> length [1,2,3] * 1000000000000
+3000000000000
+ghci> fromIntegral (maxBound :: Int) + 1
+9223372036854775808
+
+## 3. Integer division family
+
+ghci> 17 `div` 5
+3
+ghci> 17 `mod` 5
+2
+ghci> (-7) `div` 2
+-4
+ghci> (-7) `mod` 2
+1
+ghci> (-7) `quot` 2
+-3
+ghci> (-7) `rem` 2
+-1
+ghci> 7 `div` (-2)
+-4
+ghci> 7 `mod` (-2)
+-1
+ghci> -7 `div` 2
+-3
+ghci> -5 `mod` 3
+-2
+ghci> 10 `divMod` 3
+(3,1)
+ghci> (-10) `quotRem` 3
+(-3,-1)
+ghci> 1 `div` 0
+*** Exception: divide by zero
+ghci> 1 `mod` 0
+*** Exception: divide by zero
+ghci> 1 / 0
+Infinity
+ghci> -1 / 0
+-Infinity
+ghci> 0 / 0
+NaN
+ghci> 2 ^ (-1)
+*** Exception: Negative exponent
+ghci> gcd 12 8
+4
+ghci> gcd 0 0
+0
+ghci> gcd (-12) 8
+4
+ghci> lcm 4 6
+12
+
+## 4. Rounding
+
+ghci> round 2.5
+2
+ghci> round 3.5
+4
+ghci> round (-2.5)
+-2
+ghci> round 2.6
+3
+ghci> truncate (-2.7)
+-2
+ghci> floor (-2.7)
+-3
+ghci> ceiling 2.1
+3
+ghci> truncate 1e20
+100000000000000000000
+ghci> :t round 2.5
+round 2.5 :: Integral b => b
+
+## 5. Show for Double
+
+ghci> 0.1
+0.1
+ghci> 0.1 + 0.2
+0.30000000000000004
+ghci> 1.0
+1.0
+ghci> 100.0
+100.0
+ghci> 1234567.0
+1234567.0
+ghci> 12345678.9
+1.23456789e7
+ghci> 0.1 * 0.1
+1.0000000000000002e-2
+ghci> 0.05
+5.0e-2
+ghci> 1e7
+1.0e7
+ghci> 1e22
+1.0e22
+ghci> 1e-3
+1.0e-3
+ghci> 5.0e-324
+5.0e-324
+ghci> 1.7976931348623157e308
+1.7976931348623157e308
+ghci> fromIntegral 3 :: Double
+3.0
+ghci> -0.0
+-0.0
+ghci> abs (-0.0)
+0.0
+ghci> 1 / 3
+0.3333333333333333
+ghci> 2 / 3
+0.6666666666666666
+ghci> sqrt 2
+1.4142135623730951
+ghci> [1.5, 2, 3]
+[1.5,2.0,3.0]
+
+## 6. Negative numbers and unary minus
+
+ghci> negate 5
+-5
+ghci> -5
+-5
+ghci> - 5
+-5
+ghci> abs (-7)
+7
+ghci> abs -7
+
+<interactive>:9:1: error: [GHC-39999]
+    • No instance for ‘Show (Integer -> Integer)’
+        arising from a use of ‘print’
+        (maybe you haven't applied a function to enough arguments?)
+    • In a stmt of an interactive GHCi command: print it
+ghci> 3 - -2
+
+<interactive>:11:1: error:
+    Precedence parsing error
+        cannot mix ‘-’ [infixl 6] and prefix `-' [infixl 6] in the same infix expression
+ghci> 3 + (-2)
+1
+ghci> [-1, 2, -3]
+[-1,2,-3]
+ghci> (-1, -2)
+(-1,-2)
+ghci> Just (-3)
+Just (-3)
+ghci> Just (-1.5)
+Just (-1.5)
+ghci> Just (negate 2)
+Just (-2)
+ghci> show (-5)
+"-5"
+ghci> -2 ^ 2
+-4
+ghci> (-2) ^ 2
+4
+ghci> map negate [1, -2]
+[-1,2]
+
+## 7. Booleans and comparison
+
+ghci> True && False
+False
+ghci> True || undefined
+True
+ghci> False && undefined
+False
+ghci> not True
+False
+ghci> 3 == 3
+True
+ghci> 3 /= 4
+True
+ghci> 3 == 3.0
+True
+ghci> compare 1 2
+LT
+ghci> compare "b" "a"
+GT
+ghci> max "apple" "banana"
+"banana"
+ghci> [1,2] < [1,3]
+True
+ghci> [1,2] < [1,2,0]
+True
+ghci> "Zebra" < "apple"
+True
+ghci> (1,'b') > (1,'a')
+True
+ghci> Just 3 > Nothing
+True
+ghci> True > False
+True
+ghci> 1 < 2 < 3
+
+<interactive>:33:1: error:
+    Precedence parsing error
+        cannot mix ‘<’ [infix 4] and ‘<’ [infix 4] in the same infix expression
+
+## 8. Chars and strings: show vs. print
+
+ghci> "hello"
+"hello"
+ghci> 'a'
+'a'
+ghci> show 'a'
+"'a'"
+ghci> show "a"
+"\"a\""
+ghci> show "hello"
+"\"hello\""
+ghci> ""
+""
+ghci> "a\"b"
+"a\"b"
+ghci> "tab\there"
+"tab\there"
+ghci> "line\nbreak"
+"line\nbreak"
+ghci> '\n'
+'\n'
+ghci> '\''
+'\''
+ghci> "\\"
+"\\"
+ghci> "λ"
+"\955"
+ghci> 'λ'
+'\955'
+ghci> "café"
+"caf\233"
+ghci> length "λ"
+1
+ghci> length "café"
+4
+ghci> putStrLn "λ café"
+λ café
+ghci> print "λ"
+"\955"
+ghci> "\1234\&5"
+"\1234\&5"
+ghci> "\SOH"
+"\SOH"
+ghci> "\SO\&H"
+"\SO\&H"
+ghci> ['h', 'i']
+"hi"
+ghci> ['a'..'e']
+"abcde"
+ghci> ['a', 'c' .. 'i']
+"acegi"
+ghci> head "abc"
+'a'
+ghci> "abc" !! 1
+'b'
+ghci> "hello" ++ " " ++ "world"
+"hello world"
+ghci> 'a' : "bc"
+"abc"
+ghci> words "  hello   world  "
+["hello","world"]
+ghci> unwords ["hello", "world"]
+"hello world"
+ghci> lines "a\nb\n"
+["a","b"]
+ghci> unlines ["a", "b"]
+"a\nb\n"
+ghci> reverse "hello"
+"olleh"
+ghci> show 3 ++ "!"
+"3!"
+ghci> ["ab", "cd"]
+["ab","cd"]
+ghci> [['a'], "b"]
+["a","b"]
+ghci> [[1,2],[3]]
+[[1,2],[3]]
+
+## 9. Unit, tuples
+
+ghci> ()
+()
+ghci> (1, 2)
+(1,2)
+ghci> (1, "a", 'c', True)
+(1,"a",'c',True)
+ghci> ((1, 2), [3])
+((1,2),[3])
+ghci> fst (1, 2)
+1
+ghci> snd (1, 2)
+2
+ghci> zip [1, 2, 3] [10, 20, 30]
+[(1,10),(2,20),(3,30)]
+ghci> zip3 [1,2] "ab" [True,False]
+[(1,'a',True),(2,'b',False)]
+ghci> unzip [(1,'a'),(2,'b')]
+([1,2],"ab")
+ghci> show (1, 2)
+"(1,2)"
+ghci> (1,2) == (1,2)
+True
+ghci> [(i, c) | i <- [1,2], c <- "ab"]
+[(1,'a'),(1,'b'),(2,'a'),(2,'b')]
+
+## 10. Lists and Prelude list functions
+
+ghci> []
+[]
+ghci> [1, 2, 3]
+[1,2,3]
+ghci> 1 : [2, 3]
+[1,2,3]
+ghci> 1 : 2 : []
+[1,2]
+ghci> head [1, 2, 3]
+1
+ghci> head []
+*** Exception: Prelude.head: empty list
+CallStack (from HasCallStack):
+  error, called at libraries/base/GHC/List.hs:1644:3 in base:GHC.List
+  errorEmptyList, called at libraries/base/GHC/List.hs:87:11 in base:GHC.List
+  badHead, called at libraries/base/GHC/List.hs:83:28 in base:GHC.List
+  head, called at <interactive>:11:1 in interactive:Ghci6
+ghci> tail []
+*** Exception: Prelude.tail: empty list
+CallStack (from HasCallStack):
+  error, called at libraries/base/GHC/List.hs:1644:3 in base:GHC.List
+  errorEmptyList, called at libraries/base/GHC/List.hs:130:28 in base:GHC.List
+  tail, called at <interactive>:13:1 in interactive:Ghci6
+ghci> last []
+*** Exception: Prelude.last: empty list
+CallStack (from HasCallStack):
+  error, called at libraries/base/GHC/List.hs:1644:3 in base:GHC.List
+  errorEmptyList, called at libraries/base/GHC/List.hs:158:13 in base:GHC.List
+  lastError, called at libraries/base/GHC/List.hs:153:29 in base:GHC.List
+  last, called at <interactive>:15:1 in interactive:Ghci6
+ghci> init []
+*** Exception: Prelude.init: empty list
+CallStack (from HasCallStack):
+  error, called at libraries/base/GHC/List.hs:1644:3 in base:GHC.List
+  errorEmptyList, called at libraries/base/GHC/List.hs:180:28 in base:GHC.List
+  init, called at <interactive>:17:1 in interactive:Ghci6
+ghci> maximum []
+*** Exception: Prelude.maximum: empty list
+CallStack (from HasCallStack):
+  error, called at libraries/base/GHC/List.hs:1644:3 in base:GHC.List
+  errorEmptyList, called at libraries/base/GHC/List.hs:715:28 in base:GHC.List
+  maximum, called at libraries/base/Data/Foldable.hs:745:15 in base:Data.Foldable
+ghci> minimum []
+*** Exception: Prelude.minimum: empty list
+CallStack (from HasCallStack):
+  error, called at libraries/base/GHC/List.hs:1644:3 in base:GHC.List
+  errorEmptyList, called at libraries/base/GHC/List.hs:739:28 in base:GHC.List
+  minimum, called at libraries/base/Data/Foldable.hs:746:15 in base:Data.Foldable
+ghci> foldr1 (+) []
+*** Exception: Prelude.foldr1: empty list
+CallStack (from HasCallStack):
+  error, called at libraries/base/GHC/List.hs:1644:3 in base:GHC.List
+  errorEmptyList, called at libraries/base/GHC/List.hs:609:30 in base:GHC.List
+  foldr1, called at libraries/base/Data/Foldable.hs:741:15 in base:Data.Foldable
+ghci> [1,2,3] !! 5
+*** Exception: Prelude.!!: index too large
+CallStack (from HasCallStack):
+  error, called at libraries/base/GHC/List.hs:1366:14 in base:GHC.List
+  tooLarge, called at libraries/base/GHC/List.hs:1376:50 in base:GHC.List
+  !!, called at <interactive>:25:9 in interactive:Ghci6
+ghci> [1,2,3] !! (-1)
+*** Exception: Prelude.!!: negative index
+CallStack (from HasCallStack):
+  error, called at libraries/base/GHC/List.hs:1369:12 in base:GHC.List
+  negIndex, called at libraries/base/GHC/List.hs:1373:17 in base:GHC.List
+  !!, called at <interactive>:27:9 in interactive:Ghci6
+ghci> length [1, 2, 3, 4]
+4
+ghci> null []
+True
+ghci> reverse [1, 2, 3]
+[3,2,1]
+ghci> sum []
+0
+ghci> product []
+1
+ghci> sum [1.5, 2]
+3.5
+ghci> elem 3 [1, 2, 3, 4]
+True
+ghci> sort [3, 1, 4, 1, 5]
+
+<interactive>:43:1: error: [GHC-88464]
+    Variable not in scope: sort :: [a0] -> t
+    Suggested fix: Perhaps use ‘sqrt’ (imported from Prelude)
+ghci> nub [1, 1, 2, 3, 3, 2]
+
+<interactive>:45:1: error: [GHC-88464]
+    Variable not in scope: nub :: [a0] -> t
+ghci> take 3 [1, 2, 3, 4, 5]
+[1,2,3]
+ghci> take (-1) [1, 2]
+[]
+ghci> drop 10 [1, 2]
+[]
+ghci> splitAt 2 [1,2,3,4]
+([1,2],[3,4])
+ghci> span even [2,4,5,6]
+([2,4],[5,6])
+ghci> replicate 3 True
+[True,True,True]
+ghci> replicate (-2) 'x'
+""
+ghci> concat [[1,2],[3]]
+[1,2,3]
+ghci> concatMap show [1,2,3]
+"123"
+ghci> lookup 2 [(1,"a"),(2,"b")]
+Just "b"
+ghci> lookup 3 [(1,"a")]
+Nothing
+
+## 11. Ranges (enumFromThenTo semantics)
+
+ghci> [1..5]
+[1,2,3,4,5]
+ghci> [5..1]
+[]
+ghci> [1,3..9]
+[1,3,5,7,9]
+ghci> [1,3..10]
+[1,3,5,7,9]
+ghci> [5,4..1]
+[5,4,3,2,1]
+ghci> [1,1..1] == take 3 [1,1..1]
+False
+ghci> take 5 [1..]
+[1,2,3,4,5]
+ghci> take 5 [0,2..]
+[0,2,4,6,8]
+ghci> [1.0..3.5]
+[1.0,2.0,3.0,4.0]
+ghci> [0.1,0.2..0.5]
+[0.1,0.2,0.30000000000000004,0.4,0.5]
+ghci> [1.0,1.5..3.0]
+[1.0,1.5,2.0,2.5,3.0]
+ghci> [10,8..1]
+[10,8,6,4,2]
+ghci> ['a'..'e']
+"abcde"
+ghci> [False ..]
+[False,True]
+ghci> length [1..1000000]
+1000000
+
+## 12. Laziness: things that must NOT be evaluated
+
+ghci> const 1 undefined
+1
+ghci> fst (1, undefined)
+1
+ghci> length [undefined, undefined]
+2
+ghci> take 3 (1:2:3:undefined)
+[1,2,3]
+ghci> null (undefined : undefined)
+False
+ghci> head (filter (> 1000) [1..])
+1001
+ghci> takeWhile (< 40) (map (^2) [1..])
+[1,4,9,16,25,36]
+ghci> foldr (\x acc -> x || acc) False (repeat True)
+True
+ghci> let x = undefined :: Int
+ghci> let (a, b) = (1, undefined)
+ghci> a
+1
+ghci> (\_ -> 5) undefined
+5
+ghci> case undefined of _ -> 1
+1
+ghci> zip [1,2,3] (repeat 'x')
+[(1,'x'),(2,'x'),(3,'x')]
+ghci> take 5 $ map (* 2) [1 ..]
+[2,4,6,8,10]
+ghci> let ones = 1 : ones
+ghci> take 3 ones
+[1,1,1]
+ghci> let nats = 0 : map (+1) nats
+ghci> nats !! 1000
+1000
+ghci> let fibs = 0 : 1 : zipWith (+) fibs (tail fibs)
+ghci> fibs !! 100
+354224848179261915075
+ghci> fibs !! 1000
+43466557686937456435688527675040625802564660517371780402481729089536555417949051890403879840079255169295922593080322634775209689623239873322471161642996440906533187938298969649928516003704476137795166849228875
+ghci> take 5 (cycle [1, 2, 3])
+[1,2,3,1,2]
+ghci> take 4 (iterate (* 2) 1)
+[1,2,4,8]
+ghci> snd (undefined, 2)
+2
+ghci> Just undefined `seq` 1
+1
+ghci> undefined `seq` 1
+*** Exception: Prelude.undefined
+CallStack (from HasCallStack):
+  undefined, called at <interactive>:53:1 in interactive:Ghci27
+ghci> length (take 3 (repeat undefined))
+3
+
+## 13. Laziness: partial output, then exception
+
+-- GHCi prints incrementally: the prefix appears before the exception.
+ghci> [1, 2, undefined]
+[1,2,*** Exception: Prelude.undefined
+CallStack (from HasCallStack):
+  undefined, called at <interactive>:1:8 in interactive:Ghci1
+ghci> "abc" ++ undefined
+"abc*** Exception: Prelude.undefined
+CallStack (from HasCallStack):
+  undefined, called at <interactive>:3:10 in interactive:Ghci1
+ghci> Just undefined
+Just *** Exception: Prelude.undefined
+CallStack (from HasCallStack):
+  undefined, called at <interactive>:5:6 in interactive:Ghci1
+ghci> (1, undefined)
+(1,*** Exception: Prelude.undefined
+CallStack (from HasCallStack):
+  undefined, called at <interactive>:7:5 in interactive:Ghci1
+ghci> map (10 `div`) [5, 2, 0, 1]
+[2,5,*** Exception: divide by zero
+ghci> show [1, undefined]
+"[1,*** Exception: Prelude.undefined
+CallStack (from HasCallStack):
+  undefined, called at <interactive>:11:10 in interactive:Ghci1
+
+## 14. Sharing (call-by-need, not call-by-name)
+
+ghci> let slow n = sum [1..n]
+ghci> let pair = let s = slow 3000000 in (s, s)
+ghci> fst pair + snd pair
+9000003000000
+ghci> let memo = map (\n -> n * n) [0..]
+ghci> memo !! 100000
+10000000000
+ghci> memo !! 100000
+10000000000
+
+## 15. Deep recursion and big folds (stack depth)
+
+ghci> sum [1..1000000]
+500000500000
+ghci> foldl (+) 0 [1..1000000]
+500000500000
+ghci> foldr (+) 0 [1..1000000]
+500000500000
+ghci> length (filter even [1..1000000])
+500000
+ghci> let count n = if n == 0 then 0 else 1 + count (n - 1)
+ghci> count 1000000
+1000000
+ghci> let loop n acc = if n == 0 then acc else loop (n - 1) (acc + 1)
+ghci> loop 1000000 0
+1000000
+ghci> last [1..1000000]
+1000000
+
+## 16. Functions, lambdas, currying, sections
+
+ghci> (\x -> x + 1) 5
+6
+ghci> (\x y -> x * y) 3 4
+12
+ghci> (\x -> \y -> x + y) 3 4
+7
+ghci> (\(a, b) -> a + b) (1, 2)
+3
+ghci> map (\x -> x * x) [1, 2, 3, 4]
+[1,4,9,16]
+ghci> map (+ 1) [10, 20]
+[11,21]
+ghci> map (1 +) [10, 20]
+[11,21]
+ghci> map (subtract 1) [10, 20]
+[9,19]
+ghci> map (`div` 2) [7, 9]
+[3,4]
+ghci> map (2 ^) [1, 2, 3]
+[2,4,8]
+ghci> map (^ 2) [1, 2, 3]
+[1,4,9]
+ghci> (- 1) 5
+
+<interactive>:23:1: error: [GHC-39999]
+    • Could not deduce ‘Num t0’
+      from the context: (Num t1, Num (t1 -> t2))
+        bound by the inferred type for ‘it’:
+                   forall {t1} {t2}. (Num t1, Num (t1 -> t2)) => t2
+        at <interactive>:23:1-7
+      The type variable ‘t0’ is ambiguous
+      Potentially matching instances:
+        instance Num Integer -- Defined in ‘GHC.Num’
+        instance Num Double -- Defined in ‘GHC.Float’
+        ...plus three others
+        ...plus two instances involving out-of-scope types
+        (use -fprint-potential-instances to see them all)
+    • In the ambiguity check for the inferred type for ‘it’
+      To defer the ambiguity check to use sites, enable AllowAmbiguousTypes
+      When checking the inferred type
+        it :: forall {t1} {t2}. (Num t1, Num (t1 -> t2)) => t2
+ghci> map ((+) 1) [10, 20, 30]
+[11,21,31]
+ghci> (.) (+1) (*2) 5
+11
+ghci> ((+1) . (*2)) 5
+11
+ghci> head $ reverse [1, 2, 3]
+3
+ghci> sum $ map (* 2) $ filter odd [1..10]
+50
+ghci> flip const 1 2
+2
+ghci> flip (-) 1 10
+9
+ghci> uncurry (+) (3, 4)
+7
+ghci> curry fst 1 2
+1
+ghci> id 42
+42
+ghci> const 5 99
+5
+ghci> id
+
+<interactive>:47:1: error: [GHC-39999]
+    • No instance for ‘Show (a0 -> a0)’ arising from a use of ‘print’
+        (maybe you haven't applied a function to enough arguments?)
+    • In a stmt of an interactive GHCi command: print it
+ghci> (+)
+
+<interactive>:49:1: error: [GHC-39999]
+    • No instance for ‘Show (Integer -> Integer -> Integer)’
+        arising from a use of ‘print’
+        (maybe you haven't applied a function to enough arguments?)
+    • In a stmt of an interactive GHCi command: print it
+ghci> \x -> x
+
+<interactive>:51:1: error: [GHC-39999]
+    • No instance for ‘Show (p0 -> p0)’ arising from a use of ‘print’
+        (maybe you haven't applied a function to enough arguments?)
+    • In a stmt of an interactive GHCi command: print it
+ghci> Just
+
+<interactive>:53:1: error: [GHC-39999]
+    • No instance for ‘Show (a0 -> Maybe a0)’
+        arising from a use of ‘print’
+        (maybe you haven't applied a function to enough arguments?)
+    • In a stmt of an interactive GHCi command: print it
+
+## 17. Definitions at the prompt
+
+ghci> double x = x * 2
+ghci> double 21
+42
+ghci> add x y = x + y
+ghci> map (add 10) [1, 2, 3]
+[11,12,13]
+ghci> let square x = x * x
+ghci> square 9
+81
+ghci> x = 5
+ghci> x
+5
+ghci> x = 6
+ghci> x
+6
+ghci> let xs = [1..10]
+ghci> sum xs
+55
+ghci> factorial n = if n <= 1 then 1 else n * factorial (n - 1)
+ghci> factorial 25
+15511210043330985984000000
+ghci> fib 0 = 0; fib 1 = 1; fib n = fib (n - 1) + fib (n - 2)
+ghci> fib 20
+6765
+ghci> f 0 = "zero"
+ghci> f 1 = "one"
+ghci> f 0
+"*** Exception: <interactive>:35:1-11: Non-exhaustive patterns in function f
+ghci> f 1
+"one"
+ghci> :{
+ghci| g 0 = "zero"
+ghci| g n = "other"
+ghci| :}
+ghci> g 0
+"zero"
+ghci> g 5
+"other"
+ghci> sign n | n > 0 = 1 | n < 0 = -1 | otherwise = 0
+ghci> sign (-4)
+-1
+ghci> partial 0 = "zero"
+ghci> partial 1
+"*** Exception: <interactive>:54:1-18: Non-exhaustive patterns in function partial
+ghci> let y = 1; z = 2
+ghci> y + z
+3
+ghci> let (p, q) = (3, 4)
+ghci> p * q
+12
+ghci> 1 + 2
+3
+ghci> it * 10
+30
+ghci> it
+30
+ghci> let r = it
+ghci> :t r
+r :: Num a => a
+ghci> nosuchthing
+
+<interactive>:76:1: error: [GHC-88464]
+    Variable not in scope: nosuchthing
+ghci> noSuch + 1
+
+<interactive>:78:1: error: [GHC-88464]
+    Variable not in scope: noSuch
+
+## 18. Let, where, if, case, guards
+
+ghci> let x = 5 in x + 1
+6
+ghci> let x = 3; y = 4 in x * y
+12
+ghci> let x = 1 in let y = 2 in x + y
+3
+ghci> let x = 1; x = 2 in x
+
+<interactive>:7:5: error:
+    Conflicting definitions for ‘x’
+    Bound at: <interactive>:7:5
+              <interactive>:7:12
+ghci> let f 0 = 1; f n = n * f (n - 1) in f 5
+120
+ghci> if True then 1 else 2
+1
+ghci> if 3 > 2 then if True then 42 else 0 else -1
+42
+ghci> if 1 then 2 else 3
+
+<interactive>:15:4: error: [GHC-39999]
+    • Could not deduce ‘Num Bool’ arising from the literal ‘1’
+      from the context: Num a
+        bound by the inferred type of it :: Num a => a
+        at <interactive>:15:1-18
+    • In the expression: 1
+      In the expression: if 1 then 2 else 3
+      In an equation for ‘it’: it = if 1 then 2 else 3
+ghci> case 2 of { 1 -> "one" ; 2 -> "two" ; _ -> "other" }
+
+<interactive>:17:13: warning: [GHC-53633] [-Woverlapping-patterns]
+    Pattern match is redundant
+    In a case alternative: 1 -> ...
+
+<interactive>:17:39: warning: [GHC-53633] [-Woverlapping-patterns]
+    Pattern match is redundant
+    In a case alternative: _ -> ...
+"two"
+ghci> case 3 of { 1 -> "one" ; 2 -> "two" }
+
+<interactive>:19:13: warning: [GHC-53633] [-Woverlapping-patterns]
+    Pattern match is redundant
+    In a case alternative: 1 -> ...
+
+<interactive>:19:26: warning: [GHC-53633] [-Woverlapping-patterns]
+    Pattern match is redundant
+    In a case alternative: 2 -> ...
+"*** Exception: <interactive>:19:1-37: Non-exhaustive patterns in case
+ghci> case [1,2,3] of { [] -> "empty" ; x:xs -> show x }
+
+<interactive>:21:19: warning: [GHC-53633] [-Woverlapping-patterns]
+    Pattern match is redundant
+    In a case alternative: [] -> ...
+"1"
+ghci> case (1, 2) of (a, b) | a > b -> "gt" | otherwise -> "le"
+"le"
+ghci> case Just 3 of { Nothing -> 0 ; Just n -> n }
+
+<interactive>:25:18: warning: [GHC-53633] [-Woverlapping-patterns]
+    Pattern match is redundant
+    In a case alternative: Nothing -> ...
+3
+ghci> case "hi" of { 'h':_ -> True ; _ -> False }
+
+<interactive>:27:32: warning: [GHC-53633] [-Woverlapping-patterns]
+    Pattern match is redundant
+    In a case alternative: _ -> ...
+True
+ghci> case [1,2] of { [a, b] -> a + b ; _ -> 0 }
+
+<interactive>:29:35: warning: [GHC-53633] [-Woverlapping-patterns]
+    Pattern match is redundant
+    In a case alternative: _ -> ...
+3
+ghci> case 5 of n | even n -> "even" | odd n -> "odd"
+"odd"
+ghci> :{
+ghci| h n = r
+ghci|   where r = n * k
+ghci|         k = 10
+ghci| :}
+ghci> h 3
+30
+
+## 19. List comprehensions
+
+ghci> [x * 2 | x <- [1, 2, 3, 4, 5]]
+[2,4,6,8,10]
+ghci> [x | x <- [1..20], even x, x > 10]
+[12,14,16,18,20]
+ghci> [x + y | x <- [1, 2], y <- [10, 20]]
+[11,21,12,22]
+ghci> [(x, y) | x <- [1..3], y <- [x..3]]
+[(1,1),(1,2),(1,3),(2,2),(2,3),(3,3)]
+ghci> [y | x <- [1..5], let y = x * x, odd y]
+[1,9,25]
+ghci> [x | Just x <- [Just 1, Nothing, Just 3]]
+[1,3]
+ghci> [c | c <- "Hello World", c `elem` ['A'..'Z']]
+"HW"
+ghci> take 3 [(a,b,c) | c <- [1..20], b <- [1..c], a <- [1..b], a*a + b*b == c*c]
+[(3,4,5),(6,8,10),(5,12,13)]
+ghci> [[x, y] | x <- "ab", y <- "cd"]
+["ac","ad","bc","bd"]
+ghci> [() | True]
+[()]
+ghci> [x | x <- [1..10], then]
+
+<interactive>:21:24: error: [GHC-58481] parse error on input ‘]’
+
+## 20. Maybe and Either
+
+ghci> Just 42
+Just 42
+ghci> Nothing
+Nothing
+ghci> Just (Just 3)
+Just (Just 3)
+ghci> Just (Just Nothing)
+Just (Just Nothing)
+ghci> [Just 1, Nothing]
+[Just 1,Nothing]
+ghci> Just "hi"
+Just "hi"
+ghci> Just 'c'
+Just 'c'
+ghci> Just (1, 2)
+Just (1,2)
+ghci> Just [1, 2]
+Just [1,2]
+ghci> Left 3
+Left 3
+ghci> Right "x"
+Right "x"
+ghci> [Left 1, Right 'a']
+[Left 1,Right 'a']
+ghci> fromMaybe 0 (Just 42)
+
+<interactive>:25:1: error: [GHC-88464]
+    Variable not in scope: fromMaybe :: t0 -> Maybe a0 -> t
+ghci> fromMaybe 0 Nothing
+
+<interactive>:27:1: error: [GHC-88464]
+    Variable not in scope: fromMaybe :: t0 -> Maybe a0 -> t
+ghci> import Data.Maybe
+ghci> fromMaybe 0 (Just 42)
+42
+ghci> isJust (Just 5)
+True
+ghci> isNothing Nothing
+True
+ghci> maybe 0 (+1) (Just 5)
+6
+ghci> either length negate (Left "abc")
+3
+ghci> Just 3 == Just 3
+True
+ghci> fmap (+1) (Just 2)
+Just 3
+ghci> (+1) <$> Nothing
+Nothing
+ghci> mapM_ print [1, 2]
+1
+2
+ghci> sequence [Just 1, Just 2]
+Just [1,2]
+
+## 21. Algebraic data types and deriving Show
+
+ghci> data Color = Red | Green | Blue
+ghci> Red
+
+<interactive>:3:1: error: [GHC-39999]
+    • No instance for ‘Show Color’ arising from a use of ‘print’
+    • In a stmt of an interactive GHCi command: print it
+ghci> data Color = Red | Green | Blue deriving Show
+ghci> Red
+Red
+ghci> [Red, Green]
+[Red,Green]
+ghci> Just Red
+Just Red
+ghci> Red == Red
+
+<interactive>:13:5: error: [GHC-39999]
+    • No instance for ‘Eq Color’ arising from a use of ‘==’
+    • In the expression: Red == Red
+      In an equation for ‘it’: it = Red == Red
+ghci> data Color = Red | Green | Blue deriving (Show, Eq, Ord, Enum, Bounded)
+ghci> Red == Red
+True
+ghci> Red < Blue
+True
+ghci> [Red ..]
+[Red,Green,Blue]
+ghci> succ Red
+Green
+ghci> succ Blue
+*** Exception: succ{Color}: tried to take `succ' of last tag in enumeration
+CallStack (from HasCallStack):
+  error, called at <interactive>:15:58 in interactive:Ghci6
+ghci> maxBound :: Color
+Blue
+ghci> data Shape = Circle Double | Rectangle Double Double deriving Show
+ghci> Circle 5.0
+Circle 5.0
+ghci> Circle 5
+Circle 5.0
+ghci> Rectangle 3 4
+Rectangle 3.0 4.0
+ghci> Circle (-1)
+Circle (-1.0)
+ghci> [Circle 1, Rectangle 2 3]
+[Circle 1.0,Rectangle 2.0 3.0]
+ghci> Just (Circle 2)
+Just (Circle 2.0)
+ghci> Circle
+
+<interactive>:43:1: error: [GHC-39999]
+    • No instance for ‘Show (Double -> Shape)’
+        arising from a use of ‘print’
+        (maybe you haven't applied a function to enough arguments?)
+    • In a stmt of an interactive GHCi command: print it
+ghci> data P = P { px :: Int, py :: Int } deriving Show
+ghci> P 1 2
+P {px = 1, py = 2}
+ghci> P { px = 1, py = -2 }
+P {px = 1, py = -2}
+ghci> px (P 3 4)
+3
+ghci> Just (P 1 2)
+Just (P {px = 1, py = 2})
+ghci> (P 1 2) { py = 9 }
+P {px = 1, py = 9}
+ghci> data T a = Leaf | Node (T a) a (T a) deriving Show
+ghci> Node Leaf 1 (Node Leaf (-2) Leaf)
+Node Leaf 1 (Node Leaf (-2) Leaf)
+ghci> data Op = Int :+: Int deriving Show
+ghci> 3 :+: 4
+3 :+: 4
+ghci> Just (3 :+: 4)
+Just (3 :+: 4)
+ghci> newtype Age = Age Int deriving Show
+ghci> Age 3
+Age 3
+
+## 22. :type
+
+ghci> :t 42
+42 :: Num a => a
+ghci> :t 4.2
+4.2 :: Fractional a => a
+ghci> :t "hello"
+"hello" :: String
+ghci> :t 'a'
+'a' :: Char
+ghci> :t True
+True :: Bool
+ghci> :t []
+[] :: [a]
+ghci> :t [1,2,3]
+[1,2,3] :: Num a => [a]
+ghci> :t [1, 2.5]
+[1, 2.5] :: Fractional a => [a]
+ghci> :t ()
+() :: ()
+ghci> :t (1, "x")
+(1, "x") :: Num a => (a, String)
+ghci> :t (1, 2)
+(1, 2) :: (Num a, Num b) => (a, b)
+ghci> :t Just
+Just :: a -> Maybe a
+ghci> :t Nothing
+Nothing :: Maybe a
+ghci> :t Just 3
+Just 3 :: Num a => Maybe a
+ghci> :t Left 'a'
+Left 'a' :: Either Char b
+ghci> :t (+)
+(+) :: Num a => a -> a -> a
+ghci> :t (+ 1)
+(+ 1) :: Num a => a -> a
+ghci> :t (1 +)
+(1 +) :: Num a => a -> a
+ghci> :t (- 1)
+(- 1) :: Num a => a
+ghci> :t subtract 1
+subtract 1 :: Num a => a -> a
+ghci> :t (==)
+(==) :: Eq a => a -> a -> Bool
+ghci> :t (<)
+(<) :: Ord a => a -> a -> Bool
+ghci> :t (.)
+(.) :: (b -> c) -> (a -> b) -> a -> c
+ghci> :t ($)
+($) :: (a -> b) -> a -> b
+ghci> :t id
+id :: a -> a
+ghci> :t const
+const :: a -> b -> a
+ghci> :t flip
+flip :: (a -> b -> c) -> b -> a -> c
+ghci> :t map
+map :: (a -> b) -> [a] -> [b]
+ghci> :t map (+ 1)
+map (+ 1) :: Num b => [b] -> [b]
+ghci> :t filter
+filter :: (a -> Bool) -> [a] -> [a]
+ghci> :t foldr
+foldr :: Foldable t => (a -> b -> b) -> b -> t a -> b
+ghci> :t foldl
+foldl :: Foldable t => (b -> a -> b) -> b -> t a -> b
+ghci> :t length
+length :: Foldable t => t a -> Int
+ghci> :t sum
+sum :: (Foldable t, Num a) => t a -> a
+ghci> :t elem
+elem :: (Foldable t, Eq a) => a -> t a -> Bool
+ghci> :t null
+null :: Foldable t => t a -> Bool
+ghci> :t head
+head :: GHC.Stack.Types.HasCallStack => [a] -> a
+ghci> :t zip
+zip :: [a] -> [b] -> [(a, b)]
+ghci> :t show
+show :: Show a => a -> String
+ghci> :t read
+read :: Read a => String -> a
+ghci> :t fromIntegral
+fromIntegral :: (Integral a, Num b) => a -> b
+ghci> :t (/)
+(/) :: Fractional a => a -> a -> a
+ghci> :t div
+div :: Integral a => a -> a -> a
+ghci> :t sqrt
+sqrt :: Floating a => a -> a
+ghci> :t 10 / 3
+10 / 3 :: Fractional a => a
+ghci> :t 2 ^ 10
+2 ^ 10 :: Num a => a
+ghci> :t 17 `div` 5
+17 `div` 5 :: Integral a => a
+ghci> :t sqrt 2
+sqrt 2 :: Floating a => a
+ghci> :t floor
+floor :: (RealFrac a, Integral b) => a -> b
+ghci> :t floor 2.5
+floor 2.5 :: Integral b => b
+ghci> :t \x -> x
+\x -> x :: p -> p
+ghci> :t \x y -> x
+\x y -> x :: p1 -> p2 -> p1
+ghci> :t \x y -> y
+\x y -> y :: p1 -> p2 -> p2
+ghci> :t \f x -> f (f x)
+\f x -> f (f x) :: (t -> t) -> t -> t
+ghci> :t \x -> x + 1
+\x -> x + 1 :: Num a => a -> a
+ghci> :t \x -> [x]
+\x -> [x] :: a -> [a]
+ghci> :t \(a, b) -> (b, a)
+\(a, b) -> (b, a) :: (b, a) -> (a, b)
+ghci> :t \x -> if x then 1 else 2
+\x -> if x then 1 else 2 :: Num a => Bool -> a
+ghci> :t \xs -> case xs of { [] -> 0; (y:_) -> y }
+\xs -> case xs of { [] -> 0; (y:_) -> y } :: Num a => [a] -> a
+ghci> :t [x * 2 | x <- [1..5]]
+[x * 2 | x <- [1..5]] :: (Enum a, Num a) => [a]
+ghci> :t [1..]
+[1..] :: (Num a, Enum a) => [a]
+ghci> :t ['a'..]
+['a'..] :: [Char]
+ghci> :t if True then 1 else 2
+if True then 1 else 2 :: Num a => a
+ghci> :t let f x = x in f
+let f x = x in f :: p -> p
+ghci> :t let f x = x in (f 1, f True)
+let f x = x in (f 1, f True) :: Num a => (a, Bool)
+ghci> :t \x -> x x
+
+<interactive>:1:9: error: [GHC-25897]
+    • Couldn't match expected type ‘t1’ with actual type ‘t1 -> t2’
+      ‘t1’ is a rigid type variable bound by
+        the inferred type of it :: (t1 -> t2) -> t2
+        at <interactive>:1:1
+    • In the first argument of ‘x’, namely ‘x’
+      In the expression: x x
+      In the expression: \ x -> x x
+    • Relevant bindings include
+        x :: t1 -> t2 (bound at <interactive>:1:2)
+ghci> :t 1 + True
+
+<interactive>:1:1: error: [GHC-39999]
+    • No instance for ‘Num Bool’ arising from the literal ‘1’
+    • In the first argument of ‘(+)’, namely ‘1’
+      In the expression: 1 + True
+ghci> :t undefined
+undefined :: GHC.Stack.Types.HasCallStack => a
+ghci> :t error
+error :: GHC.Stack.Types.HasCallStack => [Char] -> a
+ghci> :t (,)
+(,) :: a -> b -> (a, b)
+ghci> :t (,,)
+(,,) :: a -> b -> c -> (a, b, c)
+ghci> :t (:)
+(:) :: a -> [a] -> [a]
+ghci> :t "a" ++ "b"
+"a" ++ "b" :: [Char]
+ghci> :t words
+words :: String -> [String]
+ghci> :t lines
+lines :: String -> [String]
+ghci> :type map
+map :: (a -> b) -> [a] -> [b]
+ghci> :ty map
+map :: (a -> b) -> [a] -> [b]
+ghci> :t nosuchthing
+
+<interactive>:1:1: error: [GHC-88464]
+    Variable not in scope: nosuchthing
+ghci> :t Just 1 == Nothing
+Just 1 == Nothing :: Bool
+ghci> :t compare
+compare :: Ord a => a -> a -> Ordering
+ghci> :t max
+max :: Ord a => a -> a -> a
+ghci> :t fst
+fst :: (a, b) -> a
+ghci> :t uncurry
+uncurry :: (a -> b -> c) -> (a, b) -> c
+ghci> :t iterate
+iterate :: (a -> a) -> a -> [a]
+ghci> :t take 3 (repeat 'x')
+take 3 (repeat 'x') :: [Char]
+
+## 23. :type of user definitions (inference, generalisation, constraint order)
+
+ghci> double x = x * 2
+ghci> :t double
+double :: Num a => a -> a
+ghci> add x y = x + y
+ghci> :t add
+add :: Num a => a -> a -> a
+ghci> factorial n = if n <= 1 then 1 else n * factorial (n - 1)
+ghci> :t factorial
+factorial :: (Ord t, Num t) => t -> t
+ghci> fib n = if n <= 1 then n else fib (n - 1) + fib (n - 2)
+ghci> :t fib
+fib :: (Ord t, Num t) => t -> t
+ghci> let square x = x * x
+ghci> :t square
+square :: Num a => a -> a
+ghci> let xs = [1..10]
+ghci> :t xs
+xs :: (Num a, Enum a) => [a]
+ghci> plus = (+)
+ghci> :t plus
+plus :: Num a => a -> a -> a
+ghci> n = 5
+ghci> :t n
+n :: Num a => a
+ghci> avg xs = sum xs / fromIntegral (length xs)
+ghci> :t avg
+avg :: (Fractional a, Foldable t) => t a -> a
+ghci> swap' (a, b) = (b, a)
+ghci> :t swap'
+swap' :: (b, a) -> (a, b)
+ghci> compose f g x = f (g x)
+ghci> :t compose
+compose :: (t1 -> t2) -> (t3 -> t1) -> t3 -> t2
+ghci> describeList xs = case xs of { [] -> "empty" ; [x] -> "singleton" ; _ -> "longer" }
+ghci> :t describeList
+describeList :: [a] -> String
+ghci> k x y = x
+ghci> :t k
+k :: p1 -> p2 -> p1
+ghci> eq3 a b c = a == b && b == c
+ghci> :t eq3
+eq3 :: Eq a => a -> a -> a -> Bool
+ghci> ord3 a b = if a < b then show a else show b
+ghci> :t ord3
+ord3 :: (Ord a, Show a) => a -> a -> String
+ghci> idd :: a -> a; idd x = x
+ghci> :t idd
+idd :: a -> a
+ghci> toD :: Int -> Double; toD = fromIntegral
+ghci> :t toD
+toD :: Int -> Double
+ghci> data Shape = Circle Double | Rectangle Double Double
+ghci> :t Circle
+Circle :: Double -> Shape
+ghci> :t Rectangle 3
+Rectangle 3 :: Double -> Shape
+ghci> data T a = Leaf | Node (T a) a (T a)
+ghci> :t Node
+Node :: T a -> a -> T a -> T a
+ghci> :t Leaf
+Leaf :: T a
+ghci> 1 + 1
+2
+ghci> :t it
+it :: Num a => a
+ghci> "s"
+"s"
+ghci> :t it
+it :: String
+
+## 24. Type errors that real typing must catch
+
+ghci> length [1,2,3] / 2
+
+<interactive>:1:16: error: [GHC-39999]
+    • No instance for ‘Fractional Int’ arising from a use of ‘/’
+    • In the expression: length [1, 2, 3] / 2
+      In an equation for ‘it’: it = length [1, 2, 3] / 2
+ghci> 1 + True
+
+<interactive>:3:1: error: [GHC-39999]
+    • No instance for ‘Num Bool’ arising from the literal ‘1’
+    • In the first argument of ‘(+)’, namely ‘1’
+      In the expression: 1 + True
+      In an equation for ‘it’: it = 1 + True
+ghci> "a" ++ 'b'
+
+<interactive>:5:8: error: [GHC-83865]
+    • Couldn't match expected type ‘[Char]’ with actual type ‘Char’
+    • In the second argument of ‘(++)’, namely ‘'b'’
+      In the expression: "a" ++ 'b'
+      In an equation for ‘it’: it = "a" ++ 'b'
+ghci> 'a' : 'b'
+
+<interactive>:7:7: error: [GHC-83865]
+    • Couldn't match expected type ‘[Char]’ with actual type ‘Char’
+    • In the second argument of ‘(:)’, namely ‘'b'’
+      In the expression: 'a' : 'b'
+      In an equation for ‘it’: it = 'a' : 'b'
+ghci> [1, "a"]
+
+<interactive>:9:2: error: [GHC-39999]
+    • No instance for ‘Num String’ arising from the literal ‘1’
+    • In the expression: 1
+      In the expression: [1, "a"]
+      In an equation for ‘it’: it = [1, "a"]
+ghci> if True then 1 else "no"
+
+<interactive>:11:14: error: [GHC-39999]
+    • No instance for ‘Num String’ arising from the literal ‘1’
+    • In the expression: 1
+      In the expression: if True then 1 else "no"
+      In an equation for ‘it’: it = if True then 1 else "no"
+ghci> head 5
+
+<interactive>:13:1: error: [GHC-39999]
+    • No instance for ‘Num [()]’ arising from a use of ‘it’
+    • In the first argument of ‘print’, namely ‘it’
+      In a stmt of an interactive GHCi command: print it
+ghci> (\x -> x x)
+
+<interactive>:15:10: error: [GHC-25897]
+    • Couldn't match expected type ‘t1’ with actual type ‘t1 -> t2’
+      ‘t1’ is a rigid type variable bound by
+        the inferred type of it :: (t1 -> t2) -> t2
+        at <interactive>:15:1-11
+    • In the first argument of ‘x’, namely ‘x’
+      In the expression: x x
+      In the expression: \ x -> x x
+    • Relevant bindings include
+        x :: t1 -> t2 (bound at <interactive>:15:3)
+        it :: (t1 -> t2) -> t2 (bound at <interactive>:15:1)
+ghci> not 3
+
+<interactive>:17:5: error: [GHC-39999]
+    • No instance for ‘Num Bool’ arising from the literal ‘3’
+    • In the first argument of ‘not’, namely ‘3’
+      In the expression: not 3
+      In an equation for ‘it’: it = not 3
+ghci> Just 1 + 1
+
+<interactive>:19:1: error: [GHC-39999]
+    • No instance for ‘Num (Maybe Integer)’ arising from a use of ‘it’
+    • In the first argument of ‘print’, namely ‘it’
+      In a stmt of an interactive GHCi command: print it
+ghci> id
+
+<interactive>:21:1: error: [GHC-39999]
+    • No instance for ‘Show (a0 -> a0)’ arising from a use of ‘print’
+        (maybe you haven't applied a function to enough arguments?)
+    • In a stmt of an interactive GHCi command: print it
+ghci> print id
+
+<interactive>:23:1: error: [GHC-39999]
+    • No instance for ‘Show (a0 -> a0)’ arising from a use of ‘print’
+        (maybe you haven't applied a function to enough arguments?)
+    • In the expression: print id
+      In an equation for ‘it’: it = print id
+ghci> show (+)
+
+<interactive>:25:1: error: [GHC-39999]
+    • No instance for ‘Show (Integer -> Integer -> Integer)’
+        arising from a use of ‘show’
+        (maybe you haven't applied a function to enough arguments?)
+    • In the expression: show (+)
+      In an equation for ‘it’: it = show (+)
+ghci> True + 1
+
+<interactive>:27:6: error: [GHC-39999]
+    • No instance for ‘Num Bool’ arising from a use of ‘+’
+    • In the expression: True + 1
+      In an equation for ‘it’: it = True + 1
+ghci> fromMaybe 0 (Just "x")
+
+<interactive>:29:1: error: [GHC-88464]
+    Variable not in scope: fromMaybe :: t0 -> Maybe String -> t
+ghci> let bad = 1 + True
+
+<interactive>:31:11: error: [GHC-39999]
+    • No instance for ‘Num Bool’ arising from the literal ‘1’
+    • In the first argument of ‘(+)’, namely ‘1’
+      In the expression: 1 + True
+      In an equation for ‘bad’: bad = 1 + True
+ghci> :t length [1,2,3] / 2
+
+<interactive>:1:16: error: [GHC-39999]
+    • No instance for ‘Fractional Int’ arising from a use of ‘/’
+    • In the expression: length [1, 2, 3] / 2
+
+## 25. Runtime errors and their messages
+
+ghci> undefined
+*** Exception: Prelude.undefined
+CallStack (from HasCallStack):
+  undefined, called at <interactive>:1:1 in interactive:Ghci1
+ghci> error "boom"
+*** Exception: boom
+CallStack (from HasCallStack):
+  error, called at <interactive>:3:1 in interactive:Ghci1
+ghci> error ""
+*** Exception: 
+CallStack (from HasCallStack):
+  error, called at <interactive>:5:1 in interactive:Ghci1
+ghci> head []
+*** Exception: Prelude.head: empty list
+CallStack (from HasCallStack):
+  error, called at libraries/base/GHC/List.hs:1644:3 in base:GHC.List
+  errorEmptyList, called at libraries/base/GHC/List.hs:87:11 in base:GHC.List
+  badHead, called at libraries/base/GHC/List.hs:83:28 in base:GHC.List
+  head, called at <interactive>:7:1 in interactive:Ghci1
+ghci> tail []
+*** Exception: Prelude.tail: empty list
+CallStack (from HasCallStack):
+  error, called at libraries/base/GHC/List.hs:1644:3 in base:GHC.List
+  errorEmptyList, called at libraries/base/GHC/List.hs:130:28 in base:GHC.List
+  tail, called at <interactive>:9:1 in interactive:Ghci1
+ghci> fromJust Nothing
+
+<interactive>:11:1: error: [GHC-88464]
+    Variable not in scope: fromJust :: Maybe a0 -> t
+ghci> import Data.Maybe
+ghci> fromJust Nothing
+*** Exception: Maybe.fromJust: Nothing
+CallStack (from HasCallStack):
+  error, called at libraries/base/Data/Maybe.hs:150:21 in base:Data.Maybe
+  fromJust, called at <interactive>:15:1 in interactive:Ghci2
+ghci> let f 0 = 1
+ghci> f 1
+*** Exception: <interactive>:17:5-11: Non-exhaustive patterns in function f
+ghci> let g (Just x) = x
+ghci> g Nothing
+*** Exception: <interactive>:21:5-18: Non-exhaustive patterns in function g
+ghci> (\(Just x) -> x) Nothing
+*** Exception: <interactive>:25:2-15: Non-exhaustive patterns in lambda
+ghci> let Just y = Nothing :: Maybe Int
+
+<interactive>:27:5: warning: [GHC-53633] [-Woverlapping-patterns]
+    Pattern match is redundant
+    In a pattern binding: Just y = ...
+ghci> y
+*** Exception: <interactive>:27:5-33: Non-exhaustive patterns in Just y
+ghci> case 3 of 1 -> 'a'
+
+<interactive>:31:11: warning: [GHC-53633] [-Woverlapping-patterns]
+    Pattern match is redundant
+    In a case alternative: 1 -> ...
+*** Exception: <interactive>:31:1-18: Non-exhaustive patterns in case
+ghci> [1,2,3] !! 10
+*** Exception: Prelude.!!: index too large
+CallStack (from HasCallStack):
+  error, called at libraries/base/GHC/List.hs:1366:14 in base:GHC.List
+  tooLarge, called at libraries/base/GHC/List.hs:1376:50 in base:GHC.List
+  !!, called at <interactive>:33:9 in interactive:Ghci5
+ghci> read "x" :: Int
+*** Exception: Prelude.read: no parse
+ghci> 1 `div` 0
+*** Exception: divide by zero
+ghci> toEnum 1114112 :: Char
+*** Exception: Prelude.chr: bad argument: 1114112
+ghci> succ (maxBound :: Int)
+*** Exception: Prelude.Enum.succ{Int}: tried to take `succ' of maxBound
+ghci> let loop = loop
+-- loop  (skipped: GHCi prints <<loop>> only in compiled code; at the prompt it may hang)
+
+## 26. GHCi commands and REPL surface
+
+ghci> :t
+
+<no location info>: error: not an expression: ‘’
+ghci> :type
+
+<no location info>: error: not an expression: ‘’
+ghci> :foo
+unknown command ':foo'
+use :? for help.
+ghci> :q2
+unknown command ':q2'
+use :? for help.
+ghci> 1 +
+
+<interactive>:9:4: error: [GHC-58481]
+    parse error (possibly incorrect indentation or mismatched brackets)
+ghci> )
+
+<interactive>:11:1: error: [GHC-58481] parse error on input ‘)’
+ghci> let
+ghci> x =
+
+<interactive>:15:4: error: [GHC-58481]
+    parse error (possibly incorrect indentation or mismatched brackets)
+ghci> :{
+ghci| 1 +
+ghci|   2
+ghci| :}
+3
+ghci> :{
+ghci| let a = 1
+ghci|     b = 2
+ghci| :}
+ghci> a + b
+3
+-- comments after input
+ghci> 1 + 1 -- comment
+2
+ghci> {- block -} 2
+2
+ghci> :t 1 -- comment
+1 -- comment :: Num a => a
+
