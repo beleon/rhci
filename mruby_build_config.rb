@@ -11,6 +11,10 @@ MRuby::Build.new do |conf|
   conf.defines << 'MRB_UTF8_STRING'
   # Int is 64-bit on GHC; keep mrb_int the same width everywhere.
   conf.defines << 'MRB_INT64'
+  # Stock mruby allows ~500 nested Ruby calls (~100 through blocks); the
+  # parser and type checker recurse along syntactic nesting. The evaluator
+  # never recurses regardless.
+  conf.defines << 'MRB_CALL_LEVEL_MAX=100000'
 
   conf.gem core: 'mruby-bigint'      # Integer is unbounded
   conf.gem core: 'mruby-math'        # sqrt, exp, log, trig for Floating

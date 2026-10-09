@@ -2,8 +2,22 @@
 
 Status: **proposal, nothing implemented.** The scope it serves is in
 `CLAUDE.md`: GHCi *semantics* (values, `show` output, what type-checks,
-laziness, the syntax users write), not GHCi's text. It must run on CRuby 3.4
-and on mruby 4.0, in the lean `mruby_build_config.rb` build.
+laziness, the syntax users write), not GHCi's text.
+
+There are two deliverables from one source tree:
+- **CRuby library:** embedded in long-running Ruby programs. Startup time
+  doesn't matter. Isolation, no global side effects, and host control over
+  runaway evaluation do.
+- **mruby standalone command `rghci`:** built only with our own
+  `mruby_build_config.rb`. Startup must be similar to bash's
+  (see §6). It targets laptops and desktops.
+
+**Fail, don't approximate.** If something can't be done with GHCi's exact
+semantics, rghci rejects it with an explicit "unsupported: …" error. It
+never substitutes something close. This covers unsupported syntax and
+extensions, types we don't provide (`Float`), and numeric edge cases we
+can't reproduce exactly. A wrong answer that looks right is the worst
+outcome. Runtime performance is best effort, with no target.
 
 ## 1. Pipeline
 
@@ -104,12 +118,22 @@ A type error leaves the session unchanged, as in GHCi.
   `Functor f`) unify structurally with no special machinery.
 - Kinds are inferred for `data` and `class` declarations, defaulting to `*`.
 
+### Two checking modes
+GHCi checks prompt input and loaded files under different flags. Both
+modes are needed, and they have to be tested separately:
+
+| | prompt input | `:load`ed file |
+|---|---|---|
+| monomorphism restriction | off | **on** |
+| defaulting | ExtendedDefaultRules | standard Haskell 2010 rules |
+
 ### Inference
 - **Algorithm W with level-based generalisation** (Rémy/OCaml style),
   processing one SCC at a time. Explicit signatures are checked and then
   used as the binding's type. Polymorphic recursion is allowed only with a
   signature, as in Haskell.
-- **No monomorphism restriction**, because GHCi turns it off.
+- **Monomorphism restriction:** off at the prompt and on in loaded files,
+  as in GHCi.
 - **Constraints** are collected as predicates `C τ` and reduced by
   instance lookup (`Show [a]` → `Show a`). A constraint on a concrete type
   with no instance is a type error (`length xs / 2` →
@@ -120,8 +144,8 @@ A type error leaves the session unchanged, as in GHCi.
   appears in neither the type nor the environment) is defaulted. Interactive
   input uses GHCi's ExtendedDefaultRules (candidates `()`, `[]`, `Integer`,
   `Double`; interactive classes allowed). Prelude code uses the standard
-  rules. This is why `Nothing` and `[]` print, `2 ^ 64` is an Integer, and
-  `head 5` is a type error.
+  rules, and so do loaded files. This is why `Nothing` and `[]` print,
+  `2 ^ 64` is an Integer, and `head 5` is a type error.
 
 ### Classes and instances
 - **Haskell 98 classes:** single parameter, superclasses, default methods,
@@ -212,9 +236,19 @@ list?". Printing goes through the `Show` dictionary like any other code.
   Ruby supplies only primitives: arithmetic and comparison per numeric
   type, char/code point conversion, `showDouble`, `error`, `seq`, `putChar`
   and `getLine`.
-- It is compiled through the normal pipeline at startup. If that turns out
-  slow on mruby (to be measured, not guessed), a build step snapshots the
-  elaborated Core and type environment as a Ruby data literal.
+- **Never compiled at startup.** A build step runs the Prelude through the
+  whole pipeline and writes a **snapshot**: the type environment, class and
+  instance tables, and the elaborated machine Core.
+  - The snapshot is stored **per binding, in a compact encoded form,
+    materialised lazily** on first reference. Startup then costs
+    nothing per Prelude definition, and a session pays only for what it
+    uses. `:t map` decodes one type, and `sum [1..10]` decodes the
+    handful of bindings it reaches.
+  - Compiled code and types are shared and read-only. **CAFs (top-level
+    thunks) are instantiated per session**, because evaluating one mutates
+    it, and two embedded sessions must never share mutable heap.
+- The snapshot is regenerated whenever `prelude/*.hs` or the compiler
+  changes. A test checks that it is up to date.
 
 ## 5. REPL surface
 - An input is one of: an expression, a declaration group (functions,
@@ -224,14 +258,71 @@ list?". Printing goes through the `Show` dictionary like any other code.
 - **Any other expression:** bind `it` generalised (`:t it` gives `Num a => a`),
   then run `print it` at the defaulted type. With no `Show` instance this is a
   type error (functions, or `data` without `deriving Show`).
-- **Commands:** `:t`/`:type`, `:q`/`:quit`, `:{ … :}`, and a minimal `:?`.
+- **Commands:** `:t`/`:type`, `:q`/`:quit`, `:{ … :}`, `:l`/`:load`,
+  `:r`/`:reload`, and a minimal `:?`.
+- **`:load file`, with GHCi semantics:**
+  - The `.hs` extension is optional and an optional `module M where`
+    header is accepted.
+  - The file is checked in file mode (monomorphism restriction on,
+    standard defaulting).
+  - Imported modules are found as `A/B.hs` relative to the **current
+    directory**, which is GHCi's default `-i.`. Imports are loaded
+    transitively, and a cycle is an error.
+  - A successful load **discards all prompt bindings**. Then every
+    top-level name of the loaded module is in scope (exports are ignored, as
+    in GHCi's `*M` context), along with the exports of the modules it imports.
+  - A failed load leaves only the Prelude in scope, as with GHCi's
+    `Failed, no modules loaded.`.
+  - `:reload` repeats the last `:load`. Running `main` at the prompt works,
+    because it's just an `IO ()` expression.
 - **Error classes:** parse, scope, type and runtime. The text is GHC-like
   but not GHC-exact, for example `*** Exception: Prelude.head: empty list`.
 - **Ctrl-C:** on CRuby an `INT` trap sets a flag the machine polls, and
   GHCi prints `Interrupted.`. mruby has no signal handling, so Ctrl-C ends
   the process there. That goes behind the runtime shim.
 
-## 6. Dual-runtime discipline
+## 6. Deliverables
+
+### CRuby library (embedding)
+- Everything lives under `module Rghci`. There are **no globals, no
+  core-class monkey patches, no signal traps, no `exit`**, and no writes to
+  `$stdout`/`$stdin` except through the IO objects the host passes in.
+- **The API** is roughly:
+  - `Rghci::Session.new(stdout:, stdin:, limits:)`
+  - `session.eval(input)` returns a result object: the output text and a
+    status of ok, parse error, scope error, type error, runtime exception
+    or limit hit.
+  - `session.type_of(expr)`, `session.load(path)`, `session.interrupt!`
+- **Sessions are independent.** Prelude code and types are shared
+  read-only, and each session has its own heap (see Prelude/CAFs). Running
+  different sessions on different threads is allowed. A single session is
+  not thread-safe.
+- **Limits, because a host can't afford a hang.** The host can set a
+  step budget, a stack-depth cap, and a wall-clock deadline (checked
+  every N machine steps). `interrupt!` sets a flag the machine polls.
+  When a limit is hit, the input is aborted and the session stays usable,
+  the same way a Ctrl-C at GHCi's prompt behaves. With no limits set,
+  behaviour is GHCi's (`[1..]` prints forever).
+
+### mruby command `rghci`
+- **A static binary** is built from an mrbgem in this repo
+  (`mrbgems/rghci-bin`). It has a small C `main` that loads the
+  compiled bundle and the Prelude snapshot from **bytecode embedded in the
+  binary** (`mrbc -B`). Ruby source is never parsed at startup.
+- **Startup budget, measured on this machine:** `bash -c exit` and
+  `bash --norc -i -c exit` take about **1.5 ms**. An empty mruby takes
+  1.3 ms. Loading 5k lines of Ruby takes **2.7 ms as bytecode** but
+  **10.7 ms as source**.
+  - **Target:** `rghci` reaching its prompt (measured with
+    `echo :q | rghci`) costs **at most 2× `bash --norc -i -c exit`** on the
+    same machine. It's enforced by a benchmark test from build step 1 on,
+    so every later step is held to it.
+  - That is why the Prelude snapshot is lazy (§4). It's also why
+    load-time work in the bundle (big constant tables, eager class
+    setup) gets measured and moved behind first use.
+- `MRB_CALL_LEVEL_MAX=100000` is set in the build config (see below).
+
+## 7. Dual-runtime discipline
 - **One source tree, one manifest.** `lib/rghci/manifest.rb` lists the
   files in load order. CRuby loads them with `require_relative`. For mruby,
   `tools/bundle.rb` concatenates them (Prelude `.hs` embedded as heredocs)
@@ -252,10 +343,10 @@ list?". Printing goes through the `Show` dictionary like any other code.
   frames and about 100–170 through `map`/`each`, while CRuby allows about
   10k and 3.7k. With `MRB_CALL_LEVEL_MAX=100000` in the build config,
   mruby reaches about 131k plain and 26k–44k through blocks, which is
-  deeper than CRuby. **Proposal:** set that define in our build, and keep
-  the machine stack-free regardless.
+  deeper than CRuby. **Decided:** the define is set in our build, and the
+  machine stays stack-free regardless.
 
-## 7. Testing
+## 8. Testing
 - **Oracle runner** (`test/oracle_test.rb`): replays `oracle/probes.txt` on
   each runtime and compares against the goldens using the semantic rules.
   Values must match exactly. `:t` results are compared up to renaming with
@@ -271,15 +362,22 @@ list?". Printing goes through the `Show` dictionary like any other code.
   - `Int` overflow
   - `div`/`mod`/`quot`/`rem` sign tables
   - `round`/`truncate` on halves
+- **`:load` probes:** the oracle harness mounts a directory of `.hs`
+  fixtures into the container, so module loading, the monomorphism
+  restriction in files, and standard defaulting all get GHCi goldens.
+- **Embedding tests** (CRuby only): session isolation (CAFs not shared),
+  each limit aborting cleanly with the session reusable afterwards, and
+  nothing written outside the provided IO.
 - **`rake test` runs everything twice,** on `ruby` and on
   `build/mruby/bin/mruby` against the bundle. A test that passes on one
   runtime only counts as failing.
 
-## 8. Build order
+## 9. Build order
 Each step ends green on **both** runtimes before the next one starts.
 
 1. **Skeleton:** manifest, shim, bundler, test framework, lint, `rake test`
-   on both runtimes.
+   on both runtimes, the `rghci` static binary with embedded bytecode, and
+   the startup benchmark.
 2. **Lexer, layout, parser, fixity:** a parse-only pass over every probe,
    with error *class* matching the goldens for parse errors.
 3. **Machine and primitives** driven by hand-written Core: laziness,
@@ -290,19 +388,19 @@ Each step ends green on **both** runtimes before the next one starts.
    Bool/Char/list/function types.
 5. **Classes:** dictionary elaboration, defaulting, deriving, and the
    Prelude in Haskell. Then the oracle sections switch on one by one.
-6. **REPL surface:** `it`, shadowing, IO at the prompt, `:{ :}`. The full
+6. **REPL surface:** `it`, shadowing, IO at the prompt, `:{ :}`, `:load`
+   and `:reload` in file mode, and the embedding API with limits. The full
    oracle should then be green or in `known_gaps.txt`.
-7. **Performance:** measure on mruby, then add the Prelude snapshot and
-   machine fast paths if they're needed.
+7. **Performance:** best effort, driven by what feels slow in use.
 
-## 9. Open questions
-1. **The mruby target:** is it our build (which can set
-   `MRB_CALL_LEVEL_MAX`), or must rghci also run on stock and embedded
-   mruby builds we don't control? The second option forces the parser and
-   type checker onto explicit stacks too, which is much more work.
-2. **Performance expectations** on mruby: acceptable startup time, and how
-   long `sum [1..10^6]` may take.
-3. **`Float` (32-bit):** leave it out, or emulate single-precision rounding?
-   It is not in the probe surface.
-4. **`:load file.hs`:** the original had it. Should it be in scope now,
-   later, or not at all?
+## 10. Decisions taken in review (2026-10-09)
+- mruby is only our own build, so `MRB_CALL_LEVEL_MAX` may be raised.
+  The parser and type checker may recurse along syntactic nesting, and the
+  machine stays stack-free.
+- CRuby is for embedding, where startup doesn't matter. mruby is the
+  standalone command, with startup similar to bash.
+- Runtime performance is best effort. Semantics come first, and if
+  something can't be exact it fails rather than approximates.
+- No 32-bit `Float` for now. Using it is an "unsupported" error, not a
+  silent Double.
+- `:load` is in scope now.
