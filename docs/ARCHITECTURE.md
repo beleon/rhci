@@ -152,8 +152,8 @@ modes are needed, and they have to be tested separately:
   and instance heads of the form `C (T a1 … an)` with contexts. That covers
   Eq, Ord, Show, Enum, Bounded, Num, Real, Integral, Fractional, Floating,
   RealFrac, RealFloat, Semigroup, Monoid, Functor, Applicative, Monad,
-  Foldable, Traversable, and Read (needed by `rghci -a`, and it must
-  match GHC's `reads` exactly), plus user-declared classes.
+  Foldable, Traversable, and Read (for `read`, matching GHC's `reads`
+  exactly), plus user-declared classes.
   - `Show` includes **`showList`**. That is the Report's trick that makes
     `"hi"` and `[['a'],"b"]` print as strings, so we use the class as
     specified rather than special-casing the printer.
@@ -332,15 +332,26 @@ list?". Printing goes through the `Show` dictionary like any other code.
   keys, history, and Tab completion of names in scope. Raw mode comes from
   a tiny C gem (`mrbgems/rghci-term`: termios, window size) next to the C
   `main`. It's mruby-command only; the CRuby library has no terminal code.
-- **Command-line modes.** The flag letters are tentative. The axes are
-  orthogonal:
-  | flag | meaning |
+- **Command-line modes:**
+  | form | meaning |
   |---|---|
-  | `-c EXPR` | EXPR is a **pure value**. An `IO` type is an error that points at `-x`. |
-  | `-x EXPR` | EXPR is an **IO action** and is run. A non-IO type is an error. |
-  | `-a ARGS…` | **Typed application:** EXPR is a function, and each argument is parsed with `Read` at the inferred parameter type. `String` parameters are taken verbatim. The arity must equal the argument count. Ambiguous parameter types default as at the prompt, so `rghci -c '(+)' -a 3 4.5` fails with a parse error on `4.5`, as `read "4.5" :: Integer` does. |
-  | `-g ARGS…` | The arguments are only visible to `getArgs` (`System.Environment`). Useful with `-x`. |
-  | `-i` | **interact:** after any `-a` arguments, EXPR is applied to stdin as a lazy `String` (`String -> String`, or `String -> IO t` with `-x`). Output streams as it's produced. |
+  | `rghci -c EXPR [ARG…]` | **Pure evaluation.** Each ARG is itself a Haskell **expression**. The input is checked and run as `(EXPR) (ARG1) (ARG2) …`, with prompt rules (extended defaulting, no monomorphism restriction). |
+  | `rghci -x EXPR [ARG…]` | **IO.** EXPR must have type `IO t` and is run. The ARGs are plain `String`s, visible only through `getArgs`, and the program parses them itself. |
+  | `rghci -i …` | Combines with `-c`/`-x`: the result (after applying any ARGs) is applied to stdin as a lazy `String` (`String -> String`, or `String -> IO t` with `-x`), and output streams as it's produced. |
+  - **`-c` arity and type rules.** EXPR must take exactly as many
+    arguments as given. If the applied result still has a function type,
+    that's an explicit arity error ("`(+)` expects 2 arguments, got 1").
+    Too many arguments, or arguments of the wrong type, are ordinary type
+    errors. `-c` with an `IO` type is an error that points at `-x`, and
+    `-x` with a non-IO type is an error that points at `-c`.
+  - **Examples:**
+    - `rghci -c '(+)' '3 :: Double' 10` checks
+      `((+)) (3 :: Double) (10)` and prints `13.0`.
+    - `rghci -c '"Hello\n"'` writes `Hello` and a newline.
+    - `rghci -c 'map toUpper' hello` is a scope error (`hello` is a
+      variable). Write `'"hello"'`.
+    - `rghci -x 'getArgs >>= mapM_ putStrLn' a b` writes `a` and `b` on
+      separate lines.
   - **Output rule:** a result of type `String` is written raw with
     `putStr` (no quotes, escapes become real characters, no newline
     added), so `-c '"Hello\n"'` writes `Hello` and a newline. Any other
