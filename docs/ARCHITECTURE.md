@@ -316,6 +316,11 @@ list?". Printing goes through the `Show` dictionary like any other code.
   lines of Haskell with the old front end took 550 ms. Allocating an
   object costs about 0.5 µs, and a 20k-node snapshot written as Ruby code
   loads in 11.6 ms.
+  - These figures came from a bash timing loop, which adds about 0.4 ms
+    of its own per run. Measured with `Process.spawn` and a monotonic
+    clock (the method `tools/bench_startup.rb` uses), the floor is
+    `/bin/true` 0.52 ms, then mruby 0.91 ms and `bash -c exit` 1.11 ms.
+    The skeleton `rhci` takes 0.94 ms, the same as plain mruby.
   - **Interactive: a usable prompt in under 10 ms**, meaning the prompt is
     printed and keystrokes are accepted. The order is: load bytecode, put
     the terminal in raw mode, print the prompt, *then* decode the Prelude
