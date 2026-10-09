@@ -10,6 +10,7 @@ module Rhci
     EXIT_UNSUPPORTED = 4 # outside what rhci implements exactly
 
     PROMPT = 'rhci> '
+    CONTINUATION_PROMPT = 'rhci| '
 
     USAGE = <<~TEXT
       usage: rhci [FILE.hs...]                 interactive session
@@ -109,27 +110,59 @@ module Rhci
       session = Session.new(stdout: stdout, stdin: stdin)
       report(session.load(opts.files), stderr) unless opts.files.empty?
       loop do
-        Shim.write(stdout, PROMPT)
-        Shim.flush(stdout)
-        line = Shim.read_line(stdin)
-        if line.nil?
+        input = read_input(stdin, stdout)
+        if input.nil?
           Shim.write(stdout, "\n")
           return EXIT_OK
         end
-        input = line.strip
-        next if input.empty?
-        return EXIT_OK if input == ':q' || input == ':quit'
+        next if input.strip.empty?
+        return EXIT_OK if quit?(input)
 
         report(session.eval(input), stderr)
         Shim.flush(stdout)
       end
     end
 
+    # One input: a line, or the lines between `:{` and `:}` joined with
+    # newlines (layout intact). nil at end of input.
+    def self.read_input(stdin, stdout)
+      line = prompt_line(stdin, stdout, PROMPT)
+      return nil if line.nil?
+      return line unless line.strip == ':{'
+
+      lines = []
+      loop do
+        l = prompt_line(stdin, stdout, CONTINUATION_PROMPT)
+        return nil if l.nil?
+        return lines.join("\n") if l.strip == ':}'
+
+        lines << l
+      end
+    end
+
+    def self.prompt_line(stdin, stdout, prompt)
+      Shim.write(stdout, prompt)
+      Shim.flush(stdout)
+      line = Shim.read_line(stdin)
+      line&.chomp
+    end
+
+    def self.quit?(input)
+      s = input.strip
+      return false unless s.start_with?(':') && !s.include?(' ')
+
+      Session.command_name(s[1..-1]) == 'quit'
+    end
+
     def self.report(result, stderr)
       return if result.ok?
 
-      prefix = result.status == :exception ? '*** Exception' : result.status.to_s.tr('_', ' ')
-      Shim.write(stderr, "#{prefix}: #{result.message}\n")
+      text = case result.status
+             when :exception then "*** Exception: #{result.message}"
+             when :unsupported then "unsupported: #{result.message}"
+             else result.message
+             end
+      Shim.write(stderr, "#{text}\n")
       Shim.flush(stderr)
     end
 
@@ -138,6 +171,7 @@ module Rhci
       when :ok then EXIT_OK
       when :exception, :limit then EXIT_EXCEPTION
       when :unsupported then EXIT_UNSUPPORTED
+      when :command_error then EXIT_USAGE
       else EXIT_COMPILE
       end
     end

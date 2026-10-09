@@ -1,0 +1,3 @@
+# Probes where rhci knowingly differs from the GHCi goldens.
+# Format: stage | exact probe input | reason
+# Stages: frontend (parse-error class), ... (more as later stages land)

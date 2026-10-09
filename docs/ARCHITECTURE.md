@@ -321,6 +321,10 @@ list?". Printing goes through the `Show` dictionary like any other code.
     clock (the method `tools/bench_startup.rb` uses), the floor is
     `/bin/true` 0.52 ms, then mruby 0.91 ms and `bash -c exit` 1.11 ms.
     The skeleton `rhci` takes 0.94 ms, the same as plain mruby.
+  - **Front end (measured after build step 2):** lexing, layout, parsing
+    and fixity on 157k characters take 728 ms on mruby and 337 ms on CRuby.
+    A 60–90k character Prelude would cost about 0.3–0.4 s on mruby before
+    type checking even starts, which confirms the snapshot.
   - **Interactive: a usable prompt in under 10 ms**, meaning the prompt is
     printed and keystrokes are accepted. The order is: load bytecode, put
     the terminal in raw mode, print the prompt, *then* decode the Prelude

@@ -20,6 +20,11 @@ def rhci_common(conf)
   # parser and type checker recurse along syntactic nesting. The evaluator
   # never recurses regardless.
   conf.defines << 'MRB_CALL_LEVEL_MAX=100000'
+  # mruby caps Arrays at 131072 elements (and Strings at 1 MB off
+  # Linux/macOS) by default. The evaluator's explicit stack alone needs ~10^6
+  # entries for `foldr (+) 0 [1..1000000]`; 0 disables the checks.
+  conf.defines << 'MRB_ARY_LENGTH_MAX=0'
+  conf.defines << 'MRB_STR_LENGTH_MAX=0'
 
   conf.gem core: 'mruby-bigint'      # Integer is unbounded
   conf.gem core: 'mruby-math'        # sqrt, exp, log, trig for Floating

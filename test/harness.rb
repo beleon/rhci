@@ -32,6 +32,15 @@ module RT
     raise Failure, message unless cond
   end
 
+  # The `kind` of the Rhci::Error the block raises, or nil. (mruby leaves
+  # `$!` nil inside a `rescue` modifier, so tests must not rely on it.)
+  def self.error_kind
+    yield
+    nil
+  rescue Rhci::Error => e
+    e.kind
+  end
+
   def self.raises(klass)
     begin
       yield

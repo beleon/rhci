@@ -34,5 +34,28 @@ EXECUTABLES.each do |label, cmd|
     RT.test 'REPL quits on :q' do
       RT.eq [Rhci::CLI::PROMPT, '', 0], run_exe(cmd, [], ":q\n")
     end
+
+    RT.test 'parse errors are reported with location and exit 3' do
+      _, err, code = run_exe(cmd, ['-c', '1 +'])
+      RT.eq 3, code
+      RT.eq "<interactive>:1:4: parse error (possibly incorrect indentation or mismatched brackets)\n", err
+      _, err, code = run_exe(cmd, ['-c', '(+)', '3 - -2'])
+      RT.eq 3, code
+      RT.ok err.include?('cannot mix'), err
+    end
+
+    RT.test ':{ :} groups lines with their layout; :qu abbreviates :quit' do
+      out, err, code = run_exe(cmd, [], ":{\nlet a = 1\n    b = 2\n:}\n:qu\n")
+      RT.eq 0, code
+      RT.eq 'rhci> rhci| rhci| rhci| rhci> ', out
+      RT.eq "unsupported: evaluation is not implemented yet\n", err
+    end
+
+    RT.test 'unknown commands; :t parses its argument' do
+      _, err, = run_exe(cmd, [], ":foo\n:t 1 +\n:t 1\n")
+      RT.eq "unknown command ':foo'\nuse :? for help.\n" \
+            "<interactive>:1:4: parse error (possibly incorrect indentation or mismatched brackets)\n" \
+            "unsupported: type inference is not implemented yet\n", err
+    end
   end
 end

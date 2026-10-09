@@ -33,4 +33,15 @@ RT.suite 'runtime assumptions' do
     RT.ok tiny > 0, 'ldexp(1, -1074) must be the smallest subnormal, not 0'
     RT.eq [0.5, -1073], Math.frexp(tiny)
   end
+
+  RT.test 'Arrays and Strings are not length-capped (MRB_*_LENGTH_MAX=0)' do
+    a = []
+    i = 0
+    while i < 1_000_000
+      a << i
+      i += 1
+    end
+    RT.eq 1_000_000, a.length
+    RT.eq 2_000_000, ('ab' * 1_000_000).length
+  end
 end

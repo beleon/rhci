@@ -1,4 +1,11 @@
 version
 shim
+errors
+lexer
+layout
+ast
+parser
+fixity
+frontend
 session
 cli
