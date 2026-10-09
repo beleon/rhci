@@ -107,6 +107,7 @@ module Rhci
 
     def self.repl(opts, stdin, stdout, stderr)
       session = Session.new(stdout: stdout, stdin: stdin)
+      report(session.load(opts.files), stderr) unless opts.files.empty?
       loop do
         Shim.write(stdout, PROMPT)
         Shim.flush(stdout)

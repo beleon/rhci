@@ -46,4 +46,10 @@ RT.suite 'CLI' do
     RT.eq 4, Rhci::CLI.main(['-c', '"Hello"'], stdin: RT::FakeIO.new, stdout: RT::FakeIO.new, stderr: err)
     RT.eq "unsupported: evaluation is not implemented yet\n", err.written
   end
+
+  RT.test 'files given to the REPL are not silently ignored' do
+    err = RT::FakeIO.new
+    RT.eq 0, Rhci::CLI.main(['Foo.hs'], stdin: RT::FakeIO.new(":q\n"), stdout: RT::FakeIO.new, stderr: err)
+    RT.eq "unsupported: evaluation is not implemented yet\n", err.written
+  end
 end

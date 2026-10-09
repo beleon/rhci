@@ -31,6 +31,11 @@ module Rhci
       not_implemented
     end
 
+    # `:load PATH...` / `rhci PATH...`: replace the loaded modules.
+    def load(paths)
+      not_implemented
+    end
+
     # `rhci -c EXPR ARG...`: apply a pure EXPR to ARGs, each a Haskell
     # expression.
     def run_pure(expr, args, interact: false)
