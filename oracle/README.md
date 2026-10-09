@@ -103,3 +103,14 @@ The aim is fidelity on what we cover, not breadth.
 `swap (1, 2)` expecting `[2,1]`, `zip`/Pythagorean triples printing nested lists,
 `sort`/`nub`/`fromMaybe` used without imports, and `data Color` printed without
 `deriving Show`.
+
+## Numeric differential suite (`numeric/`)
+`cases.txt` (from `tools/gen_numeric_cases.rb`, deterministic) goes through
+`Num.hs` with real GHC (`numeric/run.sh`) into `golden.txt`. About 14.5k
+cases: Double `show` by bit pattern (edges, every power of ten with its
+neighbours, random bits, random decimals), `decodeFloat`,
+truncate/floor/ceiling/round, `fromInteger` and `fromRational` to Double
+(including ties), decimal literals (`read`, which matches how literals
+convert), and `Int` arithmetic on edge values. `test/unit/num_golden_test.rb`
+requires an exact match on both runtimes.
+

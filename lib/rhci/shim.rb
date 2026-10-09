@@ -8,6 +8,13 @@ module Rhci
   module Shim
     MRUBY = RUBY_ENGINE == 'mruby'
 
+    # Monotonic seconds, or nil where there is no clock (lean mruby).
+    def self.now
+      return nil if MRUBY
+
+      Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    end
+
     def self.read_line(io)
       io.gets
     end

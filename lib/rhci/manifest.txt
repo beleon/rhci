@@ -1,11 +1,15 @@
 version
 shim
 errors
+num
 lexer
 layout
 ast
 parser
 fixity
 frontend
+core
+vm
+lower
 session
 cli

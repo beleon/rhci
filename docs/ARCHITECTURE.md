@@ -325,6 +325,19 @@ list?". Printing goes through the `Show` dictionary like any other code.
     and fixity on 157k characters take 728 ms on mruby and 337 ms on CRuby.
     A 60–90k character Prelude would cost about 0.3–0.4 s on mruby before
     type checking even starts, which confirms the snapshot.
+  - **Machine (measured after build step 3), at 10⁶ elements:**
+    | | GHCi | CRuby | mruby |
+    |---|---|---|---|
+    | `foldr (+) 0 [1..n]` | 0.27 s | 22.2 s | 122.5 s |
+    | `count n` (non-tail) | 0.87 s | 11.3 s | 55.3 s |
+    | `foldl' (+) 0 [1..n]` | 0.04 s | 18.2 s | 38.4 s |
+
+    These are hand-written Core at about 24 machine steps per element.
+    CRuby manages about 1.2M steps/s and mruby about 0.5M. On mruby, blocks
+    allocating Procs were a large cost, now removed from the hot path. One
+    big, constantly written Array was re-scanned by the incremental GC, so
+    the stack is now segmented. Scaling is linear to about 160k and still
+    superlinear above that.
   - **Interactive: a usable prompt in under 10 ms**, meaning the prompt is
     printed and keystrokes are accepted. The order is: load bytecode, put
     the terminal in raw mode, print the prompt, *then* decode the Prelude

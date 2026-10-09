@@ -44,4 +44,13 @@ RT.suite 'runtime assumptions' do
     RT.eq 1_000_000, a.length
     RT.eq 2_000_000, ('ab' * 1_000_000).length
   end
+
+  RT.test 'NaN: Float#nan? and ordered comparisons are reliable; == is not on mruby' do
+    n = 0.0 / 0.0
+    RT.ok n.nan?, 'nan?'
+    RT.ok !(n < n) && !(n <= n) && !(n > 1.0), 'ordered comparisons with NaN are false'
+    RT.ok !Rhci::Num.double_eq(n, n), 'double_eq(NaN, NaN) is false'
+    RT.ok Rhci::Num.double_eq(0.0, -0.0), 'double_eq(0.0, -0.0) is true'
+    RT.eq Rhci::Shim::MRUBY, n == n, 'mruby says NaN == NaN; CRuby does not' # documents the quirk
+  end
 end
