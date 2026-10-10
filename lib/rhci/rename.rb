@@ -1,6 +1,21 @@
 # frozen_string_literal: true
 
 module Rhci
+  # A module that is neither known nor found: one GHC ships (GHC_MODULES)
+  # is unsupported, anything else is not found, as in GHC.
+  def self.module_not_found(mod, line, col, source, kind = :scope)
+    source ||= '<interactive>'
+    unless @ghc_modules
+      @ghc_modules = {}
+      GHC_MODULES.each { |m| @ghc_modules[m] = true }
+    end
+    if @ghc_modules.key?(mod)
+      raise UnsupportedError.new("module ‘#{mod}’ is not supported", line, col, source)
+    end
+
+    raise Error.new(kind, "Could not find module ‘#{mod}’", line, col, source)
+  end
+
   # A resolved identifier. Every binder gets its own Name (unique `uid`),
   # so shadowing never confuses later passes.
   #   kind :var (incl. primitives), :con, :field, :tycon
@@ -350,7 +365,8 @@ module Rhci
     # (a value may be an Array of Names: ambiguous). module_mode: a file,
     # where a name defined or imported there that clashes with one the
     # Prelude (or an explicitly imported base module) provides is ambiguous.
-    # official: base modules the file imports; hidden: Prelude names it hides.
+    # official: default modules the file imports (a name, or [name,
+    # {str => Name}] for an import list); hidden: names it hides.
     # internal: rhci_* names are visible (rhci's own synthesised inputs).
     # qualified: alias => [[module name, {values:, types:}]] for qualified
     # names; nil at the prompt, where the prompt's imports apply and every
@@ -437,7 +453,7 @@ module Rhci
     def check_import(imp)
       return if @env.known_module?(imp.module_name) || @imported_modules&.include?(imp.module_name)
 
-      raise Error.new(:scope, "Could not find module ‘#{imp.module_name}’", imp.tok.line, imp.tok.col, @source)
+      Rhci.module_not_found(imp.module_name, imp.tok.line, imp.tok.col, @source)
     end
 
     attr_writer :imported_modules
@@ -454,8 +470,10 @@ module Rhci
 
     # ---- lookup -----------------------------------------------------------------
 
-    def lookup_value(str)
-      i = @scopes.length - 1
+    # locals: false looks past local bindings (a record label always means
+    # the top-level field, even where a variable of its name is in scope).
+    def lookup_value(str, locals: true)
+      i = locals ? @scopes.length - 1 : -1
       while i >= 0
         n = @scopes[i][str]
         return n if n
@@ -466,7 +484,7 @@ module Rhci
       base = @hidden.key?(str) ? nil : @env.values[str]
       if @module_mode && own
         candidates = own.is_a?(Array) ? own.dup : [own]
-        candidates << base if base && official?(BASE_VALUES[str]) && !candidates.include?(base)
+        candidates << base if base && official?(BASE_VALUES[str], str) && !candidates.include?(base)
         return candidates[0] if candidates.length == 1
 
         raise Error.new(:compile, "Ambiguous occurrence ‘#{str}’", nil, nil, @source)
@@ -523,8 +541,12 @@ module Rhci
     end
 
     # A base module whose names count as imported by the file being renamed.
-    def official?(mod)
-      mod == 'Prelude' || @official.include?(mod)
+    # Does the file import str from default module mod itself (all of mod,
+    # or str by name)?
+    def official?(mod, str)
+      return true if mod == 'Prelude'
+
+      @official.any? { |o| o == mod || (o.is_a?(Array) && o[0] == mod && o[1].key?(str)) }
     end
 
     def resolve_value(node, str, qual, what)
@@ -1120,7 +1142,7 @@ module Rhci
       fields.map do |f, _|
         err(:compile, node.tok, "duplicate field name ‘#{f}’ in record construction") if seen.key?(f)
         seen[f] = true
-        n = lookup_value(f)
+        n = lookup_value(f, locals: false)
         err(:scope, node.tok, "Not in scope: field ‘#{f}’") unless n && n.kind == :field
         if con && !(con.fields || []).include?(n)
           err(:compile, node.tok, "Constructor ‘#{con.str}’ does not have field ‘#{f}’")

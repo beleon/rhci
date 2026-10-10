@@ -40,10 +40,12 @@ end
 def exports(text)
   values = []
   types = []
-  # Join `data` declarations continued on indented `=`/`|` lines.
+  # Join `data` declarations continued on indented `=`/`|` lines, and
+  # records continued while a brace is open.
   lines = []
   text.split("\n").each do |line|
-    if (line.start_with?('  = ') || line.start_with?('  | ')) && !lines.empty?
+    open = !lines.empty? && lines[-1].count('{') > lines[-1].count('}')
+    if !lines.empty? && (open || line.start_with?('  = ') || line.start_with?('  | '))
       lines[-1] = "#{lines[-1]} #{line.strip}"
     else
       lines << line
@@ -65,10 +67,42 @@ def exports(text)
 
         con = con[1..-2] if con.start_with?('(')
         values << con unless con.include?('.') || con.include?('#') || values.include?(con)
+        record_fields(alt).each { |f| values << f unless values.include?(f) }
       end
     end
   end
   [values, types]
+end
+
+# The field names of a constructor written with record syntax.
+def record_fields(alt)
+  i = alt.index('{') or return []
+  depth = 0
+  body = +''
+  alt[i..].each_char do |c|
+    depth += 1 if '({['.include?(c)
+    depth -= 1 if ')}]'.include?(c)
+    break if depth.zero?
+
+    body << c if depth >= 1
+  end
+  parts = [+'']
+  depth = 0
+  body[1..].to_s.each_char do |c|
+    depth += 1 if '([{'.include?(c)
+    depth -= 1 if ')]}'.include?(c)
+    c == ',' && depth.zero? ? parts << +'' : parts[-1] << c
+  end
+  parts.map { |p| p.split('::')[0].strip }.select { |n| n.match?(/\A[a-z_][A-Za-z0-9_']*\z/) }
+end
+
+# Every module GHC's installed packages expose: an import of one rhci does
+# not know is unsupported, not "not found".
+def ghc_modules
+  out = IO.popen(['podman', 'run', '--rm', 'docker.io/library/haskell:9.6', 'sh', '-c',
+                  "ghc-pkg field '*' exposed-modules --simple-output"], &:read)
+  # Re-exports read "M from pkg-1.0:M,": keep the plain module names.
+  out.split(/[\s,]+/).reject { |m| m.empty? || m == 'from' || m.include?(':') }.uniq.sort
 end
 
 module_exports = {}
@@ -131,6 +165,11 @@ File.write(File.join(ROOT, 'lib', 'rhci', 'base_names.rb'), <<~RUBY)
     MODULE_EXPORTS = {
   #{exports_src}
     }.freeze
+
+    # Every module GHC's installed packages expose (ghc-pkg).
+    GHC_MODULES = %w[
+  #{ghc_modules.each_slice(6).map { |s| "    #{s.join(' ')}" }.join("\n")}
+    ].freeze
   end
 RUBY
 puts "#{values.length} default values, #{types.length} default types, #{module_exports.length} modules"

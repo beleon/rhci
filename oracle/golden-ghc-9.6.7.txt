@@ -2930,3 +2930,75 @@ floatToDigits :: RealFloat a => Integer -> a -> ([Int], Int)
 ghci> :t readHex
 readHex :: (Eq a, Num a) => ReadS a
 
+
+## 42. Found by the exercism track
+
+ghci> data P = P { px :: Int, py :: Char } deriving Show
+ghci> let s P {px = px} = px + 1
+ghci> s (P 1 'a')
+2
+ghci> let c = let px = 3 in P { px = px, py = 'b' }
+ghci> c
+P {px = 3, py = 'b'}
+ghci> let u r = let px = 3 in r { px = px }
+ghci> u (P 1 'a')
+P {px = 3, py = 'a'}
+ghci> let v px py = P { px = px, py = py }
+ghci> v 4 'c'
+P {px = 4, py = 'c'}
+ghci> let h x = a + 1 where { a = f x; f :: Int -> Int; f = (* 2) }
+ghci> h 3
+7
+ghci> let k x = a where { a = g x; g :: Int -> Int; g y = y * b; b = 5 }
+ghci> k 3
+15
+ghci> :{
+ghci| data T a = L | N (T a) a (T a)
+ghci| instance Foldable T where
+ghci|   foldMap _ L = mempty
+ghci|   foldMap f (N l x r) = foldMap f l <> f x <> foldMap f r
+ghci| :}
+ghci> let t = N (N L 1 L) 2 (N L 3 L)
+ghci> (sum t, product t, length t, maximum t, minimum t, elem 2 t, null t, null L)
+(6,6,3,3,1,True,False,True)
+ghci> foldr (:) [] t
+[1,2,3]
+ghci> foldl (flip (:)) [] t
+[3,2,1]
+ghci> foldr1 (-) t
+2
+ghci> concatMap show t
+"123"
+ghci> (1,2,3,4,5,6,7)
+(1,2,3,4,5,6,7)
+ghci> (1,2,3,4,5,6,7) == (1,2,3,4,5,6,7)
+True
+ghci> compare (1,2,3,4,5,9) (1,2,3,4,6,0)
+LT
+ghci> (1,'a',True,"s",2.5,Just 3,[4],LT) < (1,'a',True,"s",2.5,Just 3,[4],GT)
+True
+ghci> read "(1,2,3,4,5,6,7,8)" :: (Int,Int,Int,Int,Int,Int,Int,Int)
+(1,2,3,4,5,6,7,8)
+ghci> read " ( 1 , 'x' , True , \"s\" , 2 , 3 ) " :: (Int,Char,Bool,String,Integer,Double)
+(1,'x',True,"s",2,3.0)
+ghci> minBound :: (Bool, Ordering, Char)
+(False,LT,'\NUL')
+ghci> maxBound :: (Bool, Bool, Bool, Bool, Bool, Bool, Bool)
+(True,True,True,True,True,True,True)
+ghci> (1,2,3,4,5,6,7,8,9,10,11,12,13,14,15)
+(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15)
+ghci> showsPrec 11 (1,2,3,4,5,6) ""
+"(1,2,3,4,5,6)"
+ghci> ("a","b","c") <> ("x","y","z")
+("ax","by","cz")
+ghci> mempty :: (String, [Int], String, String, String)
+("",[],"","","")
+ghci> :t (,,,,,,)
+(,,,,,,)
+  :: a -> b -> c -> d -> e -> f -> g -> (a, b, c, d, e, f, g)
+ghci> let f :: Integral a => Floating b => a -> b -> b; f n x = fromIntegral n * x
+ghci> f 2 1.5
+3.0
+ghci> :t f
+f :: (Integral a, Floating b) => a -> b -> b
+

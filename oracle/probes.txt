@@ -1351,3 +1351,46 @@ fst . head $ readHex "deadbeef" :: Int
 :t showFFloat
 :t floatToDigits
 :t readHex
+
+## 42. Found by the exercism track
+data P = P { px :: Int, py :: Char } deriving Show
+let s P {px = px} = px + 1
+s (P 1 'a')
+let c = let px = 3 in P { px = px, py = 'b' }
+c
+let u r = let px = 3 in r { px = px }
+u (P 1 'a')
+let v px py = P { px = px, py = py }
+v 4 'c'
+let h x = a + 1 where { a = f x; f :: Int -> Int; f = (* 2) }
+h 3
+let k x = a where { a = g x; g :: Int -> Int; g y = y * b; b = 5 }
+k 3
+:{
+data T a = L | N (T a) a (T a)
+instance Foldable T where
+  foldMap _ L = mempty
+  foldMap f (N l x r) = foldMap f l <> f x <> foldMap f r
+:}
+let t = N (N L 1 L) 2 (N L 3 L)
+(sum t, product t, length t, maximum t, minimum t, elem 2 t, null t, null L)
+foldr (:) [] t
+foldl (flip (:)) [] t
+foldr1 (-) t
+concatMap show t
+(1,2,3,4,5,6,7)
+(1,2,3,4,5,6,7) == (1,2,3,4,5,6,7)
+compare (1,2,3,4,5,9) (1,2,3,4,6,0)
+(1,'a',True,"s",2.5,Just 3,[4],LT) < (1,'a',True,"s",2.5,Just 3,[4],GT)
+read "(1,2,3,4,5,6,7,8)" :: (Int,Int,Int,Int,Int,Int,Int,Int)
+read " ( 1 , 'x' , True , \"s\" , 2 , 3 ) " :: (Int,Char,Bool,String,Integer,Double)
+minBound :: (Bool, Ordering, Char)
+maxBound :: (Bool, Bool, Bool, Bool, Bool, Bool, Bool)
+(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15)
+showsPrec 11 (1,2,3,4,5,6) ""
+("a","b","c") <> ("x","y","z")
+mempty :: (String, [Int], String, String, String)
+:t (,,,,,,)
+let f :: Integral a => Floating b => a -> b -> b; f n x = fromIntegral n * x
+f 2 1.5
+:t f

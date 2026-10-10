@@ -139,3 +139,16 @@ ghci> area (Rect 3 3)
 9.0
 ghci> :r
 
+
+## L10. An import list makes only its items clash with the file's imports
+
+ghci> :load UseSet
+ghci> built
+[1,2,3]
+ghci> sorted
+[1,2,3]
+ghci> check
+True
+ghci> :t insert
+insert :: Ord a => a -> MySet.Set a -> MySet.Set a
+

@@ -310,9 +310,15 @@ module Rhci
 
     # ---- binding groups -----------------------------------------------------------
 
+    # A local binding group is one recursive let: its components are in
+    # inference order, which ignores references to signed names (Report
+    # 4.5.2), so an earlier component may use a later one.
     def groups(gs, body)
-      (gs || []).reverse_each { |scc| body = C::Let.new(scc_defs(scc), body) }
-      body
+      return body if gs.nil? || gs.empty?
+
+      defs = []
+      gs.each { |scc| defs.concat(scc_defs(scc)) }
+      C::Let.new(defs, body)
     end
 
     def rhs(r, fail)

@@ -58,3 +58,8 @@ task torture: %i[lint bundle] do
 end
 
 task default: %i[test bench]
+
+desc 'Run the exercism Haskell track on rhci and GHC (needs network and podman)'
+task :exercism do
+  ruby 'test/exercism/run.rb'
+end

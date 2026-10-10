@@ -527,7 +527,7 @@ module Rhci
         end
         target = module_path(imp.module_name)
         unless target && Shim.read_file(in_cwd(target))
-          raise Error.new(:scope, "Could not find module ‘#{imp.module_name}’", imp.tok.line, imp.tok.col, path)
+          Rhci.module_not_found(imp.module_name, imp.tok.line, imp.tok.col, path)
         end
         mod = load_module_file(target, imp.module_name)
         local << imp.module_name
@@ -566,7 +566,8 @@ module Rhci
       return if imp.qualified
 
       if DEFAULT_MODULES.include?(mod)
-        official << mod
+        # `import Data.List (sort)` makes only sort official.
+        official << (imp.items && !imp.hiding ? [mod, selection[:values]] : mod)
         return unless imp.hiding && imp.items
 
         imp.items.each do |n, subs|
@@ -637,7 +638,7 @@ module Rhci
     def prompt_import(imp)
       mod = imp.module_name
       table = @names.module_table(mod) || @names.local_module(mod)
-      raise Error.new(:compile, "Could not find module ‘#{mod}’", imp.tok.line, imp.tok.col) unless table
+      Rhci.module_not_found(mod, imp.tok.line, imp.tok.col, nil, :compile) unless table
 
       selection = import_selection(table, imp)
       alias_name = imp.as || mod

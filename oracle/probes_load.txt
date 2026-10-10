@@ -59,3 +59,10 @@ Stack [1]
 :reload
 area (Rect 3 3)
 :r
+
+## L10. An import list makes only its items clash with the file's imports
+:load UseSet
+built
+sorted
+check
+:t insert

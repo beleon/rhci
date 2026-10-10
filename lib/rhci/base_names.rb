@@ -227,6 +227,7 @@ module Rhci
     "fmtModifiers" => "Text.Printf",
     "fmtPrecision" => "Text.Printf",
     "fmtSign" => "Text.Printf",
+    "fmtWidth" => "Text.Printf",
     "foldM" => "Control.Monad",
     "foldM_" => "Control.Monad",
     "foldMap" => "Prelude",
@@ -246,6 +247,7 @@ module Rhci
     "formatRealFloat" => "Text.Printf",
     "formatString" => "Text.Printf",
     "fpChar" => "Text.Printf",
+    "fpModifiers" => "Text.Printf",
     "fpRest" => "Text.Printf",
     "fromChar" => "Text.Printf",
     "fromEnum" => "Prelude",
@@ -266,15 +268,20 @@ module Rhci
     "genericSplitAt" => "Data.List",
     "genericTake" => "Data.List",
     "get" => "Text.Read",
+    "getAnd" => "Data.Bits",
     "getArgs" => "System.Environment",
     "getChar" => "Prelude",
     "getContents" => "Prelude",
     "getContents'" => "System.IO",
+    "getDown" => "Data.Ord",
     "getEnv" => "System.Environment",
     "getEnvironment" => "System.Environment",
     "getExecutablePath" => "System.Environment",
+    "getIff" => "Data.Bits",
+    "getIor" => "Data.Bits",
     "getLine" => "Prelude",
     "getProgName" => "System.Environment",
+    "getXor" => "Data.Bits",
     "group" => "Data.List",
     "groupBy" => "Data.List",
     "guard" => "Control.Monad",
@@ -323,6 +330,7 @@ module Rhci
     "id" => "Prelude",
     "init" => "Prelude",
     "inits" => "Data.List",
+    "inputNL" => "System.IO",
     "insert" => "Data.List",
     "insertBy" => "Data.List",
     "intToDigit" => "Data.Char",
@@ -448,6 +456,7 @@ module Rhci
     "or" => "Prelude",
     "ord" => "Data.Char",
     "otherwise" => "Prelude",
+    "outputNL" => "System.IO",
     "parens" => "Text.Read",
     "parseFormat" => "Text.Printf",
     "partition" => "Data.List",
@@ -808,8 +817,8 @@ module Rhci
     ],
     "Data.Ord" => [
       [
-        "Down", "clamp", "comparing", "compare", "<", "<=", ">", ">=",
-        "max", "min", "LT", "EQ", "GT"
+        "Down", "getDown", "clamp", "comparing", "compare", "<", "<=", ">",
+        ">=", "max", "min", "LT", "EQ", "GT"
       ],
       [
         "Down", "Ord", "Ordering"
@@ -842,15 +851,15 @@ module Rhci
         "interact", "localeEncoding", "openBinaryTempFile", "openBinaryTempFileWithDefaultPermissions", "openTempFile", "openTempFileWithDefaultPermissions", "print", "putChar",
         "putStr", "putStrLn", "readFile", "readFile'", "readIO", "readLn", "writeFile", "NoBuffering",
         "LineBuffering", "BlockBuffering", "ReadMode", "WriteMode", "AppendMode", "ReadWriteMode", "LF", "CRLF",
-        "NewlineMode", "AbsoluteSeek", "RelativeSeek", "SeekFromEnd", "char8", "hClose", "hFileSize", "hFlush",
-        "hGetBuf", "hGetBufNonBlocking", "hGetBufSome", "hGetBuffering", "hGetChar", "hGetContents", "hGetContents'", "hGetEcho",
-        "hGetEncoding", "hGetLine", "hGetPosn", "hIsClosed", "hIsEOF", "hIsOpen", "hIsReadable", "hIsSeekable",
-        "hIsTerminalDevice", "hIsWritable", "hLookAhead", "hPutBuf", "hPutBufNonBlocking", "hPutChar", "hPutStr", "hPutStrLn",
-        "hSeek", "hSetBinaryMode", "hSetBuffering", "hSetEcho", "hSetEncoding", "hSetFileSize", "hSetNewlineMode", "hSetPosn",
-        "hShow", "hTell", "hWaitForInput", "isEOF", "latin1", "mkTextEncoding", "nativeNewline", "nativeNewlineMode",
-        "noNewlineTranslation", "openBinaryFile", "openFile", "stderr", "stdin", "stdout", "universalNewlineMode", "utf16",
-        "utf16be", "utf16le", "utf32", "utf32be", "utf32le", "utf8", "utf8_bom", "withBinaryFile",
-        "withFile"
+        "NewlineMode", "inputNL", "outputNL", "AbsoluteSeek", "RelativeSeek", "SeekFromEnd", "char8", "hClose",
+        "hFileSize", "hFlush", "hGetBuf", "hGetBufNonBlocking", "hGetBufSome", "hGetBuffering", "hGetChar", "hGetContents",
+        "hGetContents'", "hGetEcho", "hGetEncoding", "hGetLine", "hGetPosn", "hIsClosed", "hIsEOF", "hIsOpen",
+        "hIsReadable", "hIsSeekable", "hIsTerminalDevice", "hIsWritable", "hLookAhead", "hPutBuf", "hPutBufNonBlocking", "hPutChar",
+        "hPutStr", "hPutStrLn", "hSeek", "hSetBinaryMode", "hSetBuffering", "hSetEcho", "hSetEncoding", "hSetFileSize",
+        "hSetNewlineMode", "hSetPosn", "hShow", "hTell", "hWaitForInput", "isEOF", "latin1", "mkTextEncoding",
+        "nativeNewline", "nativeNewlineMode", "noNewlineTranslation", "openBinaryFile", "openFile", "stderr", "stdin", "stdout",
+        "universalNewlineMode", "utf16", "utf16be", "utf16le", "utf32", "utf32be", "utf32le", "utf8",
+        "utf8_bom", "withBinaryFile", "withFile"
       ],
       [
         "BufferMode", "FilePath", "Handle", "HandlePosn", "IO", "IOMode", "Newline", "NewlineMode",
@@ -880,11 +889,12 @@ module Rhci
     ],
     "Data.Bits" => [
       [
-        "!<<.", "!>>.", ".<<.", ".>>.", ".^.", "And", "Iff", "Ior",
-        "Xor", "oneBits", ".&.", ".|.", "xor", "complement", "shift", "rotate",
-        "zeroBits", "bit", "setBit", "clearBit", "complementBit", "testBit", "bitSizeMaybe", "bitSize",
-        "isSigned", "shiftL", "unsafeShiftL", "shiftR", "unsafeShiftR", "rotateL", "rotateR", "popCount",
-        "finiteBitSize", "countLeadingZeros", "countTrailingZeros", "bitDefault", "popCountDefault", "testBitDefault", "toIntegralSized"
+        "!<<.", "!>>.", ".<<.", ".>>.", ".^.", "And", "getAnd", "Iff",
+        "getIff", "Ior", "getIor", "Xor", "getXor", "oneBits", ".&.", ".|.",
+        "xor", "complement", "shift", "rotate", "zeroBits", "bit", "setBit", "clearBit",
+        "complementBit", "testBit", "bitSizeMaybe", "bitSize", "isSigned", "shiftL", "unsafeShiftL", "shiftR",
+        "unsafeShiftR", "rotateL", "rotateR", "popCount", "finiteBitSize", "countLeadingZeros", "countTrailingZeros", "bitDefault",
+        "popCountDefault", "testBitDefault", "toIntegralSized"
       ],
       [
         "And", "Iff", "Ior", "Xor", "Bits", "FiniteBits"
@@ -909,10 +919,11 @@ module Rhci
     ],
     "Text.Printf" => [
       [
-        "FieldFormat", "fmtPrecision", "fmtAdjust", "fmtSign", "fmtAlternate", "fmtModifiers", "fmtChar", "LeftAdjust",
-        "ZeroPad", "FormatParse", "fpChar", "fpRest", "SignPlus", "SignSpace", "toChar", "fromChar",
-        "formatArg", "parseFormat", "errorBadArgument", "errorBadFormat", "errorMissingArgument", "errorShortFormat", "formatChar", "formatInt",
-        "formatInteger", "formatRealFloat", "formatString", "hPrintf", "perror", "printf", "vFmt"
+        "FieldFormat", "fmtWidth", "fmtPrecision", "fmtAdjust", "fmtSign", "fmtAlternate", "fmtModifiers", "fmtChar",
+        "LeftAdjust", "ZeroPad", "FormatParse", "fpModifiers", "fpChar", "fpRest", "SignPlus", "SignSpace",
+        "toChar", "fromChar", "formatArg", "parseFormat", "errorBadArgument", "errorBadFormat", "errorMissingArgument", "errorShortFormat",
+        "formatChar", "formatInt", "formatInteger", "formatRealFloat", "formatString", "hPrintf", "perror", "printf",
+        "vFmt"
       ],
       [
         "FieldFormat", "FieldFormatter", "FormatAdjustment", "FormatParse", "FormatSign", "HPrintfType", "IsChar", "ModifierParser",
@@ -1013,9 +1024,9 @@ module Rhci
     ],
     "Control.Applicative" => [
       [
-        "WrapArrow", "WrapMonad", "ZipList", "optional", "<$", "<$>", "<**>", "empty",
-        "<|>", "some", "many", "pure", "<*>", "liftA2", "*>", "<*",
-        "Const", "asum", "liftA", "liftA3"
+        "WrapArrow", "unwrapArrow", "WrapMonad", "unwrapMonad", "ZipList", "getZipList", "optional", "<$",
+        "<$>", "<**>", "empty", "<|>", "some", "many", "pure", "<*>",
+        "liftA2", "*>", "<*", "Const", "getConst", "asum", "liftA", "liftA3"
       ],
       [
         "WrappedArrow", "WrappedMonad", "ZipList", "Alternative", "Applicative", "Const"
@@ -1031,8 +1042,9 @@ module Rhci
     ],
     "Data.Monoid" => [
       [
-        "Ap", "First", "Last", "<>", "All", "Alt", "Any", "Dual",
-        "Endo", "mempty", "mappend", "mconcat", "Product", "Sum"
+        "Ap", "getAp", "First", "getFirst", "Last", "getLast", "<>", "All",
+        "getAll", "Alt", "getAlt", "Any", "getAny", "Dual", "getDual", "Endo",
+        "appEndo", "mempty", "mappend", "mconcat", "Product", "getProduct", "Sum", "getSum"
       ],
       [
         "Ap", "First", "Last", "All", "Alt", "Any", "Dual", "Endo",
@@ -1094,4 +1106,272 @@ module Rhci
       ]
     ]
   }.freeze
+
+  # Every module GHC's installed packages expose (ghc-pkg).
+  GHC_MODULES = %w[
+    Control.Applicative Control.Applicative.Backwards Control.Applicative.Lift Control.Arrow Control.Category Control.Concurrent
+    Control.Concurrent.Chan Control.Concurrent.MVar Control.Concurrent.QSem Control.Concurrent.QSemN Control.Concurrent.STM Control.Concurrent.STM.TArray
+    Control.Concurrent.STM.TBQueue Control.Concurrent.STM.TChan Control.Concurrent.STM.TMVar Control.Concurrent.STM.TQueue Control.Concurrent.STM.TSem Control.Concurrent.STM.TVar
+    Control.DeepSeq Control.Exception Control.Exception.Base Control.Monad Control.Monad.Accum Control.Monad.Catch
+    Control.Monad.Catch.Pure Control.Monad.Cont Control.Monad.Cont.Class Control.Monad.Error.Class Control.Monad.Except Control.Monad.Fail
+    Control.Monad.Fix Control.Monad.IO.Class Control.Monad.Identity Control.Monad.Instances Control.Monad.RWS Control.Monad.RWS.CPS
+    Control.Monad.RWS.Class Control.Monad.RWS.Lazy Control.Monad.RWS.Strict Control.Monad.Reader Control.Monad.Reader.Class Control.Monad.ST
+    Control.Monad.ST.Lazy Control.Monad.ST.Lazy.Safe Control.Monad.ST.Lazy.Unsafe Control.Monad.ST.Safe Control.Monad.ST.Strict Control.Monad.ST.Unsafe
+    Control.Monad.STM Control.Monad.Select Control.Monad.Signatures Control.Monad.State Control.Monad.State.Class Control.Monad.State.Lazy
+    Control.Monad.State.Strict Control.Monad.Trans Control.Monad.Trans.Accum Control.Monad.Trans.Class Control.Monad.Trans.Cont Control.Monad.Trans.Except
+    Control.Monad.Trans.Identity Control.Monad.Trans.Maybe Control.Monad.Trans.RWS Control.Monad.Trans.RWS.CPS Control.Monad.Trans.RWS.Lazy Control.Monad.Trans.RWS.Strict
+    Control.Monad.Trans.Reader Control.Monad.Trans.Select Control.Monad.Trans.State Control.Monad.Trans.State.Lazy Control.Monad.Trans.State.Strict Control.Monad.Trans.Writer
+    Control.Monad.Trans.Writer.CPS Control.Monad.Trans.Writer.Lazy Control.Monad.Trans.Writer.Strict Control.Monad.Writer Control.Monad.Writer.CPS Control.Monad.Writer.Class
+    Control.Monad.Writer.Lazy Control.Monad.Writer.Strict Control.Monad.Zip Data.Array Data.Array.Base Data.Array.Byte
+    Data.Array.IArray Data.Array.IO Data.Array.IO.Internals Data.Array.IO.Safe Data.Array.MArray Data.Array.MArray.Safe
+    Data.Array.ST Data.Array.ST.Safe Data.Array.Storable Data.Array.Storable.Internals Data.Array.Storable.Safe Data.Array.Unboxed
+    Data.Array.Unsafe Data.Bifoldable Data.Bifoldable1 Data.Bifunctor Data.Binary Data.Binary.Builder
+    Data.Binary.Get Data.Binary.Get.Internal Data.Binary.Put Data.Bitraversable Data.Bits Data.Bool
+    Data.ByteString Data.ByteString.Builder Data.ByteString.Builder.Extra Data.ByteString.Builder.Internal Data.ByteString.Builder.Prim Data.ByteString.Builder.Prim.Internal
+    Data.ByteString.Builder.RealFloat Data.ByteString.Char8 Data.ByteString.Internal Data.ByteString.Lazy Data.ByteString.Lazy.Char8 Data.ByteString.Lazy.Internal
+    Data.ByteString.Short Data.ByteString.Short.Internal Data.ByteString.Unsafe Data.Char Data.Coerce Data.Complex
+    Data.Containers.ListUtils Data.Data Data.Dynamic Data.Either Data.Eq Data.Fixed
+    Data.Foldable Data.Foldable1 Data.Function Data.Functor Data.Functor.Classes Data.Functor.Compose
+    Data.Functor.Const Data.Functor.Constant Data.Functor.Contravariant Data.Functor.Identity Data.Functor.Product Data.Functor.Reverse
+    Data.Functor.Sum Data.Graph Data.IORef Data.Int Data.IntMap Data.IntMap.Internal
+    Data.IntMap.Internal.Debug Data.IntMap.Lazy Data.IntMap.Merge.Lazy Data.IntMap.Merge.Strict Data.IntMap.Strict Data.IntMap.Strict.Internal
+    Data.IntSet Data.IntSet.Internal Data.Ix Data.Kind Data.List Data.List.NonEmpty
+    Data.Map Data.Map.Internal Data.Map.Internal.Debug Data.Map.Lazy Data.Map.Merge.Lazy Data.Map.Merge.Strict
+    Data.Map.Strict Data.Map.Strict.Internal Data.Maybe Data.Monoid Data.Ord Data.Proxy
+    Data.Ratio Data.STRef Data.STRef.Lazy Data.STRef.Strict Data.Semigroup Data.Sequence
+    Data.Sequence.Internal Data.Sequence.Internal.Sorting Data.Set Data.Set.Internal Data.String Data.Text
+    Data.Text.Array Data.Text.Encoding Data.Text.Encoding.Error Data.Text.Foreign Data.Text.IO Data.Text.Internal
+    Data.Text.Internal.Builder Data.Text.Internal.Builder.Functions Data.Text.Internal.Builder.Int.Digits Data.Text.Internal.Builder.RealFloat.Functions Data.Text.Internal.ByteStringCompat Data.Text.Internal.Encoding
+    Data.Text.Internal.Encoding.Fusion Data.Text.Internal.Encoding.Fusion.Common Data.Text.Internal.Encoding.Utf16 Data.Text.Internal.Encoding.Utf32 Data.Text.Internal.Encoding.Utf8 Data.Text.Internal.Fusion
+    Data.Text.Internal.Fusion.CaseMapping Data.Text.Internal.Fusion.Common Data.Text.Internal.Fusion.Size Data.Text.Internal.Fusion.Types Data.Text.Internal.IO Data.Text.Internal.Lazy
+    Data.Text.Internal.Lazy.Encoding.Fusion Data.Text.Internal.Lazy.Fusion Data.Text.Internal.Lazy.Search Data.Text.Internal.PrimCompat Data.Text.Internal.Private Data.Text.Internal.Read
+    Data.Text.Internal.Search Data.Text.Internal.StrictBuilder Data.Text.Internal.Unsafe Data.Text.Internal.Unsafe.Char Data.Text.Lazy Data.Text.Lazy.Builder
+    Data.Text.Lazy.Builder.Int Data.Text.Lazy.Builder.RealFloat Data.Text.Lazy.Encoding Data.Text.Lazy.IO Data.Text.Lazy.Internal Data.Text.Lazy.Read
+    Data.Text.Read Data.Text.Unsafe Data.Time Data.Time.Calendar Data.Time.Calendar.Easter Data.Time.Calendar.Julian
+    Data.Time.Calendar.Month Data.Time.Calendar.MonthDay Data.Time.Calendar.OrdinalDate Data.Time.Calendar.Quarter Data.Time.Calendar.WeekDate Data.Time.Clock
+    Data.Time.Clock.POSIX Data.Time.Clock.System Data.Time.Clock.TAI Data.Time.Format Data.Time.Format.ISO8601 Data.Time.Format.Internal
+    Data.Time.LocalTime Data.Traversable Data.Tree Data.Tuple Data.Type.Bool Data.Type.Coercion
+    Data.Type.Equality Data.Type.Ord Data.Typeable Data.Unique Data.Version Data.Void
+    Data.Word Debug.Trace Distribution.Backpack Distribution.Backpack.ComponentsGraph Distribution.Backpack.Configure Distribution.Backpack.ConfiguredComponent
+    Distribution.Backpack.DescribeUnitId Distribution.Backpack.FullUnitId Distribution.Backpack.LinkedComponent Distribution.Backpack.ModSubst Distribution.Backpack.ModuleShape Distribution.Backpack.PreModuleShape
+    Distribution.CabalSpecVersion Distribution.Compat.Binary Distribution.Compat.CharParsing Distribution.Compat.CreatePipe Distribution.Compat.DList Distribution.Compat.Directory
+    Distribution.Compat.Environment Distribution.Compat.Exception Distribution.Compat.FilePath Distribution.Compat.Graph Distribution.Compat.Internal.TempFile Distribution.Compat.Lens
+    Distribution.Compat.MonadFail Distribution.Compat.Newtype Distribution.Compat.NonEmptySet Distribution.Compat.Parsing Distribution.Compat.Prelude Distribution.Compat.Prelude.Internal
+    Distribution.Compat.Process Distribution.Compat.ResponseFile Distribution.Compat.Semigroup Distribution.Compat.Stack Distribution.Compat.Time Distribution.Compat.Typeable
+    Distribution.Compiler Distribution.FieldGrammar Distribution.FieldGrammar.Class Distribution.FieldGrammar.FieldDescrs Distribution.FieldGrammar.Newtypes Distribution.FieldGrammar.Parsec
+    Distribution.FieldGrammar.Pretty Distribution.Fields Distribution.Fields.ConfVar Distribution.Fields.Field Distribution.Fields.Lexer Distribution.Fields.LexerMonad
+    Distribution.Fields.ParseResult Distribution.Fields.Parser Distribution.Fields.Pretty Distribution.InstalledPackageInfo Distribution.License Distribution.Make
+    Distribution.ModuleName Distribution.Package Distribution.PackageDescription Distribution.PackageDescription.Check Distribution.PackageDescription.Configuration Distribution.PackageDescription.FieldGrammar
+    Distribution.PackageDescription.Parsec Distribution.PackageDescription.PrettyPrint Distribution.PackageDescription.Quirks Distribution.PackageDescription.Utils Distribution.Parsec Distribution.Parsec.Error
+    Distribution.Parsec.FieldLineStream Distribution.Parsec.Position Distribution.Parsec.Warning Distribution.Pretty Distribution.ReadE Distribution.SPDX
+    Distribution.SPDX.License Distribution.SPDX.LicenseExceptionId Distribution.SPDX.LicenseExpression Distribution.SPDX.LicenseId Distribution.SPDX.LicenseListVersion Distribution.SPDX.LicenseReference
+    Distribution.Simple Distribution.Simple.Bench Distribution.Simple.Build Distribution.Simple.Build.Macros Distribution.Simple.Build.PackageInfoModule Distribution.Simple.Build.PathsModule
+    Distribution.Simple.BuildPaths Distribution.Simple.BuildTarget Distribution.Simple.BuildToolDepends Distribution.Simple.CCompiler Distribution.Simple.Command Distribution.Simple.Compiler
+    Distribution.Simple.Configure Distribution.Simple.Flag Distribution.Simple.GHC Distribution.Simple.GHCJS Distribution.Simple.Glob Distribution.Simple.Haddock
+    Distribution.Simple.HaskellSuite Distribution.Simple.Hpc Distribution.Simple.Install Distribution.Simple.InstallDirs Distribution.Simple.InstallDirs.Internal Distribution.Simple.LocalBuildInfo
+    Distribution.Simple.PackageDescription Distribution.Simple.PackageIndex Distribution.Simple.PreProcess Distribution.Simple.PreProcess.Unlit Distribution.Simple.Program Distribution.Simple.Program.Ar
+    Distribution.Simple.Program.Builtin Distribution.Simple.Program.Db Distribution.Simple.Program.Find Distribution.Simple.Program.GHC Distribution.Simple.Program.HcPkg Distribution.Simple.Program.Hpc
+    Distribution.Simple.Program.Internal Distribution.Simple.Program.Ld Distribution.Simple.Program.ResponseFile Distribution.Simple.Program.Run Distribution.Simple.Program.Script Distribution.Simple.Program.Strip
+    Distribution.Simple.Program.Types Distribution.Simple.Register Distribution.Simple.Setup Distribution.Simple.ShowBuildInfo Distribution.Simple.SrcDist Distribution.Simple.Test
+    Distribution.Simple.Test.ExeV10 Distribution.Simple.Test.LibV09 Distribution.Simple.Test.Log Distribution.Simple.UHC Distribution.Simple.UserHooks Distribution.Simple.Utils
+    Distribution.System Distribution.TestSuite Distribution.Text Distribution.Types.AbiDependency Distribution.Types.AbiHash Distribution.Types.AnnotatedId
+    Distribution.Types.Benchmark Distribution.Types.Benchmark.Lens Distribution.Types.BenchmarkInterface Distribution.Types.BenchmarkType Distribution.Types.BuildInfo Distribution.Types.BuildInfo.Lens
+    Distribution.Types.BuildType Distribution.Types.Component Distribution.Types.ComponentId Distribution.Types.ComponentInclude Distribution.Types.ComponentLocalBuildInfo Distribution.Types.ComponentName
+    Distribution.Types.ComponentRequestedSpec Distribution.Types.CondTree Distribution.Types.Condition Distribution.Types.ConfVar Distribution.Types.Dependency Distribution.Types.DependencyMap
+    Distribution.Types.DumpBuildInfo Distribution.Types.ExeDependency Distribution.Types.Executable Distribution.Types.Executable.Lens Distribution.Types.ExecutableScope Distribution.Types.ExposedModule
+    Distribution.Types.Flag Distribution.Types.ForeignLib Distribution.Types.ForeignLib.Lens Distribution.Types.ForeignLibOption Distribution.Types.ForeignLibType Distribution.Types.GenericPackageDescription
+    Distribution.Types.GenericPackageDescription.Lens Distribution.Types.GivenComponent Distribution.Types.HookedBuildInfo Distribution.Types.IncludeRenaming Distribution.Types.InstalledPackageInfo Distribution.Types.InstalledPackageInfo.FieldGrammar
+    Distribution.Types.InstalledPackageInfo.Lens Distribution.Types.LegacyExeDependency Distribution.Types.Lens Distribution.Types.Library Distribution.Types.Library.Lens Distribution.Types.LibraryName
+    Distribution.Types.LibraryVisibility Distribution.Types.LocalBuildInfo Distribution.Types.Mixin Distribution.Types.Module Distribution.Types.ModuleReexport Distribution.Types.ModuleRenaming
+    Distribution.Types.MungedPackageId Distribution.Types.MungedPackageName Distribution.Types.PackageDescription Distribution.Types.PackageDescription.Lens Distribution.Types.PackageId Distribution.Types.PackageId.Lens
+    Distribution.Types.PackageName Distribution.Types.PackageName.Magic Distribution.Types.PackageVersionConstraint Distribution.Types.PkgconfigDependency Distribution.Types.PkgconfigName Distribution.Types.PkgconfigVersion
+    Distribution.Types.PkgconfigVersionRange Distribution.Types.SetupBuildInfo Distribution.Types.SetupBuildInfo.Lens Distribution.Types.SourceRepo Distribution.Types.SourceRepo.Lens Distribution.Types.TargetInfo
+    Distribution.Types.TestSuite Distribution.Types.TestSuite.Lens Distribution.Types.TestSuiteInterface Distribution.Types.TestType Distribution.Types.UnitId Distribution.Types.UnqualComponentName
+    Distribution.Types.Version Distribution.Types.VersionInterval Distribution.Types.VersionInterval.Legacy Distribution.Types.VersionRange Distribution.Types.VersionRange.Internal Distribution.Utils.Base62
+    Distribution.Utils.Generic Distribution.Utils.IOData Distribution.Utils.Json Distribution.Utils.LogProgress Distribution.Utils.MD5 Distribution.Utils.MapAccum
+    Distribution.Utils.NubList Distribution.Utils.Path Distribution.Utils.Progress Distribution.Utils.ShortText Distribution.Utils.String Distribution.Utils.Structured
+    Distribution.Verbosity Distribution.Verbosity.Internal Distribution.Version Foreign Foreign.C Foreign.C.ConstPtr
+    Foreign.C.Error Foreign.C.String Foreign.C.Types Foreign.Concurrent Foreign.ForeignPtr Foreign.ForeignPtr.Safe
+    Foreign.ForeignPtr.Unsafe Foreign.Marshal Foreign.Marshal.Alloc Foreign.Marshal.Array Foreign.Marshal.Error Foreign.Marshal.Pool
+    Foreign.Marshal.Safe Foreign.Marshal.Unsafe Foreign.Marshal.Utils Foreign.Ptr Foreign.Safe Foreign.StablePtr
+    Foreign.Storable GHC GHC.Arr GHC.ArrayArray GHC.Base GHC.BaseDir
+    GHC.Bits GHC.Builtin.Names GHC.Builtin.Names.TH GHC.Builtin.PrimOps GHC.Builtin.PrimOps.Casts GHC.Builtin.PrimOps.Ids
+    GHC.Builtin.Types GHC.Builtin.Types.Literals GHC.Builtin.Types.Prim GHC.Builtin.Uniques GHC.Builtin.Utils GHC.ByteCode.Asm
+    GHC.ByteCode.InfoTable GHC.ByteCode.Instr GHC.ByteCode.Linker GHC.ByteCode.Types GHC.ByteOrder GHC.CString
+    GHC.Char GHC.Classes GHC.Clock GHC.Cmm GHC.Cmm.BlockId GHC.Cmm.CLabel
+    GHC.Cmm.CallConv GHC.Cmm.CommonBlockElim GHC.Cmm.Config GHC.Cmm.ContFlowOpt GHC.Cmm.Dataflow GHC.Cmm.Dataflow.Block
+    GHC.Cmm.Dataflow.Collections GHC.Cmm.Dataflow.Graph GHC.Cmm.Dataflow.Label GHC.Cmm.DebugBlock GHC.Cmm.Dominators GHC.Cmm.Expr
+    GHC.Cmm.Graph GHC.Cmm.Info GHC.Cmm.Info.Build GHC.Cmm.InitFini GHC.Cmm.LRegSet GHC.Cmm.LayoutStack
+    GHC.Cmm.Lexer GHC.Cmm.Lint GHC.Cmm.Liveness GHC.Cmm.MachOp GHC.Cmm.Node GHC.Cmm.Opt
+    GHC.Cmm.Parser GHC.Cmm.Parser.Config GHC.Cmm.Parser.Monad GHC.Cmm.Pipeline GHC.Cmm.ProcPoint GHC.Cmm.Reducibility
+    GHC.Cmm.Reg GHC.Cmm.Sink GHC.Cmm.Switch GHC.Cmm.Switch.Implement GHC.Cmm.ThreadSanitizer GHC.Cmm.Type
+    GHC.Cmm.Utils GHC.CmmToAsm GHC.CmmToAsm.AArch64 GHC.CmmToAsm.AArch64.CodeGen GHC.CmmToAsm.AArch64.Cond GHC.CmmToAsm.AArch64.Instr
+    GHC.CmmToAsm.AArch64.Ppr GHC.CmmToAsm.AArch64.RegInfo GHC.CmmToAsm.AArch64.Regs GHC.CmmToAsm.BlockLayout GHC.CmmToAsm.CFG GHC.CmmToAsm.CFG.Dominators
+    GHC.CmmToAsm.CFG.Weight GHC.CmmToAsm.CPrim GHC.CmmToAsm.Config GHC.CmmToAsm.Dwarf GHC.CmmToAsm.Dwarf.Constants GHC.CmmToAsm.Dwarf.Types
+    GHC.CmmToAsm.Format GHC.CmmToAsm.Instr GHC.CmmToAsm.Monad GHC.CmmToAsm.PIC GHC.CmmToAsm.PPC GHC.CmmToAsm.PPC.CodeGen
+    GHC.CmmToAsm.PPC.Cond GHC.CmmToAsm.PPC.Instr GHC.CmmToAsm.PPC.Ppr GHC.CmmToAsm.PPC.RegInfo GHC.CmmToAsm.PPC.Regs GHC.CmmToAsm.Ppr
+    GHC.CmmToAsm.Reg.Graph GHC.CmmToAsm.Reg.Graph.Base GHC.CmmToAsm.Reg.Graph.Coalesce GHC.CmmToAsm.Reg.Graph.Spill GHC.CmmToAsm.Reg.Graph.SpillClean GHC.CmmToAsm.Reg.Graph.SpillCost
+    GHC.CmmToAsm.Reg.Graph.Stats GHC.CmmToAsm.Reg.Graph.TrivColorable GHC.CmmToAsm.Reg.Graph.X86 GHC.CmmToAsm.Reg.Linear GHC.CmmToAsm.Reg.Linear.AArch64 GHC.CmmToAsm.Reg.Linear.Base
+    GHC.CmmToAsm.Reg.Linear.FreeRegs GHC.CmmToAsm.Reg.Linear.JoinToTargets GHC.CmmToAsm.Reg.Linear.PPC GHC.CmmToAsm.Reg.Linear.StackMap GHC.CmmToAsm.Reg.Linear.State GHC.CmmToAsm.Reg.Linear.Stats
+    GHC.CmmToAsm.Reg.Linear.X86 GHC.CmmToAsm.Reg.Linear.X86_64 GHC.CmmToAsm.Reg.Liveness GHC.CmmToAsm.Reg.Target GHC.CmmToAsm.Reg.Utils GHC.CmmToAsm.Types
+    GHC.CmmToAsm.Utils GHC.CmmToAsm.Wasm GHC.CmmToAsm.Wasm.Asm GHC.CmmToAsm.Wasm.FromCmm GHC.CmmToAsm.Wasm.Types GHC.CmmToAsm.Wasm.Utils
+    GHC.CmmToAsm.X86 GHC.CmmToAsm.X86.CodeGen GHC.CmmToAsm.X86.Cond GHC.CmmToAsm.X86.Instr GHC.CmmToAsm.X86.Ppr GHC.CmmToAsm.X86.RegInfo
+    GHC.CmmToAsm.X86.Regs GHC.CmmToC GHC.CmmToLlvm GHC.CmmToLlvm.Base GHC.CmmToLlvm.CodeGen GHC.CmmToLlvm.Config
+    GHC.CmmToLlvm.Data GHC.CmmToLlvm.Mangler GHC.CmmToLlvm.Ppr GHC.CmmToLlvm.Regs GHC.Compact GHC.Compact.Serialized
+    GHC.Conc GHC.Conc.IO GHC.Conc.Signal GHC.Conc.Sync GHC.ConsoleHandler GHC.Constants
+    GHC.Core GHC.Core.Class GHC.Core.Coercion GHC.Core.Coercion.Axiom GHC.Core.Coercion.Opt GHC.Core.ConLike
+    GHC.Core.DataCon GHC.Core.FVs GHC.Core.FamInstEnv GHC.Core.InstEnv GHC.Core.LateCC GHC.Core.Lint
+    GHC.Core.Lint.Interactive GHC.Core.Make GHC.Core.Map.Expr GHC.Core.Map.Type GHC.Core.Multiplicity GHC.Core.Opt.Arity
+    GHC.Core.Opt.CSE GHC.Core.Opt.CallArity GHC.Core.Opt.CallerCC GHC.Core.Opt.ConstantFold GHC.Core.Opt.CprAnal GHC.Core.Opt.DmdAnal
+    GHC.Core.Opt.Exitify GHC.Core.Opt.FloatIn GHC.Core.Opt.FloatOut GHC.Core.Opt.LiberateCase GHC.Core.Opt.Monad GHC.Core.Opt.OccurAnal
+    GHC.Core.Opt.Pipeline GHC.Core.Opt.Pipeline.Types GHC.Core.Opt.SetLevels GHC.Core.Opt.Simplify GHC.Core.Opt.Simplify.Env GHC.Core.Opt.Simplify.Iteration
+    GHC.Core.Opt.Simplify.Monad GHC.Core.Opt.Simplify.Utils GHC.Core.Opt.SpecConstr GHC.Core.Opt.Specialise GHC.Core.Opt.StaticArgs GHC.Core.Opt.Stats
+    GHC.Core.Opt.WorkWrap GHC.Core.Opt.WorkWrap.Utils GHC.Core.PatSyn GHC.Core.Ppr GHC.Core.Predicate GHC.Core.Reduction
+    GHC.Core.RoughMap GHC.Core.Rules GHC.Core.Rules.Config GHC.Core.Seq GHC.Core.SimpleOpt GHC.Core.Stats
+    GHC.Core.Subst GHC.Core.Tidy GHC.Core.TyCo.Compare GHC.Core.TyCo.FVs GHC.Core.TyCo.Ppr GHC.Core.TyCo.Rep
+    GHC.Core.TyCo.Subst GHC.Core.TyCo.Tidy GHC.Core.TyCon GHC.Core.TyCon.Env GHC.Core.TyCon.RecWalk GHC.Core.TyCon.Set
+    GHC.Core.Type GHC.Core.Unfold GHC.Core.Unfold.Make GHC.Core.Unify GHC.Core.UsageEnv GHC.Core.Utils
+    GHC.CoreToIface GHC.CoreToStg GHC.CoreToStg.Prep GHC.Data.Bag GHC.Data.Bitmap GHC.Data.Bool
+    GHC.Data.BooleanFormula GHC.Data.EnumSet GHC.Data.FastMutInt GHC.Data.FastString GHC.Data.FastString.Env GHC.Data.FiniteMap
+    GHC.Data.Graph.Base GHC.Data.Graph.Collapse GHC.Data.Graph.Color GHC.Data.Graph.Directed GHC.Data.Graph.Inductive.Graph GHC.Data.Graph.Inductive.PatriciaTree
+    GHC.Data.Graph.Ops GHC.Data.Graph.Ppr GHC.Data.Graph.UnVar GHC.Data.IOEnv GHC.Data.List.Infinite GHC.Data.List.SetOps
+    GHC.Data.Maybe GHC.Data.OrdList GHC.Data.Pair GHC.Data.ShortText GHC.Data.SizedSeq GHC.Data.SmallArray
+    GHC.Data.Stream GHC.Data.Strict GHC.Data.StringBuffer GHC.Data.TrieMap GHC.Data.Unboxed GHC.Data.UnionFind
+    GHC.Data.Word64Map GHC.Data.Word64Map.Internal GHC.Data.Word64Map.Lazy GHC.Data.Word64Map.Strict GHC.Data.Word64Map.Strict.Internal GHC.Data.Word64Set
+    GHC.Data.Word64Set.Internal GHC.Debug GHC.Desugar GHC.Driver.Backend GHC.Driver.Backend.Internal GHC.Driver.Backpack
+    GHC.Driver.Backpack.Syntax GHC.Driver.CmdLine GHC.Driver.CodeOutput GHC.Driver.Config GHC.Driver.Config.Cmm GHC.Driver.Config.Cmm.Parser
+    GHC.Driver.Config.CmmToAsm GHC.Driver.Config.CmmToLlvm GHC.Driver.Config.Core.Lint GHC.Driver.Config.Core.Lint.Interactive GHC.Driver.Config.Core.Opt.Arity GHC.Driver.Config.Core.Opt.LiberateCase
+    GHC.Driver.Config.Core.Opt.Simplify GHC.Driver.Config.Core.Opt.WorkWrap GHC.Driver.Config.Core.Rules GHC.Driver.Config.CoreToStg GHC.Driver.Config.CoreToStg.Prep GHC.Driver.Config.Diagnostic
+    GHC.Driver.Config.Finder GHC.Driver.Config.HsToCore GHC.Driver.Config.HsToCore.Ticks GHC.Driver.Config.HsToCore.Usage GHC.Driver.Config.Linker GHC.Driver.Config.Logger
+    GHC.Driver.Config.Parser GHC.Driver.Config.Stg.Debug GHC.Driver.Config.Stg.Lift GHC.Driver.Config.Stg.Pipeline GHC.Driver.Config.Stg.Ppr GHC.Driver.Config.StgToCmm
+    GHC.Driver.Config.StgToJS GHC.Driver.Config.Tidy GHC.Driver.Env GHC.Driver.Env.KnotVars GHC.Driver.Env.Types GHC.Driver.Errors
+    GHC.Driver.Errors.Ppr GHC.Driver.Errors.Types GHC.Driver.Flags GHC.Driver.GenerateCgIPEStub GHC.Driver.Hooks GHC.Driver.LlvmConfigCache
+    GHC.Driver.Main GHC.Driver.Make GHC.Driver.MakeFile GHC.Driver.Monad GHC.Driver.Phases GHC.Driver.Pipeline
+    GHC.Driver.Pipeline.Execute GHC.Driver.Pipeline.LogQueue GHC.Driver.Pipeline.Monad GHC.Driver.Pipeline.Phases GHC.Driver.Plugins GHC.Driver.Plugins.External
+    GHC.Driver.Ppr GHC.Driver.Session GHC.Encoding.UTF8 GHC.Enum GHC.Environment GHC.Err
+    GHC.Event GHC.Event.TimeOut GHC.Exception GHC.Exception.Type GHC.ExecutionStack GHC.ExecutionStack.Internal
+    GHC.Exts GHC.Exts.Heap GHC.Exts.Heap.ClosureTypes GHC.Exts.Heap.Closures GHC.Exts.Heap.Constants GHC.Exts.Heap.FFIClosures
+    GHC.Exts.Heap.FFIClosures_ProfilingDisabled GHC.Exts.Heap.FFIClosures_ProfilingEnabled GHC.Exts.Heap.InfoTable GHC.Exts.Heap.InfoTable.Types GHC.Exts.Heap.InfoTableProf GHC.Exts.Heap.ProfInfo.PeekProfInfo
+    GHC.Exts.Heap.ProfInfo.PeekProfInfo_ProfilingDisabled GHC.Exts.Heap.ProfInfo.PeekProfInfo_ProfilingEnabled GHC.Exts.Heap.ProfInfo.Types GHC.Exts.Heap.Utils GHC.Fingerprint GHC.Fingerprint.Type
+    GHC.Float GHC.Float.ConversionUtils GHC.Float.RealFracMethods GHC.Foreign GHC.ForeignPtr GHC.ForeignSrcLang
+    GHC.ForeignSrcLang.Type GHC.GHCi GHC.GHCi.Helpers GHC.Generics GHC.HandleEncoding GHC.Hs
+    GHC.Hs.Binds GHC.Hs.Decls GHC.Hs.Doc GHC.Hs.DocString GHC.Hs.Dump GHC.Hs.Expr
+    GHC.Hs.Extension GHC.Hs.ImpExp GHC.Hs.Instances GHC.Hs.Lit GHC.Hs.Pat GHC.Hs.Stats
+    GHC.Hs.Syn.Type GHC.Hs.Type GHC.Hs.Utils GHC.HsToCore GHC.HsToCore.Arrows GHC.HsToCore.Binds
+    GHC.HsToCore.Breakpoints GHC.HsToCore.Coverage GHC.HsToCore.Docs GHC.HsToCore.Errors.Ppr GHC.HsToCore.Errors.Types GHC.HsToCore.Expr
+    GHC.HsToCore.Foreign.C GHC.HsToCore.Foreign.Call GHC.HsToCore.Foreign.Decl GHC.HsToCore.Foreign.JavaScript GHC.HsToCore.Foreign.Prim GHC.HsToCore.Foreign.Utils
+    GHC.HsToCore.GuardedRHSs GHC.HsToCore.ListComp GHC.HsToCore.Match GHC.HsToCore.Match.Constructor GHC.HsToCore.Match.Literal GHC.HsToCore.Monad
+    GHC.HsToCore.Pmc GHC.HsToCore.Pmc.Check GHC.HsToCore.Pmc.Desugar GHC.HsToCore.Pmc.Ppr GHC.HsToCore.Pmc.Solver GHC.HsToCore.Pmc.Solver.Types
+    GHC.HsToCore.Pmc.Types GHC.HsToCore.Pmc.Utils GHC.HsToCore.Quote GHC.HsToCore.Ticks GHC.HsToCore.Types GHC.HsToCore.Usage
+    GHC.HsToCore.Utils GHC.IO GHC.IO.Buffer GHC.IO.BufferedIO GHC.IO.Device GHC.IO.Encoding
+    GHC.IO.Encoding.CodePage GHC.IO.Encoding.Failure GHC.IO.Encoding.Iconv GHC.IO.Encoding.Latin1 GHC.IO.Encoding.Types GHC.IO.Encoding.UTF16
+    GHC.IO.Encoding.UTF32 GHC.IO.Encoding.UTF8 GHC.IO.Exception GHC.IO.FD GHC.IO.Handle GHC.IO.Handle.FD
+    GHC.IO.Handle.Internals GHC.IO.Handle.Lock GHC.IO.Handle.Text GHC.IO.Handle.Types GHC.IO.IOMode GHC.IO.StdHandles
+    GHC.IO.SubSystem GHC.IO.Unsafe GHC.IOArray GHC.IOPort GHC.IORef GHC.Iface.Binary
+    GHC.Iface.Env GHC.Iface.Errors GHC.Iface.Ext.Ast GHC.Iface.Ext.Binary GHC.Iface.Ext.Debug GHC.Iface.Ext.Fields
+    GHC.Iface.Ext.Types GHC.Iface.Ext.Utils GHC.Iface.Load GHC.Iface.Make GHC.Iface.Recomp GHC.Iface.Recomp.Binary
+    GHC.Iface.Recomp.Flags GHC.Iface.Rename GHC.Iface.Syntax GHC.Iface.Tidy GHC.Iface.Tidy.StaticPtrTable GHC.Iface.Type
+    GHC.IfaceToCore GHC.InfoProv GHC.Int GHC.Integer GHC.Integer.GMP.Internals GHC.Integer.Logarithms
+    GHC.IsList GHC.Ix GHC.JS.Make GHC.JS.Ppr GHC.JS.Syntax GHC.JS.Transform
+    GHC.LanguageExtensions GHC.LanguageExtensions.Type GHC.Lexeme GHC.Linker GHC.Linker.Config GHC.Linker.Dynamic
+    GHC.Linker.ExtraObj GHC.Linker.Loader GHC.Linker.MacOS GHC.Linker.Static GHC.Linker.Static.Utils GHC.Linker.Types
+    GHC.Linker.Unit GHC.Linker.Windows GHC.List GHC.Llvm GHC.Llvm.MetaData GHC.Llvm.Ppr
+    GHC.Llvm.Syntax GHC.Llvm.Types GHC.MVar GHC.Magic GHC.Magic.Dict GHC.Maybe
+    GHC.Natural GHC.Num GHC.Num.Backend GHC.Num.Backend.Native GHC.Num.Backend.Selected GHC.Num.BigNat
+    GHC.Num.Integer GHC.Num.Natural GHC.Num.Primitives GHC.Num.WordArray GHC.OldList GHC.OverloadedLabels
+    GHC.Pack GHC.Parser GHC.Parser.Annotation GHC.Parser.CharClass GHC.Parser.Errors.Basic GHC.Parser.Errors.Ppr
+    GHC.Parser.Errors.Types GHC.Parser.HaddockLex GHC.Parser.Header GHC.Parser.Lexer GHC.Parser.PostProcess GHC.Parser.PostProcess.Haddock
+    GHC.Parser.Types GHC.Parser.Utils GHC.Platform GHC.Platform.AArch64 GHC.Platform.ARM GHC.Platform.ArchOS
+    GHC.Platform.Constants GHC.Platform.Host GHC.Platform.LoongArch64 GHC.Platform.NoRegs GHC.Platform.PPC GHC.Platform.Profile
+    GHC.Platform.RISCV64 GHC.Platform.Reg GHC.Platform.Reg.Class GHC.Platform.Regs GHC.Platform.S390X GHC.Platform.Wasm32
+    GHC.Platform.Ways GHC.Platform.X86 GHC.Platform.X86_64 GHC.Plugins GHC.Prelude GHC.Prelude.Basic
+    GHC.Prim GHC.Prim.Exception GHC.Prim.Ext GHC.Prim.Panic GHC.Prim.PtrEq GHC.PrimopWrappers
+    GHC.Profiling GHC.Ptr GHC.RTS.Flags GHC.Read GHC.Real GHC.Records
+    GHC.Rename.Bind GHC.Rename.Doc GHC.Rename.Env GHC.Rename.Expr GHC.Rename.Fixity GHC.Rename.HsType
+    GHC.Rename.Module GHC.Rename.Names GHC.Rename.Pat GHC.Rename.Splice GHC.Rename.Unbound GHC.Rename.Utils
+    GHC.ResponseFile GHC.Runtime.Context GHC.Runtime.Debugger GHC.Runtime.Eval GHC.Runtime.Eval.Types GHC.Runtime.Heap.Inspect
+    GHC.Runtime.Heap.Layout GHC.Runtime.Interpreter GHC.Runtime.Interpreter.Types GHC.Runtime.Loader GHC.ST GHC.STRef
+    GHC.Serialized GHC.Settings GHC.Settings.Config GHC.Settings.Constants GHC.Settings.IO GHC.Settings.Utils
+    GHC.Show GHC.Stable GHC.StableName GHC.Stack GHC.Stack.CCS GHC.Stack.CloneStack
+    GHC.Stack.Types GHC.StaticPtr GHC.Stats GHC.Stg.BcPrep GHC.Stg.CSE GHC.Stg.Debug
+    GHC.Stg.FVs GHC.Stg.InferTags GHC.Stg.InferTags.Rewrite GHC.Stg.InferTags.TagSig GHC.Stg.InferTags.Types GHC.Stg.Lift
+    GHC.Stg.Lift.Analysis GHC.Stg.Lift.Config GHC.Stg.Lift.Monad GHC.Stg.Lint GHC.Stg.Pipeline GHC.Stg.Stats
+    GHC.Stg.Subst GHC.Stg.Syntax GHC.Stg.Unarise GHC.Stg.Utils GHC.StgToByteCode GHC.StgToCmm
+    GHC.StgToCmm.ArgRep GHC.StgToCmm.Bind GHC.StgToCmm.CgUtils GHC.StgToCmm.Closure GHC.StgToCmm.Config GHC.StgToCmm.DataCon
+    GHC.StgToCmm.Env GHC.StgToCmm.Expr GHC.StgToCmm.ExtCode GHC.StgToCmm.Foreign GHC.StgToCmm.Heap GHC.StgToCmm.Hpc
+    GHC.StgToCmm.InfoTableProv GHC.StgToCmm.Layout GHC.StgToCmm.Lit GHC.StgToCmm.Monad GHC.StgToCmm.Prim GHC.StgToCmm.Prof
+    GHC.StgToCmm.Sequel GHC.StgToCmm.TagCheck GHC.StgToCmm.Ticky GHC.StgToCmm.Types GHC.StgToCmm.Utils GHC.StgToJS
+    GHC.StgToJS.Apply GHC.StgToJS.Arg GHC.StgToJS.Closure GHC.StgToJS.CodeGen GHC.StgToJS.CoreUtils GHC.StgToJS.DataCon
+    GHC.StgToJS.Deps GHC.StgToJS.Expr GHC.StgToJS.ExprCtx GHC.StgToJS.FFI GHC.StgToJS.Heap GHC.StgToJS.Ids
+    GHC.StgToJS.Linker.Linker GHC.StgToJS.Linker.Types GHC.StgToJS.Linker.Utils GHC.StgToJS.Literal GHC.StgToJS.Monad GHC.StgToJS.Object
+    GHC.StgToJS.Prim GHC.StgToJS.Printer GHC.StgToJS.Profiling GHC.StgToJS.Regs GHC.StgToJS.Rts.Rts GHC.StgToJS.Rts.Types
+    GHC.StgToJS.Sinker GHC.StgToJS.Stack GHC.StgToJS.StaticPtr GHC.StgToJS.StgUtils GHC.StgToJS.Symbols GHC.StgToJS.Types
+    GHC.StgToJS.Utils GHC.Storable GHC.SysTools GHC.SysTools.Ar GHC.SysTools.BaseDir GHC.SysTools.Cpp
+    GHC.SysTools.Elf GHC.SysTools.Info GHC.SysTools.Process GHC.SysTools.Tasks GHC.SysTools.Terminal GHC.Tc.Deriv
+    GHC.Tc.Deriv.Functor GHC.Tc.Deriv.Generate GHC.Tc.Deriv.Generics GHC.Tc.Deriv.Infer GHC.Tc.Deriv.Utils GHC.Tc.Errors
+    GHC.Tc.Errors.Hole GHC.Tc.Errors.Hole.FitTypes GHC.Tc.Errors.Ppr GHC.Tc.Errors.Types GHC.Tc.Gen.Annotation GHC.Tc.Gen.App
+    GHC.Tc.Gen.Arrow GHC.Tc.Gen.Bind GHC.Tc.Gen.Default GHC.Tc.Gen.Export GHC.Tc.Gen.Expr GHC.Tc.Gen.Foreign
+    GHC.Tc.Gen.Head GHC.Tc.Gen.HsType GHC.Tc.Gen.Match GHC.Tc.Gen.Pat GHC.Tc.Gen.Rule GHC.Tc.Gen.Sig
+    GHC.Tc.Gen.Splice GHC.Tc.Instance.Class GHC.Tc.Instance.Family GHC.Tc.Instance.FunDeps GHC.Tc.Instance.Typeable GHC.Tc.Module
+    GHC.Tc.Plugin GHC.Tc.Solver GHC.Tc.Solver.Canonical GHC.Tc.Solver.InertSet GHC.Tc.Solver.Interact GHC.Tc.Solver.Monad
+    GHC.Tc.Solver.Rewrite GHC.Tc.Solver.Types GHC.Tc.TyCl GHC.Tc.TyCl.Build GHC.Tc.TyCl.Class GHC.Tc.TyCl.Instance
+    GHC.Tc.TyCl.PatSyn GHC.Tc.TyCl.Utils GHC.Tc.Types GHC.Tc.Types.Constraint GHC.Tc.Types.EvTerm GHC.Tc.Types.Evidence
+    GHC.Tc.Types.Origin GHC.Tc.Types.Rank GHC.Tc.Utils.Backpack GHC.Tc.Utils.Concrete GHC.Tc.Utils.Env GHC.Tc.Utils.Instantiate
+    GHC.Tc.Utils.Monad GHC.Tc.Utils.TcMType GHC.Tc.Utils.TcType GHC.Tc.Utils.Unify GHC.Tc.Utils.Zonk GHC.Tc.Validity
+    GHC.ThToHs GHC.TopHandler GHC.Tuple GHC.Tuple.Prim GHC.TypeError GHC.TypeLits
+    GHC.TypeLits.Internal GHC.TypeNats GHC.TypeNats.Internal GHC.Types GHC.Types.Annotations GHC.Types.Avail
+    GHC.Types.Basic GHC.Types.BreakInfo GHC.Types.CompleteMatch GHC.Types.CostCentre GHC.Types.CostCentre.State GHC.Types.Cpr
+    GHC.Types.Demand GHC.Types.Error GHC.Types.Error.Codes GHC.Types.FieldLabel GHC.Types.Fixity GHC.Types.Fixity.Env
+    GHC.Types.ForeignCall GHC.Types.ForeignStubs GHC.Types.Hint GHC.Types.Hint.Ppr GHC.Types.HpcInfo GHC.Types.IPE
+    GHC.Types.Id GHC.Types.Id.Info GHC.Types.Id.Make GHC.Types.Literal GHC.Types.Meta GHC.Types.Name
+    GHC.Types.Name.Cache GHC.Types.Name.Env GHC.Types.Name.Occurrence GHC.Types.Name.Ppr GHC.Types.Name.Reader GHC.Types.Name.Set
+    GHC.Types.Name.Shape GHC.Types.PkgQual GHC.Types.ProfAuto GHC.Types.RepType GHC.Types.SafeHaskell GHC.Types.SourceError
+    GHC.Types.SourceFile GHC.Types.SourceText GHC.Types.SrcLoc GHC.Types.Target GHC.Types.Tickish GHC.Types.TyThing
+    GHC.Types.TyThing.Ppr GHC.Types.TypeEnv GHC.Types.Unique GHC.Types.Unique.DFM GHC.Types.Unique.DSet GHC.Types.Unique.FM
+    GHC.Types.Unique.Map GHC.Types.Unique.MemoFun GHC.Types.Unique.SDFM GHC.Types.Unique.Set GHC.Types.Unique.Supply GHC.Types.Var
+    GHC.Types.Var.Env GHC.Types.Var.Set GHC.Unicode GHC.UniqueSubdir GHC.Unit GHC.Unit.Database
+    GHC.Unit.Env GHC.Unit.External GHC.Unit.Finder GHC.Unit.Finder.Types GHC.Unit.Home GHC.Unit.Home.ModInfo
+    GHC.Unit.Info GHC.Unit.Module GHC.Unit.Module.Deps GHC.Unit.Module.Env GHC.Unit.Module.Graph GHC.Unit.Module.Imported
+    GHC.Unit.Module.Location GHC.Unit.Module.ModDetails GHC.Unit.Module.ModGuts GHC.Unit.Module.ModIface GHC.Unit.Module.ModSummary GHC.Unit.Module.Status
+    GHC.Unit.Module.Warnings GHC.Unit.Module.WholeCoreBindings GHC.Unit.Parser GHC.Unit.Ppr GHC.Unit.State GHC.Unit.Types
+    GHC.Utils.Asm GHC.Utils.Binary GHC.Utils.Binary.Typeable GHC.Utils.BufHandle GHC.Utils.CliOption GHC.Utils.Constants
+    GHC.Utils.Containers.Internal.BitUtil GHC.Utils.Containers.Internal.StrictPair GHC.Utils.Encoding GHC.Utils.Encoding.UTF8 GHC.Utils.Error GHC.Utils.Exception
+    GHC.Utils.FV GHC.Utils.Fingerprint GHC.Utils.GlobalVars GHC.Utils.IO.Unsafe GHC.Utils.Json GHC.Utils.Lexeme
+    GHC.Utils.Logger GHC.Utils.Misc GHC.Utils.Monad GHC.Utils.Monad.State.Strict GHC.Utils.Outputable GHC.Utils.Panic
+    GHC.Utils.Panic.Plain GHC.Utils.Ppr GHC.Utils.Ppr.Colour GHC.Utils.TmpFs GHC.Utils.Trace GHC.Utils.Unique
+    GHC.Utils.Word64 GHC.Version GHC.Wasm.ControlFlow GHC.Wasm.ControlFlow.FromCmm GHC.Weak GHC.Weak.Finalize
+    GHC.Word GHCi.BinaryArray GHCi.BreakArray GHCi.CreateBCO GHCi.FFI GHCi.InfoTable
+    GHCi.Message GHCi.ObjLink GHCi.RemoteTypes GHCi.ResolvedBCO GHCi.Run GHCi.Signals
+    GHCi.StaticPtrTable GHCi.TH GHCi.TH.Binary GHCi.Utils IServ Language.Haskell.Extension
+    Language.Haskell.Syntax Language.Haskell.Syntax.Basic Language.Haskell.Syntax.Binds Language.Haskell.Syntax.Concrete Language.Haskell.Syntax.Decls Language.Haskell.Syntax.Expr
+    Language.Haskell.Syntax.Extension Language.Haskell.Syntax.ImpExp Language.Haskell.Syntax.Lit Language.Haskell.Syntax.Module.Name Language.Haskell.Syntax.Pat Language.Haskell.Syntax.Type
+    Language.Haskell.TH Language.Haskell.TH.CodeDo Language.Haskell.TH.LanguageExtensions Language.Haskell.TH.Lib Language.Haskell.TH.Lib.Internal Language.Haskell.TH.Ppr
+    Language.Haskell.TH.PprLib Language.Haskell.TH.Quote Language.Haskell.TH.Syntax Numeric Numeric.Natural Prelude
+    System.CPUTime System.Cmd System.Console.GetOpt System.Console.Haskeline System.Console.Haskeline.Completion System.Console.Haskeline.History
+    System.Console.Haskeline.IO System.Console.Haskeline.Internal System.Console.Terminfo System.Console.Terminfo.Base System.Console.Terminfo.Color System.Console.Terminfo.Cursor
+    System.Console.Terminfo.Edit System.Console.Terminfo.Effects System.Console.Terminfo.Keys System.Directory System.Directory.Internal System.Directory.Internal.Prelude
+    System.Directory.OsPath System.Environment System.Environment.Blank System.Exit System.FilePath System.FilePath.Posix
+    System.FilePath.Windows System.IO System.IO.Error System.IO.Unsafe System.Info System.Mem
+    System.Mem.StableName System.Mem.Weak System.OsPath System.OsPath.Data.ByteString.Short System.OsPath.Data.ByteString.Short.Internal System.OsPath.Data.ByteString.Short.Word16
+    System.OsPath.Encoding System.OsPath.Encoding.Internal System.OsPath.Internal System.OsPath.Posix System.OsPath.Posix.Internal System.OsPath.Types
+    System.OsPath.Windows System.OsPath.Windows.Internal System.OsString System.OsString.Internal System.OsString.Internal.Types System.OsString.Posix
+    System.OsString.Windows System.Posix System.Posix.ByteString System.Posix.ByteString.FilePath System.Posix.Directory System.Posix.Directory.ByteString
+    System.Posix.Directory.Fd System.Posix.Directory.Internals System.Posix.Directory.PosixPath System.Posix.DynamicLinker System.Posix.DynamicLinker.ByteString System.Posix.DynamicLinker.Module
+    System.Posix.DynamicLinker.Module.ByteString System.Posix.DynamicLinker.Prim System.Posix.Env System.Posix.Env.ByteString System.Posix.Env.PosixString System.Posix.Error
+    System.Posix.Fcntl System.Posix.Files System.Posix.Files.ByteString System.Posix.Files.PosixString System.Posix.IO System.Posix.IO.ByteString
+    System.Posix.IO.PosixString System.Posix.Internals System.Posix.PosixPath.FilePath System.Posix.PosixString System.Posix.Process System.Posix.Process.ByteString
+    System.Posix.Process.Internals System.Posix.Process.PosixString System.Posix.Resource System.Posix.Semaphore System.Posix.SharedMem System.Posix.Signals
+    System.Posix.Signals.Exts System.Posix.Temp System.Posix.Temp.ByteString System.Posix.Temp.PosixString System.Posix.Terminal System.Posix.Terminal.ByteString
+    System.Posix.Terminal.PosixString System.Posix.Time System.Posix.Types System.Posix.Unistd System.Posix.User System.Posix.User.ByteString
+    System.Process System.Process.Internals System.Timeout Text.Parsec Text.Parsec.ByteString Text.Parsec.ByteString.Lazy
+    Text.Parsec.Char Text.Parsec.Combinator Text.Parsec.Error Text.Parsec.Expr Text.Parsec.Language Text.Parsec.Perm
+    Text.Parsec.Pos Text.Parsec.Prim Text.Parsec.String Text.Parsec.Text Text.Parsec.Text.Lazy Text.Parsec.Token
+    Text.ParserCombinators.Parsec Text.ParserCombinators.Parsec.Char Text.ParserCombinators.Parsec.Combinator Text.ParserCombinators.Parsec.Error Text.ParserCombinators.Parsec.Expr Text.ParserCombinators.Parsec.Language
+    Text.ParserCombinators.Parsec.Perm Text.ParserCombinators.Parsec.Pos Text.ParserCombinators.Parsec.Prim Text.ParserCombinators.Parsec.Token Text.ParserCombinators.ReadP Text.ParserCombinators.ReadPrec
+    Text.PrettyPrint Text.PrettyPrint.Annotated Text.PrettyPrint.Annotated.HughesPJ Text.PrettyPrint.Annotated.HughesPJClass Text.PrettyPrint.HughesPJ Text.PrettyPrint.HughesPJClass
+    Text.Printf Text.Read Text.Read.Lex Text.Show Text.Show.Functions Text.XHtml
+    Text.XHtml.Debug Text.XHtml.Frameset Text.XHtml.Strict Text.XHtml.Table Text.XHtml.Transitional Trace.Hpc.Mix
+    Trace.Hpc.Reflect Trace.Hpc.Tix Trace.Hpc.Util Type.Reflection Type.Reflection.Unsafe Unsafe.Coerce
+    Utils.Containers.Internal.BitQueue Utils.Containers.Internal.BitUtil Utils.Containers.Internal.StrictPair
+  ].freeze
 end

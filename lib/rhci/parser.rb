@@ -782,7 +782,8 @@ module Rhci
 
     # ---- types ---------------------------------------------------------------
 
-    # [forall vs.] [context =>] type
+    # [forall vs.] [context =>]... type; GHC reads C a => D b => t as
+    # (C a, D b) => t.
     def parse_qual_type
       t = peek
       vars = []
@@ -793,10 +794,14 @@ module Rhci
         advance
       end
       ty = parse_type
-      if at_op?('=>')
+      ctx = nil
+      while at_op?('=>')
         advance
-        return TQual.new(t, vars, to_context(ty), parse_type)
+        ctx = (ctx || []) + to_context(ty)
+        ty = parse_type
       end
+      return TQual.new(t, vars, ctx, ty) if ctx
+
       vars.empty? ? ty : TQual.new(t, vars, [], ty)
     end
 
