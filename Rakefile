@@ -40,4 +40,21 @@ task bench: :mruby do
   ruby 'tools/bench_startup.rb', RHCI
 end
 
+desc 'Runtime benchmarks (bench/programs.txt) on CRuby and the mruby binary'
+task bench_runtime: :mruby do
+  ruby 'tools/bench_runtime.rb'
+end
+
+# The mruby builds with RHCI_GC_TORTURE (full collections inside the C
+# evaluation loop), in build/torture-*; run after changing machine.c.
+desc 'Run the mruby tests with GC torture in the C evaluation loop (slow)'
+task torture: %i[lint bundle] do
+  log = File.join(ROOT, 'build', 'torture-build.log')
+  env = { 'MRUBY_CONFIG' => File.join(ROOT, 'tools', 'torture_build_config.rb') }
+  ok = system(env, 'rake', '-f', File.join(MRUBY_DIR, 'Rakefile'), '-j8', 'all', out: log, err: log)
+  abort "torture build failed:\n#{File.readlines(log).last(30).join}" unless ok
+  abort 'tests failed under GC torture' unless system(File.join(ROOT, 'build', 'torture-mruby', 'bin', 'mruby'),
+                                                      File.join(ROOT, 'build', 'test_bundle.rb'))
+end
+
 task default: %i[test bench]

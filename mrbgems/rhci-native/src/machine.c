@@ -1,6 +1,6 @@
-/* The evaluation loop of Rhci::VM::Machine (lib/rhci/vm.rb, `run`) in C,
- * for the mruby builds. It is a line-by-line port working on the same
- * Ruby objects: code nodes (attr_reader objects), thunks, closures and
+/* The evaluation loop of Rhci::VM::Machine (lib/rhci/vm.rb, `run_ruby`)
+ * in C, for the mruby builds. It is a line-by-line port working on the
+ * same Ruby objects: code (plain Arrays, see vm.rb), thunks, closures and
  * constructor values (Array subclasses), the segmented FrameStack, and the
  * machine's Ruby primitives, so everything around the loop is shared.
  * The Ruby loop stays the reference (CRuby runs it); a change to one is a
@@ -27,6 +27,12 @@
 /* opcodes, as in vm.rb */
 enum { OP_LOCAL, OP_ENV, OP_GLOBAL, OP_VALUE, OP_APP, OP_LET, OP_CASE, OP_CON, OP_PRIM, OP_STR };
 
+/* code bodies: [arity, captures, nlocals, body, name] */
+enum { CODE_ARITY, CODE_CAPTURES, CODE_NLOCALS, CODE_BODY };
+
+/* An element of an Array known to be long enough (code, frames). */
+#define AT(a, i) (RARRAY_PTR(a)[i])
+
 #define ENV_THUNK 2
 #define ENV_FUN 1
 #define SEGMENT 1024
@@ -37,16 +43,20 @@ static mrb_sym s_op, s_index, s_cell, s_value, s_fn, s_args, s_binds, s_body, s_
 static mrb_sym m_value;
 static mrb_sym y_pending, y_value, y_blackhole, y_raised, y_thunk, y_funk, y_conk, y_str;
 static mrb_sym p_integerAdd, p_integerSub, p_integerMul, p_integerEq, p_integerLt, p_integerLe,
-  p_integerGt, p_integerGe, p_intAdd, p_intSub, p_intMul, p_charEq, p_ord, p_chr;
+  p_integerGt, p_integerGe, p_intAdd, p_intSub, p_intMul, p_charEq, p_ord, p_chr,
+  p_integerQuot, p_integerRem, p_integerDiv, p_integerMod, p_intRem, p_intMod, p_intToInteger,
+  p_integerToInt, p_intNegate, p_integerNegate, p_doubleNegate, p_doubleAdd, p_doubleSub, p_doubleMul,
+  p_doubleDiv, p_doubleEq, p_doubleLt, p_doubleLe, p_doubleGt, p_doubleGe;
 
 struct classes {
-  struct RClass *thunk, *string_thunk, *fun, *pap, *con_value, *code_case, *hs_exception, *limit, *lazy_cell;
-  mrb_value nil_v, true_v, false_v, cons;
+  struct RClass *thunk, *string_thunk, *fun, *pap, *con_value, *hs_exception, *limit, *lazy_cell;
+  mrb_value nil_v, true_v, false_v, cons, case_frame;
 };
 static struct classes K;
 static int ready = 0;
 
 #define IV(o, s) mrb_iv_get(mrb, (o), (s))
+#define PROTECT(v) mrb_gc_protect(mrb, (v))
 #define CLASS_OF(v) (mrb_obj_ptr(v)->c)
 
 static int
@@ -68,7 +78,7 @@ setup(mrb_state *mrb)
   K.fun = mrb_class_get_under(mrb, vm, "Fun");
   K.pap = mrb_class_get_under(mrb, vm, "PAP");
   K.con_value = mrb_class_get_under(mrb, vm, "ConValue");
-  K.code_case = mrb_class_get_under(mrb, vm, "XCase");
+  K.case_frame = mrb_const_get(mrb, mrb_obj_value(vm), mrb_intern_lit(mrb, "CASE_FRAME"));
   K.hs_exception = mrb_class_get_under(mrb, vm, "HsException");
   K.limit = mrb_class_get_under(mrb, vm, "LimitExceeded");
   K.lazy_cell = mrb_class_get_under(mrb, snapshot, "LazyCell");
@@ -83,37 +93,51 @@ setup(mrb_state *mrb)
 
 /* ---- the frame stack (VM::FrameStack's representation) ------------------ */
 
-static mrb_int
-stack_length(mrb_state *mrb, mrb_value st)
+/* While the loop runs, the stack's top segment and length are kept here;
+ * @top is updated whenever the segment changes (so the GC sees it), and
+ * @length is written back before Ruby can read it (sync_stack). */
+struct fstack {
+  mrb_value obj, top, full;
+  mrb_int len;
+};
+
+static void
+open_stack(mrb_state *mrb, struct fstack *st, mrb_value obj)
 {
-  return mrb_integer(IV(st, s_length));
+  st->obj = obj;
+  st->top = IV(obj, s_top);
+  st->full = IV(obj, s_full);
+  st->len = mrb_integer(IV(obj, s_length));
 }
 
 static void
-stack_push(mrb_state *mrb, mrb_value st, mrb_value frame)
+sync_stack(mrb_state *mrb, struct fstack *st)
 {
-  mrb_value top = IV(st, s_top);
-  if (RARRAY_LEN(top) == SEGMENT) {
-    mrb_ary_push(mrb, IV(st, s_full), top);
-    top = mrb_ary_new_capa(mrb, SEGMENT);
-    mrb_iv_set(mrb, st, s_top, top);
+  mrb_iv_set(mrb, st->obj, s_length, mrb_int_value(mrb, st->len));
+}
+
+static void
+stack_push(mrb_state *mrb, struct fstack *st, mrb_value frame)
+{
+  if (RARRAY_LEN(st->top) == SEGMENT) {
+    mrb_ary_push(mrb, st->full, st->top);
+    st->top = mrb_ary_new_capa(mrb, SEGMENT);
+    mrb_iv_set(mrb, st->obj, s_top, st->top);
   }
-  mrb_ary_push(mrb, top, frame);
-  mrb_iv_set(mrb, st, s_length, mrb_int_value(mrb, stack_length(mrb, st) + 1));
+  mrb_ary_push(mrb, st->top, frame);
+  st->len++;
 }
 
 static mrb_value
-stack_pop(mrb_state *mrb, mrb_value st)
+stack_pop(mrb_state *mrb, struct fstack *st)
 {
-  mrb_int n = stack_length(mrb, st);
-  if (n == 0) return mrb_nil_value();
-  mrb_value top = IV(st, s_top);
-  if (RARRAY_LEN(top) == 0) {
-    top = mrb_ary_pop(mrb, IV(st, s_full));
-    mrb_iv_set(mrb, st, s_top, top);
+  if (st->len == 0) return mrb_nil_value();
+  if (RARRAY_LEN(st->top) == 0) {
+    st->top = mrb_ary_pop(mrb, st->full);
+    mrb_iv_set(mrb, st->obj, s_top, st->top);
   }
-  mrb_iv_set(mrb, st, s_length, mrb_int_value(mrb, n - 1));
-  mrb_value f = mrb_ary_pop(mrb, top);
+  st->len--;
+  mrb_value f = mrb_ary_pop(mrb, st->top);
   mrb_gc_protect(mrb, f);
   return f;
 }
@@ -161,18 +185,6 @@ gather(mrb_state *mrb, mrb_value atoms, mrb_value locals, mrb_value env)
 }
 
 static mrb_value
-nullary(mrb_state *mrb, mrb_value con)
-{
-  mrb_value v = IV(con, s_nullary);
-  if (mrb_nil_p(v)) {
-    v = new_array_of(mrb, K.con_value, 1);
-    mrb_ary_set(mrb, v, 0, con);
-    mrb_iv_set(mrb, con, s_nullary, v);
-  }
-  return v;
-}
-
-static mrb_value
 build_data(mrb_state *mrb, mrb_value con, mrb_value atoms, mrb_value locals, mrb_value env)
 {
   mrb_int n = RARRAY_LEN(atoms);
@@ -189,31 +201,32 @@ raise_hs(mrb_state *mrb, const char *msg)
   mrb_exc_raise(mrb, mrb_obj_new(mrb, K.hs_exception, 1, &s));
 }
 
+/* xc: [OP_CASE, scrut, binder, con_alts, lit_alts, default] */
 static mrb_value
 select_alt(mrb_state *mrb, mrb_value xc, mrb_value value, mrb_value locals)
 {
-  mrb_value con_alts = IV(xc, s_con_alts);
+  mrb_value con_alts = AT(xc, 3);
   if (!mrb_nil_p(con_alts)) {
     mrb_int tag = mrb_integer(IV(mrb_ary_ref(mrb, value, 0), s_tag));
     mrb_value alt = mrb_ary_ref(mrb, con_alts, tag);
     if (!mrb_nil_p(alt)) {
-      mrb_value slots = mrb_ary_ref(mrb, alt, 0);
+      mrb_value slots = AT(alt, 0);
       mrb_int n = RARRAY_LEN(slots);
       for (mrb_int i = 0; i < n; i++) {
-        mrb_value s = RARRAY_PTR(slots)[i];
+        mrb_value s = AT(slots, i);
         if (!mrb_nil_p(s)) mrb_ary_set(mrb, locals, mrb_integer(s), mrb_ary_ref(mrb, value, i + 1));
       }
-      return mrb_ary_ref(mrb, alt, 1);
+      return AT(alt, 1);
     }
   }
   else {
-    mrb_value lit_alts = IV(xc, s_lit_alts);
+    mrb_value lit_alts = AT(xc, 4);
     if (!mrb_nil_p(lit_alts)) {
       mrb_value body = mrb_hash_get(mrb, lit_alts, value);
       if (!mrb_nil_p(body)) return body;
     }
   }
-  mrb_value d = IV(xc, s_default);
+  mrb_value d = AT(xc, 5);
   if (!mrb_nil_p(d)) return d;
   raise_hs(mrb, "machine: no matching case alternative");
   return mrb_nil_value();
@@ -229,7 +242,7 @@ fill(mrb_state *mrb, mrb_value obj, mrb_int offset, mrb_value atoms, mrb_value l
 static mrb_value
 new_thunk(mrb_state *mrb, mrb_value code)
 {
-  mrb_value t = new_array_of(mrb, K.thunk, ENV_THUNK + RARRAY_LEN(IV(code, s_captures)));
+  mrb_value t = new_array_of(mrb, K.thunk, ENV_THUNK + RARRAY_LEN(AT(code, CODE_CAPTURES)));
   mrb_ary_set(mrb, t, 0, mrb_symbol_value(y_pending));
   mrb_ary_set(mrb, t, 1, code);
   return t;
@@ -258,16 +271,15 @@ allocate(mrb_state *mrb, mrb_value binds, mrb_value locals, mrb_value env)
     mrb_value v;
     if (kind == y_thunk) v = new_thunk(mrb, payload);
     else if (kind == y_funk) {
-      v = new_array_of(mrb, K.fun, ENV_FUN + RARRAY_LEN(IV(payload, s_captures)));
+      v = new_array_of(mrb, K.fun, ENV_FUN + RARRAY_LEN(AT(payload, CODE_CAPTURES)));
       mrb_ary_set(mrb, v, 0, payload);
     }
-    else if (kind == y_conk) {
-      mrb_value con = mrb_ary_ref(mrb, payload, 0);
-      mrb_int arity = mrb_integer(IV(con, s_arity));
-      if (arity == 0) v = nullary(mrb, con);
+    else if (kind == y_conk) { /* payload: [ConInfo, atoms, shared value if nullary] */
+      mrb_int arity = RARRAY_LEN(AT(payload, 1));
+      if (arity == 0) v = AT(payload, 2);
       else {
         v = new_array_of(mrb, K.con_value, arity + 1);
-        mrb_ary_set(mrb, v, 0, con);
+        mrb_ary_set(mrb, v, 0, AT(payload, 0));
       }
     }
     else if (kind == y_str) v = new_string_thunk(mrb, payload, 0);
@@ -280,8 +292,8 @@ allocate(mrb_state *mrb, mrb_value binds, mrb_value locals, mrb_value env)
     mrb_sym kind = mrb_symbol(mrb_ary_ref(mrb, b, 1));
     mrb_value payload = mrb_ary_ref(mrb, b, 2);
     mrb_value obj = mrb_ary_ref(mrb, locals, slot);
-    if (kind == y_thunk) fill(mrb, obj, ENV_THUNK, IV(payload, s_captures), locals, env);
-    else if (kind == y_funk) fill(mrb, obj, ENV_FUN, IV(payload, s_captures), locals, env);
+    if (kind == y_thunk) fill(mrb, obj, ENV_THUNK, AT(payload, CODE_CAPTURES), locals, env);
+    else if (kind == y_funk) fill(mrb, obj, ENV_FUN, AT(payload, CODE_CAPTURES), locals, env);
     else if (kind == y_conk) {
       mrb_value atoms = mrb_ary_ref(mrb, payload, 1);
       if (RARRAY_LEN(atoms) > 0) fill(mrb, obj, 1, atoms, locals, env);
@@ -326,13 +338,50 @@ boolv(int b)
   return b ? K.true_v : K.false_v;
 }
 
+/* Double primitives, as the Ruby ones compute them (IEEE arithmetic;
+ * comparisons are false with NaN). */
+static int
+fast_double2(mrb_state *mrb, mrb_sym p, mrb_value x, mrb_value y, mrb_value *out)
+{
+  mrb_float a = mrb_float(x), b = mrb_float(y);
+  if (p == p_doubleAdd) *out = mrb_float_value(mrb, a + b);
+  else if (p == p_doubleSub) *out = mrb_float_value(mrb, a - b);
+  else if (p == p_doubleMul) *out = mrb_float_value(mrb, a * b);
+  else if (p == p_doubleDiv) *out = mrb_float_value(mrb, a / b);
+  else if (p == p_doubleEq) *out = boolv(a == b);
+  else if (p == p_doubleLt) *out = boolv(a < b);
+  else if (p == p_doubleLe) *out = boolv(a <= b);
+  else if (p == p_doubleGt) *out = boolv(a > b);
+  else if (p == p_doubleGe) *out = boolv(a >= b);
+  else return 0;
+  return 1;
+}
+
 /* Integer primitives on two fixnums, done here; returns 0 if the Ruby
- * primitive must run (another primitive, a bignum, or an overflow). */
+ * primitive must run (another primitive, a bignum, an overflow, or a
+ * division by zero, which the Ruby primitive reports). */
 static int
 fast_prim2(mrb_state *mrb, mrb_sym p, mrb_value x, mrb_value y, mrb_value *out)
 {
+  if (mrb_float_p(x) && mrb_float_p(y)) return fast_double2(mrb, p, x, y, out);
   if (!mrb_integer_p(x) || !mrb_integer_p(y)) return 0;
   mrb_int a = mrb_integer(x), b = mrb_integer(y), r;
+  if (p == p_integerQuot || p == p_integerRem || p == p_integerDiv || p == p_integerMod ||
+      p == p_intRem || p == p_intMod) {
+    if (b == 0 || (a == INT64_MIN && b == -1)) return 0;
+    if (p == p_integerQuot) r = a / b;
+    else if (p == p_integerRem || p == p_intRem) r = a % b;
+    else if (p == p_integerDiv) {
+      r = a / b;
+      if (a % b != 0 && ((a < 0) != (b < 0))) r--;
+    }
+    else {
+      r = a % b;
+      if (r != 0 && ((r < 0) != (b < 0))) r += b;
+    }
+    *out = mrb_int_value(mrb, r);
+    return 1;
+  }
   if (p == p_integerAdd) { if (__builtin_add_overflow(a, b, &r)) return 0; *out = mrb_int_value(mrb, r); }
   else if (p == p_integerSub) { if (__builtin_sub_overflow(a, b, &r)) return 0; *out = mrb_int_value(mrb, r); }
   else if (p == p_integerMul) { if (__builtin_mul_overflow(a, b, &r)) return 0; *out = mrb_int_value(mrb, r); }
@@ -349,12 +398,31 @@ fast_prim2(mrb_state *mrb, mrb_sym p, mrb_value x, mrb_value y, mrb_value *out)
   return 1;
 }
 
+static int
+fast_prim1(mrb_state *mrb, mrb_sym p, mrb_value x, mrb_value *out)
+{
+  if (mrb_integer_p(x)) {
+    mrb_int a = mrb_integer(x);
+    if (p == p_ord || p == p_intToInteger || p == p_integerToInt) *out = x;
+    else if (p == p_intNegate) *out = mrb_int_value(mrb, (mrb_int)(0 - (uint64_t)a));
+    else if (p == p_integerNegate && a != INT64_MIN) *out = mrb_int_value(mrb, -a);
+    else return 0;
+    return 1;
+  }
+  if (mrb_float_p(x) && p == p_doubleNegate) {
+    *out = mrb_float_value(mrb, -mrb_float(x));
+    return 1;
+  }
+  return 0;
+}
+
+/* xp: [OP_PRIM, method, atoms, strict, name] */
 static mrb_value
 prim(mrb_state *mrb, mrb_value self, mrb_value xp, mrb_value locals, mrb_value env)
 {
-  mrb_value pa = IV(xp, s_args);
-  mrb_bool strict = mrb_test(IV(xp, s_strict));
-  mrb_sym meth = mrb_symbol(IV(xp, s_meth));
+  mrb_value pa = AT(xp, 2);
+  mrb_bool strict = mrb_test(AT(xp, 3));
+  mrb_sym meth = mrb_symbol(AT(xp, 1));
   mrb_value argv[2];
   mrb_int n = RARRAY_LEN(pa);
   argv[0] = atom(mrb, RARRAY_PTR(pa)[0], locals, env);
@@ -365,6 +433,7 @@ prim(mrb_state *mrb, mrb_value self, mrb_value xp, mrb_value locals, mrb_value e
     }
     mrb_value r;
     if (n == 2 && fast_prim2(mrb, meth, argv[0], argv[1], &r)) return r;
+    if (n == 1 && fast_prim1(mrb, meth, argv[0], &r)) return r;
   }
   return mrb_funcall_argv(mrb, self, meth, n == 2 ? 2 : 1, argv);
 }
@@ -374,7 +443,8 @@ prim(mrb_state *mrb, mrb_value self, mrb_value xp, mrb_value locals, mrb_value e
 struct run_args {
   mrb_value self, expr, locals, env;
   mrb_int base;
-  mrb_int steps; /* the machine's @steps, written back on every exit */
+  mrb_int steps;       /* the machine's @steps, written back on every exit */
+  struct fstack stack; /* the machine's @stack, synced likewise */
 };
 
 static mrb_value
@@ -383,41 +453,50 @@ run_body(mrb_state *mrb, void *ud)
   struct run_args *ra = (struct run_args *)ud;
   mrb_value self = ra->self, expr = ra->expr, locals = ra->locals, env = ra->env;
   mrb_int base = ra->base;
-  mrb_value stack = IV(self, s_stack);
+  struct fstack *stack = &ra->stack;
   mrb_value value = mrb_nil_value();
   int evaluating = 1;
   mrb_int next_check = mrb_integer(IV(self, s_next_check));
   int ai = mrb_gc_arena_save(mrb);
 
   for (;;) {
-    mrb_gc_arena_restore(mrb, ai);
-    mrb_gc_protect(mrb, expr);
-    mrb_gc_protect(mrb, locals);
-    mrb_gc_protect(mrb, env);
-    mrb_gc_protect(mrb, value);
+    /* Everything the loop allocates is in the GC arena; it is reset now
+     * and then, re-protecting the registers. Between resets, a value a
+     * register reads out of another object is protected as it is read
+     * (PROTECT), since that object may be dropped. */
+    if (mrb->gc.arena_idx - ai > 512) {
+      mrb_gc_arena_restore(mrb, ai);
+      mrb_gc_protect(mrb, expr);
+      mrb_gc_protect(mrb, locals);
+      mrb_gc_protect(mrb, env);
+      mrb_gc_protect(mrb, value);
+    }
     if (evaluating) {
       ra->steps++;
       if (ra->steps >= next_check) {
         mrb_iv_set(mrb, self, s_steps, mrb_int_value(mrb, ra->steps));
+        sync_stack(mrb, stack);
         mrb_funcall_argv(mrb, self, mrb_intern_lit(mrb, "check_limits"), 0, NULL);
         next_check = mrb_integer(IV(self, s_next_check));
       }
-      mrb_int op = mrb_integer(IV(expr, s_op));
+      mrb_int op = mrb_integer(AT(expr, 0));
       if (op <= OP_VALUE) {
         mrb_value v;
-        if (op == OP_LOCAL) v = mrb_ary_ref(mrb, locals, mrb_integer(IV(expr, s_index)));
-        else if (op == OP_ENV) v = mrb_ary_ref(mrb, env, mrb_integer(IV(expr, s_index)));
-        else if (op == OP_GLOBAL) v = cell_value(mrb, IV(expr, s_cell));
-        else v = IV(expr, s_value);
+        if (op == OP_LOCAL) v = mrb_ary_ref(mrb, locals, mrb_integer(AT(expr, 1)));
+        else if (op == OP_ENV) v = mrb_ary_ref(mrb, env, mrb_integer(AT(expr, 1)));
+        else if (op == OP_GLOBAL) v = cell_value(mrb, AT(expr, 1));
+        else v = AT(expr, 1);
         if (is_thunk(v)) {
           mrb_sym state = mrb_symbol(mrb_ary_ref(mrb, v, 0));
           if (state == y_value) {
             value = mrb_ary_ref(mrb, v, 1);
+            PROTECT(value);
             evaluating = 0;
           }
           else if (state == y_pending) {
             if (CLASS_OF(v) == K.string_thunk) {
               value = unpack(mrb, v);
+              PROTECT(value);
               evaluating = 0;
             }
             else {
@@ -425,10 +504,10 @@ run_body(mrb_state *mrb, void *ud)
               stack_push(mrb, stack, v);
               mrb_value code = mrb_ary_ref(mrb, v, 1);
               env = v;
-              mrb_int n = mrb_integer(IV(code, s_nlocals));
+              mrb_int n = mrb_integer(AT(code, CODE_NLOCALS));
               locals = n == 0 ? mrb_nil_value() : mrb_ary_new_capa(mrb, n);
               if (n > 0) mrb_ary_set(mrb, locals, n - 1, mrb_nil_value());
-              expr = IV(code, s_body);
+              expr = AT(code, CODE_BODY);
             }
           }
           else if (state == y_blackhole) raise_hs(mrb, "<<loop>>");
@@ -436,31 +515,33 @@ run_body(mrb_state *mrb, void *ud)
         }
         else {
           value = v;
+          PROTECT(value);
           evaluating = 0;
         }
       }
       else if (op == OP_APP) {
-        mrb_value f = IV(expr, s_fn);
-        mrb_int fo = mrb_integer(IV(f, s_op));
+        mrb_value f = AT(expr, 1);
+        mrb_int fo = mrb_integer(AT(f, 0));
         mrb_value fv;
-        if (fo == OP_GLOBAL) fv = cell_value(mrb, IV(f, s_cell));
-        else if (fo == OP_LOCAL) fv = mrb_ary_ref(mrb, locals, mrb_integer(IV(f, s_index)));
-        else if (fo == OP_ENV) fv = mrb_ary_ref(mrb, env, mrb_integer(IV(f, s_index)));
-        else fv = IV(f, s_value);
+        if (fo == OP_GLOBAL) fv = cell_value(mrb, AT(f, 1));
+        else if (fo == OP_LOCAL) fv = mrb_ary_ref(mrb, locals, mrb_integer(AT(f, 1)));
+        else if (fo == OP_ENV) fv = mrb_ary_ref(mrb, env, mrb_integer(AT(f, 1)));
+        else fv = AT(f, 1);
         if (is_thunk(fv) && mrb_symbol(mrb_ary_ref(mrb, fv, 0)) == y_value) fv = mrb_ary_ref(mrb, fv, 1);
-        mrb_value atoms = IV(expr, s_args);
+        mrb_value atoms = AT(expr, 2);
         mrb_int n = RARRAY_LEN(atoms);
         mrb_value code;
         if (mrb_array_p(fv) && CLASS_OF(fv) == K.fun &&
-            mrb_integer(IV(code = mrb_ary_ref(mrb, fv, 0), s_arity)) == n) {
+            mrb_integer(AT(code = AT(fv, 0), CODE_ARITY)) == n) {
           /* Known saturated call: arguments straight into the callee's locals. */
-          mrb_int nl = mrb_integer(IV(code, s_nlocals));
+          mrb_int nl = mrb_integer(AT(code, CODE_NLOCALS));
           mrb_value l = mrb_ary_new_capa(mrb, nl);
           if (nl > 0) mrb_ary_set(mrb, l, nl - 1, mrb_nil_value());
           for (mrb_int i = 0; i < n; i++) mrb_ary_set(mrb, l, i, atom(mrb, RARRAY_PTR(atoms)[i], locals, env));
           locals = l;
           env = fv;
-          expr = IV(code, s_body);
+          PROTECT(env);
+          expr = AT(code, CODE_BODY);
         }
         else {
           stack_push(mrb, stack, gather(mrb, atoms, locals, env));
@@ -468,46 +549,48 @@ run_body(mrb_state *mrb, void *ud)
         }
       }
       else if (op == OP_CASE) {
-        mrb_value sc = IV(expr, s_scrut);
-        mrb_int so = mrb_integer(IV(sc, s_op));
+        mrb_value sc = AT(expr, 1);
+        mrb_int so = mrb_integer(AT(sc, 0));
         mrb_value sv = mrb_undef_value();
         if (so <= OP_VALUE) {
-          if (so == OP_LOCAL) sv = mrb_ary_ref(mrb, locals, mrb_integer(IV(sc, s_index)));
-          else if (so == OP_ENV) sv = mrb_ary_ref(mrb, env, mrb_integer(IV(sc, s_index)));
-          else if (so == OP_GLOBAL) sv = cell_value(mrb, IV(sc, s_cell));
-          else sv = IV(sc, s_value);
+          if (so == OP_LOCAL) sv = mrb_ary_ref(mrb, locals, mrb_integer(AT(sc, 1)));
+          else if (so == OP_ENV) sv = mrb_ary_ref(mrb, env, mrb_integer(AT(sc, 1)));
+          else if (so == OP_GLOBAL) sv = cell_value(mrb, AT(sc, 1));
+          else sv = AT(sc, 1);
           if (is_thunk(sv)) sv = mrb_symbol(mrb_ary_ref(mrb, sv, 0)) == y_value ? mrb_ary_ref(mrb, sv, 1) : mrb_undef_value();
         }
-        else if (so == OP_PRIM && mrb_test(IV(sc, s_strict))) {
+        else if (so == OP_PRIM && mrb_test(AT(sc, 3))) {
           sv = prim(mrb, self, sc, locals, env);
         }
         if (mrb_undef_p(sv)) {
           stack_push(mrb, stack, env);
           stack_push(mrb, stack, locals);
           stack_push(mrb, stack, expr);
+          stack_push(mrb, stack, K.case_frame);
           expr = sc;
         }
         else {
-          mrb_value binder = IV(expr, s_binder);
+          mrb_value binder = AT(expr, 2);
           if (!mrb_nil_p(binder)) mrb_ary_set(mrb, locals, mrb_integer(binder), sv);
           expr = select_alt(mrb, expr, sv, locals);
         }
       }
       else if (op == OP_LET) {
-        allocate(mrb, IV(expr, s_binds), locals, env);
-        expr = IV(expr, s_body);
+        allocate(mrb, AT(expr, 1), locals, env);
+        expr = AT(expr, 2);
       }
       else if (op == OP_CON) {
-        mrb_value con = IV(expr, s_con);
-        value = mrb_integer(IV(con, s_arity)) == 0 ? nullary(mrb, con) : build_data(mrb, con, IV(expr, s_args), locals, env);
+        mrb_value atoms = AT(expr, 2);
+        value = RARRAY_LEN(atoms) == 0 ? AT(expr, 3) : build_data(mrb, AT(expr, 1), atoms, locals, env);
         evaluating = 0;
       }
       else if (op == OP_PRIM) {
         value = prim(mrb, self, expr, locals, env);
+        PROTECT(value);
         evaluating = 0;
       }
       else if (op == OP_STR) {
-        value = unpack(mrb, new_string_thunk(mrb, IV(expr, s_cps), 0));
+        value = unpack(mrb, new_string_thunk(mrb, AT(expr, 1), 0));
         evaluating = 0;
       }
       else {
@@ -515,15 +598,17 @@ run_body(mrb_state *mrb, void *ud)
       }
     }
     else {
-      if (stack_length(mrb, stack) == base) {
+      if (stack->len == base) {
         mrb_iv_set(mrb, self, s_steps, mrb_int_value(mrb, ra->steps));
+        sync_stack(mrb, stack);
         return value;
       }
       mrb_value frame = stack_pop(mrb, stack);
-      if (mrb_obj_ptr(frame)->c == K.code_case) {
+      if (mrb_obj_eq(mrb, frame, K.case_frame)) {
+        frame = stack_pop(mrb, stack);
         locals = stack_pop(mrb, stack);
         env = stack_pop(mrb, stack);
-        mrb_value binder = IV(frame, s_binder);
+        mrb_value binder = AT(frame, 2);
         if (!mrb_nil_p(binder)) mrb_ary_set(mrb, locals, mrb_integer(binder), value);
         expr = select_alt(mrb, frame, value, locals);
         evaluating = 1;
@@ -539,12 +624,13 @@ run_body(mrb_state *mrb, void *ud)
           mrb_ary_concat(mrb, joined, args);
           args = joined;
           fun = IV(fun, s_fun);
+          PROTECT(fun);
         }
         if (!mrb_array_p(fun) || CLASS_OF(fun) != K.fun) {
           mrb_raise(mrb, E_RUNTIME_ERROR, "machine: applying a non-function");
         }
-        mrb_value code = mrb_ary_ref(mrb, fun, 0);
-        mrb_int n = mrb_integer(IV(code, s_arity));
+        mrb_value code = AT(fun, 0);
+        mrb_int n = mrb_integer(AT(code, CODE_ARITY));
         mrb_int len = RARRAY_LEN(args);
         if (len < n) {
           mrb_value pv[2] = { fun, args };
@@ -555,11 +641,11 @@ run_body(mrb_state *mrb, void *ud)
             stack_push(mrb, stack, mrb_ary_new_from_values(mrb, len - n, RARRAY_PTR(args) + n));
             args = mrb_ary_new_from_values(mrb, n, RARRAY_PTR(args));
           }
-          mrb_int nl = mrb_integer(IV(code, s_nlocals));
+          mrb_int nl = mrb_integer(AT(code, CODE_NLOCALS));
           if (nl > n) mrb_ary_set(mrb, args, nl - 1, mrb_nil_value());
           locals = args;
           env = fun;
-          expr = IV(code, s_body);
+          expr = AT(code, CODE_BODY);
           evaluating = 1;
         }
       }
@@ -577,10 +663,12 @@ machine_run_native(mrb_state *mrb, mrb_value self)
   if (!ready) setup(mrb);
   ra.self = self;
   ra.steps = mrb_integer(mrb_iv_get(mrb, self, s_steps));
+  open_stack(mrb, &ra.stack, mrb_iv_get(mrb, self, s_stack));
   mrb_bool failed = FALSE;
   mrb_value r = mrb_protect_error(mrb, run_body, &ra, &failed);
   if (failed) {
     mrb_iv_set(mrb, self, s_steps, mrb_int_value(mrb, ra.steps));
+    sync_stack(mrb, &ra.stack);
     mrb_value argv[2];
     argv[0] = mrb_int_value(mrb, ra.base);
     if (mrb_obj_is_kind_of(mrb, r, K.hs_exception)) argv[1] = r;
@@ -618,6 +706,13 @@ mrb_rhci_native_gem_init(mrb_state *mrb)
   p_integerGt = SYM("p_integerGt"); p_integerGe = SYM("p_integerGe"); p_intAdd = SYM("p_intAdd");
   p_intSub = SYM("p_intSub"); p_intMul = SYM("p_intMul"); p_charEq = SYM("p_charEq"); p_ord = SYM("p_ord");
   p_chr = SYM("p_chr");
+  p_integerQuot = SYM("p_integerQuot"); p_integerRem = SYM("p_integerRem"); p_integerDiv = SYM("p_integerDiv");
+  p_integerMod = SYM("p_integerMod"); p_intRem = SYM("p_intRem"); p_intMod = SYM("p_intMod");
+  p_intToInteger = SYM("p_intToInteger"); p_integerToInt = SYM("p_integerToInt"); p_intNegate = SYM("p_intNegate");
+  p_integerNegate = SYM("p_integerNegate"); p_doubleNegate = SYM("p_doubleNegate");
+  p_doubleAdd = SYM("p_doubleAdd"); p_doubleSub = SYM("p_doubleSub"); p_doubleMul = SYM("p_doubleMul");
+  p_doubleDiv = SYM("p_doubleDiv"); p_doubleEq = SYM("p_doubleEq"); p_doubleLt = SYM("p_doubleLt");
+  p_doubleLe = SYM("p_doubleLe"); p_doubleGt = SYM("p_doubleGt"); p_doubleGe = SYM("p_doubleGe");
 
   struct RClass *rhci = mrb_define_module(mrb, "Rhci");
   struct RClass *vm = mrb_define_module_under(mrb, rhci, "VM");

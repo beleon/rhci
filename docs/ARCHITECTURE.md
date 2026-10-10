@@ -381,9 +381,8 @@ list?". Printing goes through the `Show` dictionary like any other code.
       most of mruby's GC superlinearity at depth.
 
     The machine now runs at ~1.1–1.4M steps/s on CRuby and ~0.5–0.7M on
-    mruby. The remaining big levers are fewer steps (better Core from the
-    desugarer, unboxed arithmetic on known types) or a C machine for the
-    mruby binary.
+    mruby. The levers named here, fewer steps and a C machine for the
+    mruby binary, were taken in step 7 (below).
   - **Through the real Prelude (step 5):** `sum [1..1000000]` first took
     37 s on CRuby and 101 s on mruby, with memory growing with the list.
     - **The memory growth was a tail-call bug.** Pattern-match failure
@@ -394,7 +393,44 @@ list?". Printing goes through the `Show` dictionary like any other code.
       instance's implementation, and implementations that merely alias a
       primitive are inlined (`x + y` at Integer is a single primitive
       step). That took the cost from 39 to 28 steps per element.
-    - **Now:** about 26 s on CRuby and 46 s on mruby, in constant memory.
+    - **After step 6:** about 26 s on CRuby and 46 s on mruby, in
+      constant memory.
+  - **Step 7 (the speed stretch):**
+    - **A Core simplifier** (`lib/rhci/simplify.rb`) between the desugarer
+      and Lower; every rule keeps call-by-need (only lambdas, atoms and
+      constructors are duplicated or moved, and a case that forces is
+      never dropped):
+      - dead lets, inlining of single-use and small lambdas, beta
+        reduction;
+      - case of known constructor/literal, binder swap, and merging a
+        case on an already evaluated variable into the enclosing case (so
+        the desugarer's clause-by-clause matching becomes one case per
+        variable), unreachable defaults;
+      - case-of-case with one inner alternative, case-of-let,
+        application pushed into case/let, let-to-case for a thunk forced
+        at once, integer primitives on literals folded.
+      Across definitions, unfoldings (the simplified Core of small global
+      functions and of constants; dictionary fields are lifted to globals
+      so every instance is a constant) make methods at known instances
+      reduce to the instance's code. A dictionary-abstracted function
+      called at known instances is **specialised** once per session
+      (memoised by function and dictionaries, recursion included), as
+      GHC's SPECIALISE does. Steps fell 1.5–4x (`length (filter even
+      (map (*3) [1..10^5]))`: 12.2M → 3.1M).
+    - **The evaluation loop in C** for the mruby builds
+      (`mrbgems/rhci-native/src/machine.c`): a line-by-line port of
+      `run_ruby` on the same objects, with integer and double primitives
+      in C. Code is plain Arrays (`[op, ...]`), which the Ruby loop reads
+      as fast as attributes and C indexes directly. A test requires both
+      loops to give identical output, errors and step counts; `rake
+      torture` runs the mruby tests with forced collections inside the C
+      loop, which checks its GC rooting.
+    - CRuby's `bin/rhci` enables YJIT (1.7x on the loop).
+    - **Now:** `sum [1..1000000]` takes 1.9 s with the mruby binary
+      (from 46 s) and 10 s with `bin/rhci` on CRuby (from 26 s; YJIT on,
+      the library without it about 15 s), about 10M machine
+      steps/s in C. Reading and summing 2,000 numbers with `read` takes
+      0.7 s (from 13.7 s).
 - **Prelude snapshot (step 5):** compiling the ~1900-line Prelude takes
   0.23 s on CRuby and about 0.34 s on mruby. Decoding the whole snapshot
   eagerly was *slower* on mruby (0.54 s), so decoding is lazy: names and
@@ -419,7 +455,7 @@ list?". Printing goes through the `Show` dictionary like any other code.
   scope, commands, and paths after `:load`. A line wider than the terminal
   scrolls horizontally. Both executables use it when stdin and stdout are
   a terminal; it talks to the terminal only through the shim, which uses
-  io/console on CRuby and the C helpers in `mrbgems/rhci/src/term.c`
+  io/console on CRuby and the C helpers in `mrbgems/rhci-native/src/term.c`
   (termios, window size, unbuffered reads, SIGINT, getenv, directory
   listing) on mruby. Embedding code never reaches it.
 - **Command-line modes:**
@@ -522,7 +558,9 @@ Each step ends green on **both** runtimes before the next one starts.
 6. **REPL surface:** `it`, shadowing, IO at the prompt, `:{ :}`, `:load`
    and `:reload` in file mode, and the embedding API with limits. The full
    oracle should then be green or in `known_gaps.txt`.
-7. **Performance:** best effort, driven by what feels slow in use.
+7. **Performance:** best effort, driven by what feels slow in use. Done:
+   the Core simplifier with specialisation, and the C evaluation loop for
+   mruby (§6, measurements).
 
 ## 10. Decisions taken in review (2026-10-09)
 - mruby is only our own build, so `MRB_CALL_LEVEL_MAX` may be raised.

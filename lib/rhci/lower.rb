@@ -60,11 +60,11 @@ module Rhci
       @globals = globals
     end
 
-    # A top-level expression -> ThunkCode with no captures.
+    # A top-level expression -> thunk code with no captures.
     def expression(expr)
       body = Body.new(nil)
       x = compile(expr, body)
-      VM::ThunkCode.new([], body.nlocals, x)
+      VM.thunk_code([], body.nlocals, x)
     end
 
     # A global definition -> its value (a Fun, or a CAF thunk).
@@ -81,32 +81,32 @@ module Rhci
     def compile(e, body)
       pending = []
       x = compile_inner(e, body, pending)
-      pending.empty? ? x : VM::XLet.new(pending, x)
+      pending.empty? ? x : VM.let_node(pending, x)
     end
 
     def compile_inner(e, body, pending)
       case e
       when Core::Var, Core::Lit then VM.atom_node(atom(e, body, pending))
-      when Core::Str then VM::XStr.new(e.cps)
+      when Core::Str then VM.str_node(e.cps)
       when Core::App
         fn = atom(e.fn, body, pending)
-        VM::XApp.new(fn, e.args.map { |a| atom(a, body, pending) })
+        VM.app_node(fn, e.args.map { |a| atom(a, body, pending) })
       when Core::Lam
         slot = body.new_slot
         pending << [slot, :fun, lam(e, body)]
-        VM::XLocal.new(slot)
+        VM.atom_node(slot)
       when Core::Let
         slots = e.binds.map { |name, _| body.bind(name) }
         binds = []
         e.binds.each_with_index { |(_, rhs), i| binds << rhs_bind(slots[i], rhs, body, binds) }
-        VM::XLet.new(binds, compile(e.body, body))
+        VM.let_node(binds, compile(e.body, body))
       when Core::Case then compile_case(e, body)
-      when Core::Con then VM::XCon.new(e.con, e.args.map { |a| atom(a, body, pending) })
+      when Core::Con then VM.con_node(e.con, e.args.map { |a| atom(a, body, pending) })
       when Core::Prim
         e.args.each do |a|
           raise "lower: primitive #{e.op} needs atomic operands" unless a.is_a?(Core::Var) || a.is_a?(Core::Lit)
         end
-        VM::XPrim.new(e.op, e.args.map { |a| atom(a, body, pending) })
+        VM.prim_node(e.op, e.args.map { |a| atom(a, body, pending) })
       else
         raise "lower: unexpected #{e.class}"
       end
@@ -120,7 +120,7 @@ module Rhci
       when Core::Lit then [slot, :value, rhs.value]
       when Core::Str then [slot, :str, rhs.cps]
       when Core::Con
-        [slot, :con, [rhs.con, rhs.args.map { |a| atom(a, body, group) }]]
+        [slot, :con, VM.con_bind(rhs.con, rhs.args.map { |a| atom(a, body, group) })]
       else [slot, :thunk, thunk(rhs, body)]
       end
     end
@@ -148,13 +148,13 @@ module Rhci
       body = Body.new(parent, VM::Fun::ENV_OFFSET)
       e.params.each { |p| body.bind(p) }
       x = compile(e.body, body)
-      VM::LamCode.new(e.params.length, body.captures, body.nlocals, x, name)
+      VM.lam_code(e.params.length, body.captures, body.nlocals, x, name)
     end
 
     def thunk(e, parent)
       body = Body.new(parent, VM::Thunk::ENV_OFFSET)
       x = compile(e, body)
-      VM::ThunkCode.new(body.captures, body.nlocals, x)
+      VM.thunk_code(body.captures, body.nlocals, x)
     end
 
     def compile_case(e, body)
@@ -176,7 +176,7 @@ module Rhci
           default = compile(alt.body, body)
         end
       end
-      VM::XCase.new(scrut, binder, con_alts, lit_alts, default)
+      VM.case_node(scrut, binder, con_alts, lit_alts, default)
     end
   end
 end

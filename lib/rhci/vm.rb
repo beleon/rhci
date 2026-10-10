@@ -42,7 +42,7 @@ module Rhci
     end
 
     # A suspended computation: [state, code-or-value, captured values...].
-    # state :pending (slot 1 is the ThunkCode), :blackhole (under
+    # state :pending (slot 1 is the thunk's code), :blackhole (under
     # evaluation), :value (slot 1 is the value; captures dropped), or
     # :raised (slot 1 is the exception). The thunk is its own environment:
     # capture j lives at index 2 + j.
@@ -50,7 +50,7 @@ module Rhci
       ENV_OFFSET = 2
 
       def self.build(code)
-        t = Thunk.new(ENV_OFFSET + code.captures.length)
+        t = Thunk.new(ENV_OFFSET + code[CODE_CAPTURES].length)
         t[0] = :pending
         t[1] = code
         t
@@ -95,13 +95,13 @@ module Rhci
       end
     end
 
-    # A function closure: [LamCode, captured values...]; capture j lives at
+    # A function closure: [code, captured values...]; capture j lives at
     # index 1 + j.
     class Fun < Array
       ENV_OFFSET = 1
 
       def self.build(code)
-        f = Fun.new(ENV_OFFSET + code.captures.length)
+        f = Fun.new(ENV_OFFSET + code[CODE_CAPTURES].length)
         f[0] = code
         f
       end
@@ -153,31 +153,40 @@ module Rhci
       end
     end
 
-    # captures: atoms evaluated in the creating context to build the env.
-    class LamCode
-      attr_reader :arity, :captures, :nlocals, :body, :name
+    # Code bodies and expression nodes are plain Arrays: the Ruby loop reads
+    # them as fast as attributes, and the C loop (mrbgems/rhci-native)
+    # indexes them directly.
+    #
+    # A code body (function or thunk) is [arity, captures, nlocals, body,
+    # name]; arity is nil for a thunk. captures: atoms evaluated in the
+    # creating context to build the environment.
+    CODE_ARITY = 0
+    CODE_CAPTURES = 1
+    CODE_NLOCALS = 2
+    CODE_BODY = 3
 
-      def initialize(arity, captures, nlocals, body, name = nil)
-        @arity = arity
-        @captures = captures
-        @nlocals = nlocals
-        @body = body
-        @name = name
-      end
+    def self.lam_code(arity, captures, nlocals, body, name = nil)
+      [arity, captures, nlocals, body, name]
     end
 
-    class ThunkCode
-      attr_reader :captures, :nlocals, :body
-
-      def initialize(captures, nlocals, body)
-        @captures = captures
-        @nlocals = nlocals
-        @body = body
-      end
+    def self.thunk_code(captures, nlocals, body)
+      [nil, captures, nlocals, body, nil]
     end
 
-    # Code nodes carry an integer opcode (`op`) so the machine dispatches
-    # with one comparison chain on integers instead of class tests.
+    # An expression node is [opcode, operands...]:
+    #   [OP_LOCAL, slot]  [OP_ENV, slot]  [OP_GLOBAL, cell]  [OP_VALUE, value]
+    #   [OP_APP, fn node, atoms]
+    #   [OP_LET, binds, body]: binds are [slot, kind, payload]; kind :thunk
+    #     (thunk code), :fun (lambda code), :con (see con_bind), :str
+    #     (code points), :value (a constant)
+    #   [OP_CASE, scrutinee, binder slot or nil, con_alts, lit_alts, default]:
+    #     con_alts is indexed by tag, of [slots, body] (nil = no alt);
+    #     lit_alts is a Hash value => body; default is a body or nil
+    #   [OP_CON, ConInfo, atoms (, the shared value if nullary)]
+    #   [OP_PRIM, method, atoms, strict, name]: method implements it (looked
+    #     up when the code is built, so an unknown primitive fails early);
+    #     strict: the operands must already be evaluated (all but `raise`)
+    #   [OP_STR, code points]
     OP_LOCAL = 0
     OP_ENV = 1
     OP_GLOBAL = 2
@@ -189,129 +198,62 @@ module Rhci
     OP_PRIM = 8
     OP_STR = 9
 
-    class XLocal
-      attr_reader :op, :index
-
-      def initialize(index)
-        @op = OP_LOCAL
-        @index = index
-      end
-    end
-
-    class XEnv
-      attr_reader :op, :index
-
-      def initialize(index)
-        @op = OP_ENV
-        @index = index
-      end
-    end
-
-    class XGlobal
-      attr_reader :op, :cell
-
-      def initialize(cell)
-        @op = OP_GLOBAL
-        @cell = cell
-      end
-    end
-
-    class XValue
-      attr_reader :op, :value
-
-      def initialize(value)
-        @op = OP_VALUE
-        @value = value
-      end
-    end
-
     # The expression node that evaluates an encoded atom.
     def self.atom_node(atom)
       if atom.is_a?(Integer)
-        atom >= 0 ? XLocal.new(atom) : XEnv.new(-atom - 1)
+        atom >= 0 ? [OP_LOCAL, atom] : [OP_ENV, -atom - 1]
       elsif atom.is_a?(Cell)
-        XGlobal.new(atom)
+        [OP_GLOBAL, atom]
       else
-        XValue.new(atom.value)
+        [OP_VALUE, atom.value]
       end
     end
 
-    class XApp
-      attr_reader :op, :fn, :args
-
-      def initialize(fn_atom, args)
-        @op = OP_APP
-        @fn = VM.atom_node(fn_atom) # evaluated once the args are pushed
-        @args = args
-      end
+    def self.value_node(v)
+      [OP_VALUE, v]
     end
 
-    # binds: [slot, kind, payload]; kind :thunk (ThunkCode), :fun (LamCode),
-    # :con ([ConInfo, atoms]), :str (code points), :value (a constant).
-    class XLet
-      attr_reader :op, :binds, :body
-
-      def initialize(binds, body)
-        @op = OP_LET
-        @binds = binds
-        @body = body
-      end
+    def self.app_node(fn_atom, atoms)
+      [OP_APP, atom_node(fn_atom), atoms] # the function is evaluated once the args are pushed
     end
 
-    # con_alts: Array indexed by tag of [slots, body] (nil = no alt);
-    # lit_alts: Hash value => body; default: body or nil.
-    class XCase
-      attr_reader :op, :scrut, :binder, :con_alts, :lit_alts, :default
-
-      def initialize(scrut, binder, con_alts, lit_alts, default)
-        @op = OP_CASE
-        @scrut = scrut
-        @binder = binder
-        @con_alts = con_alts
-        @lit_alts = lit_alts
-        @default = default
-      end
+    def self.let_node(binds, body)
+      [OP_LET, binds, body]
     end
 
-    class XCon
-      attr_reader :op, :con, :args
-
-      def initialize(con, args)
-        @op = OP_CON
-        @con = con
-        @args = args
-      end
+    def self.case_node(scrut, binder, con_alts, lit_alts, default)
+      [OP_CASE, scrut, binder, con_alts, lit_alts, default]
     end
 
-    # meth: the Machine method implementing the primitive (resolved when
-    # the code is built, so an unknown primitive fails early); strict: the
-    # operands must already be evaluated (all but `raise`).
-    class XPrim
-      attr_reader :op, :prim, :args, :meth, :strict
-
-      def initialize(prim, args)
-        @op = OP_PRIM
-        @prim = prim
-        @args = args
-        @meth = Machine::PRIM_METHODS[prim]
-        raise "machine: unknown primitive #{prim}" unless @meth
-
-        @strict = prim != :raise
-      end
+    # A nullary constructor's node carries its shared value.
+    def self.con_node(con, atoms)
+      atoms.empty? ? [OP_CON, con, atoms, nullary_value(con)] : [OP_CON, con, atoms]
     end
 
-    class XStr
-      attr_reader :op, :cps
+    # A let-bound constructor: [ConInfo, atoms, shared value if nullary].
+    def self.con_bind(con, atoms)
+      [con, atoms, atoms.empty? ? nullary_value(con) : nil]
+    end
 
-      def initialize(cps)
-        @op = OP_STR
-        @cps = cps
-      end
+    def self.nullary_value(con)
+      con.nullary ||= ConValue.build(con, [])
+    end
+
+    def self.prim_node(prim, atoms)
+      meth = Machine::PRIM_METHODS[prim]
+      raise "machine: unknown primitive #{prim}" unless meth
+
+      [OP_PRIM, meth, atoms, prim != :raise, prim]
+    end
+
+    def self.str_node(cps)
+      [OP_STR, cps]
     end
 
     # Stack frames are not objects: an update frame is the Thunk itself,
-    # pending arguments are an Array, and a case continuation is three
-    # entries -- env, locals, then the XCase on top.
+    # pending arguments are an Array, and a case continuation is four
+    # entries -- env, locals, the case node, then CASE_FRAME on top.
+    CASE_FRAME = Object.new.freeze
 
     # The machine's frame stack, in fixed-size segments. One huge Array that
     # is written on every push/pop is re-scanned whole by mruby's incremental
@@ -461,19 +403,19 @@ module Rhci
         return v unless v.is_a?(Thunk)
         return v[1] if v[0] == :value
 
-        run(XValue.new(v), nil, nil)
+        run(VM.value_node(v), nil, nil)
       end
 
-      # Evaluate compiled code (a ThunkCode with no captures) to WHNF.
+      # Evaluate compiled code (thunk code with no captures) to WHNF.
       def eval_code(code)
-        run(code.body, Array.new(code.nlocals), [])
+        run(code[CODE_BODY], Array.new(code[CODE_NLOCALS]), [])
       end
 
       # Apply a function value to argument values and evaluate to WHNF.
       def apply(fn, args)
         @stack.push(args.dup)
         base = @stack.length - 1
-        run(XValue.new(fn), nil, nil, base)
+        run(VM.value_node(fn), nil, nil, base)
       end
 
       # Fully evaluate a Haskell list (of WHNF-able elements) into a Ruby
@@ -538,12 +480,12 @@ module Rhci
             if evaluating
               @steps += 1
               check_limits if @steps >= @next_check
-              op = expr.op
+              op = expr[0]
               if op <= OP_VALUE
-                v = if op == OP_LOCAL then locals[expr.index]
-                    elsif op == OP_ENV then env[expr.index]
-                    elsif op == OP_GLOBAL then expr.cell.value
-                    else expr.value
+                v = if op == OP_LOCAL then locals[expr[1]]
+                    elsif op == OP_ENV then env[expr[1]]
+                    elsif op == OP_GLOBAL then expr[1].value
+                    else expr[1]
                     end
                 if v.is_a?(Thunk)
                   state = v[0]
@@ -559,9 +501,9 @@ module Rhci
                       stack.push(v)
                       code = v[1]
                       env = v # a thunk is its own environment
-                      n = code.nlocals
+                      n = code[CODE_NLOCALS]
                       locals = n.zero? ? nil : Array.new(n)
-                      expr = code.body
+                      expr = code[CODE_BODY]
                     end
                   elsif state == :blackhole
                     raise HsException, '<<loop>>'
@@ -573,21 +515,21 @@ module Rhci
                   evaluating = false
                 end
               elsif op == OP_APP
-                f = expr.fn
-                fo = f.op
-                fv = if fo == OP_GLOBAL then f.cell.value
-                     elsif fo == OP_LOCAL then locals[f.index]
-                     elsif fo == OP_ENV then env[f.index]
-                     else f.value
+                f = expr[1]
+                fo = f[0]
+                fv = if fo == OP_GLOBAL then f[1].value
+                     elsif fo == OP_LOCAL then locals[f[1]]
+                     elsif fo == OP_ENV then env[f[1]]
+                     else f[1]
                      end
                 fv = fv[1] if fv.is_a?(Thunk) && fv[0] == :value
-                atoms = expr.args
+                atoms = expr[2]
                 n = atoms.length
-                if fv.is_a?(Fun) && fv[0].arity == n
+                if fv.is_a?(Fun) && fv[0][CODE_ARITY] == n
                   # Known saturated call: the arguments go straight into the
                   # callee's locals; no argument frame, no extra step.
                   code = fv[0]
-                  nl = Array.new(code.nlocals)
+                  nl = Array.new(code[CODE_NLOCALS])
                   i = 0
                   while i < n
                     a = atoms[i]
@@ -596,85 +538,87 @@ module Rhci
                   end
                   locals = nl
                   env = fv # a closure is its own environment
-                  expr = code.body
+                  expr = code[CODE_BODY]
                 else
                   stack.push(gather(atoms, locals, env))
                   expr = f
                 end
               elsif op == OP_CASE
-                sc = expr.scrut
-                so = sc.op
+                sc = expr[1]
+                so = sc[0]
                 sv = nil
                 if so <= OP_VALUE
-                  sv = if so == OP_LOCAL then locals[sc.index]
-                       elsif so == OP_ENV then env[sc.index]
-                       elsif so == OP_GLOBAL then sc.cell.value
-                       else sc.value
+                  sv = if so == OP_LOCAL then locals[sc[1]]
+                       elsif so == OP_ENV then env[sc[1]]
+                       elsif so == OP_GLOBAL then sc[1].value
+                       else sc[1]
                        end
                   if sv.is_a?(Thunk)
                     sv = sv[0] == :value ? sv[1] : nil
                   end
-                elsif so == OP_PRIM && sc.strict
+                elsif so == OP_PRIM && sc[3]
                   # A primitive scrutinee needs no frame: its operands are
                   # already values.
-                  pa = sc.args
+                  pa = sc[2]
                   a = pa[0]
                   x = a.is_a?(Integer) ? (a >= 0 ? locals[a] : env[-a - 1]) : a.value
                   if pa.length == 2
                     a = pa[1]
                     y = a.is_a?(Integer) ? (a >= 0 ? locals[a] : env[-a - 1]) : a.value
                     bad_operand(sc) if x.is_a?(Thunk) || y.is_a?(Thunk)
-                    sv = __send__(sc.meth, x, y)
+                    sv = __send__(sc[1], x, y)
                   else
                     bad_operand(sc) if x.is_a?(Thunk)
-                    sv = __send__(sc.meth, x)
+                    sv = __send__(sc[1], x)
                   end
                 end
                 if sv.nil?
                   stack.push(env)
                   stack.push(locals)
                   stack.push(expr)
+                  stack.push(CASE_FRAME)
                   expr = sc
                 else
                   # Scrutinee already in WHNF: choose the alternative now.
-                  locals[expr.binder] = sv if expr.binder
+                  locals[expr[2]] = sv if expr[2]
                   expr = select_alt(expr, sv, locals)
                 end
               elsif op == OP_LET
-                allocate(expr.binds, locals, env)
-                expr = expr.body
+                allocate(expr[1], locals, env)
+                expr = expr[2]
               elsif op == OP_CON
-                con = expr.con
-                value = con.arity.zero? ? nullary(con) : build_data(con, expr.args, locals, env)
+                atoms = expr[2]
+                value = atoms.empty? ? expr[3] : build_data(expr[1], atoms, locals, env)
                 evaluating = false
               elsif op == OP_PRIM
-                pa = expr.args
+                pa = expr[2]
                 a = pa[0]
                 x = a.is_a?(Integer) ? (a >= 0 ? locals[a] : env[-a - 1]) : a.value
                 if pa.length == 2
                   a = pa[1]
                   y = a.is_a?(Integer) ? (a >= 0 ? locals[a] : env[-a - 1]) : a.value
-                  bad_operand(expr) if expr.strict && (x.is_a?(Thunk) || y.is_a?(Thunk))
-                  value = __send__(expr.meth, x, y)
+                  bad_operand(expr) if expr[3] && (x.is_a?(Thunk) || y.is_a?(Thunk))
+                  value = __send__(expr[1], x, y)
                 else
-                  bad_operand(expr) if expr.strict && x.is_a?(Thunk)
-                  value = __send__(expr.meth, x)
+                  bad_operand(expr) if expr[3] && x.is_a?(Thunk)
+                  value = __send__(expr[1], x)
                 end
                 evaluating = false
               elsif op == OP_STR
-                value = unpack(StringThunk.build(expr.cps, 0))
+                value = unpack(StringThunk.build(expr[1], 0))
                 evaluating = false
               else
-                raise "machine: unknown code #{expr.class}"
+                raise "machine: unknown code #{op.inspect}"
               end
             else
               return value if stack.length == base
 
               frame = stack.pop
-              if frame.is_a?(XCase)
+              if frame.equal?(CASE_FRAME)
+                frame = stack.pop
                 locals = stack.pop
                 env = stack.pop
-                locals[frame.binder] = value if frame.binder
+                locals[frame[2]] = value if frame[2]
                 expr = select_alt(frame, value, locals)
                 evaluating = true
               elsif frame.is_a?(Thunk)
@@ -689,7 +633,7 @@ module Rhci
                 raise "machine: applying a non-function #{fun.inspect}" unless fun.is_a?(Fun)
 
                 code = fun[0]
-                n = code.arity
+                n = code[CODE_ARITY]
                 if args.length < n
                   value = PAP.new(fun, args)
                 else
@@ -698,11 +642,11 @@ module Rhci
                     args = args[0, n]
                   end
                   # The (fresh) argument array becomes the callee's locals.
-                  nl = code.nlocals
+                  nl = code[CODE_NLOCALS]
                   args[nl - 1] = nil if nl > n
                   locals = args
                   env = fun
-                  expr = code.body
+                  expr = code[CODE_BODY]
                   evaluating = true
                 end
               end
@@ -735,9 +679,6 @@ module Rhci
         out
       end
 
-      def nullary(con)
-        con.nullary ||= ConValue.build(con, [])
-      end
 
       def build_data(con, atoms, locals, env)
         n = atoms.length
@@ -753,8 +694,9 @@ module Rhci
       end
 
       def select_alt(xc, value, locals)
-        if xc.con_alts
-          alt = xc.con_alts[value[0].tag]
+        con_alts = xc[3]
+        if con_alts
+          alt = con_alts[value[0].tag]
           if alt
             slots = alt[0]
             i = 0
@@ -765,11 +707,11 @@ module Rhci
             end
             return alt[1]
           end
-        elsif xc.lit_alts
-          body = xc.lit_alts[value]
+        elsif xc[4]
+          body = xc[4][value]
           return body if body
         end
-        return xc.default if xc.default
+        return xc[5] if xc[5]
 
         raise HsException, 'machine: no matching case alternative'
       end
@@ -786,12 +728,12 @@ module Rhci
             when :thunk then Thunk.build(payload)
             when :fun then Fun.build(payload)
             when :con
-              con = payload[0]
-              if con.arity.zero?
-                nullary(con)
+              arity = payload[1].length
+              if arity.zero?
+                payload[2]
               else
-                d = ConValue.new(con.arity + 1)
-                d[0] = con
+                d = ConValue.new(arity + 1)
+                d[0] = payload[0]
                 d
               end
             when :str then StringThunk.build(payload, 0)
@@ -803,8 +745,8 @@ module Rhci
         while i < n
           slot, kind, payload = binds[i]
           case kind
-          when :thunk then fill(locals[slot], Thunk::ENV_OFFSET, payload.captures, locals, env)
-          when :fun then fill(locals[slot], Fun::ENV_OFFSET, payload.captures, locals, env)
+          when :thunk then fill(locals[slot], Thunk::ENV_OFFSET, payload[CODE_CAPTURES], locals, env)
+          when :fun then fill(locals[slot], Fun::ENV_OFFSET, payload[CODE_CAPTURES], locals, env)
           when :con then fill(locals[slot], 1, payload[1], locals, env) unless payload[1].empty?
           end
           i += 1
@@ -1432,7 +1374,7 @@ module Rhci
       end
 
       def bad_operand(xprim)
-        raise "machine: primitive #{xprim.prim} given an unevaluated operand"
+        raise "machine: primitive #{xprim[4]} given an unevaluated operand"
       end
 
       def nonzero(b)
