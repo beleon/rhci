@@ -1425,3 +1425,46 @@ quotRem (error "x" :: Integer) 0
 div (error "x" :: Integer) 0
 mod (error "x" :: Integer) (error "y")
 unwords ["hello", error "e1"]
+
+## 44. Found by differential fuzzing: types, classes, printf, Read
+import Text.Printf
+import qualified Data.Map as M
+:t \x -> max (\y -> 1)
+let g = max (\y -> 1)
+:t g
+:t compare Left
+:t succ compare
+:t toEnum 1 mempty
+:t \x -> sequence (/) (+ 1)
+:t \x -> even (+ 1)
+:t \x -> (> 0) Nothing
+:t max (1 :: Int -> Int)
+:t \x -> x + "s"
+f x = (x == id)
+:t f
+(error "L" :: Integer) + error "R"
+(error "L" :: Integer) - error "R"
+(error "L" :: Integer) * error "R"
+(error "L" :: Int) + error "R"
+negate (error "L" :: Integer) + error "R"
+gcd (error "L" :: Integer) (error "R")
+printf "%5d|%-6s|%08.3f|%e|%x|%c|%%" (42 :: Int) "ab" (3.14159 :: Double) (1234.5 :: Double) (255 :: Integer) 'z' :: String
+printf "% d|%+.0f|%#o|%.2s|%3c|" (7 :: Int) (2.5 :: Double) (8 :: Int) "hello" 'q' :: String
+read (show (Just [(-1.5) :: Double, 2])) :: Maybe [Double]
+read " ( ( 3 , 'x' ) ) " :: (Int, Char)
+read (show (M.fromList [(1 :: Int, "a\nb")])) :: M.Map Int String
+reads "12 rest" :: [(Int, String)]
+reads "(1,2" :: [((Int, Int), String)]
+:{
+class Describe a where
+  describe :: a -> String
+  describe _ = "thing"
+  tag :: a -> Int
+:}
+instance Describe Int where tag n = n * 2
+instance Describe a => Describe [a] where { describe xs = concatMap describe xs; tag = sum . map tag }
+instance Describe a => Describe (Maybe a) where tag = maybe (-1) tag
+(describe (3 :: Int), describe [1, 2 :: Int], tag [Just (1 :: Int), Nothing])
+:t describe
+:t \x -> describe [x]
+:t describe concat

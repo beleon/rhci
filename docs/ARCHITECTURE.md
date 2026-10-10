@@ -198,6 +198,16 @@ modes are needed, and they have to be tested separately:
   knot is still shared, and `fibs !! 1000` stays linear even though
   `fibs :: Num a => [a]`.
 
+### Constraints GHC2021 keeps
+- A constraint no instance solves is kept while it mentions a type
+  variable (FlexibleContexts): `max (\y -> 1) :: (Ord (p -> a), Num a) =>
+  ...`; a ground one (`Num String`) is an error. A use at concrete types
+  then fails.
+- Defaulting and ambiguity follow GHC's growThetaTyVars: a variable is
+  determined by the type if it is in it or shares a constraint with one
+  that is, so `toEnum 1 mempty :: (Enum (t1 -> t2), Monoid t1) => t2`.
+  An undetermined constraint on a compound type is ambiguous.
+
 ### `:t`
 - `:t e` infers and generalises with no defaulting, simplifies the
   constraints, renames variables (`a`, `b`, …) and prints. Because names

@@ -524,8 +524,9 @@ instance Num Int where
   fromInteger = rhci_integerToInt
 
 instance Num Integer where
-  (+) = rhci_integerAdd
-  (-) = rhci_integerSub
+  -- GHC's integerAdd/integerSub force the right operand first (§44).
+  a + b = b `seq` rhci_integerAdd a b
+  a - b = b `seq` rhci_integerSub a b
   (*) = rhci_integerMul
   negate = rhci_integerNegate
   abs n = if rhci_integerGe n 0 then n else rhci_integerNegate n

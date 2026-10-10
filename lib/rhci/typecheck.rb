@@ -371,7 +371,15 @@ module Rhci
         case h
         when T::TCon
           inst = find_instance(ev.klass, h)
-          no_instance(ev) unless inst && inst.tyvars.length == args.length
+          unless inst && inst.tyvars.length == args.length
+            # GHC2021's FlexibleContexts: a constraint no instance solves is
+            # kept while it mentions a type variable (an instance could
+            # still match), `Ord (p -> a)`; only a ground one is an error.
+            level = max_meta_level(ev.type)
+            no_instance(ev) unless level
+            (level > @level ? quant : deferred) << ev
+            next
+          end
           inst.equalities&.each { |i, et| unify(args[i], et, ev.tok) }
           subs = inst.context.map { |c, i| Ev.new(c, args[i], ev.tok) }
           ev.solution = [:inst, inst, subs]
@@ -474,12 +482,18 @@ module Rhci
     def resolve_ambiguity(quant, types)
       seen = {}
       types.each { |t| metas_of(t, seen) }
+      grow_through_constraints(quant, seen)
       remaining = []
       groups = {}
       quant.each do |ev|
         h, = T.spine(ev.type)
         if h.is_a?(T::TMeta) && !seen.key?(h)
           (groups[h] ||= []) << ev
+        elsif !h.is_a?(T::TMeta) && !mentions_any?(ev.type, seen)
+          # A kept constraint on a compound type (`Describe ([a] -> a)`)
+          # whose variables the type does not determine: ambiguous, and
+          # not defaultable.
+          ambiguous!(ev)
         else
           remaining << ev
         end
@@ -490,6 +504,54 @@ module Rhci
         raise 'typechecker: defaulting left constraints' unless q.empty? && d.empty?
       end
       remaining
+    end
+
+    # GHC's growThetaTyVars: a variable is determined by the type if it is
+    # in the type or shares a constraint with one that is (`(Enum (t1 ->
+    # t2), Monoid t1) => t2` keeps Monoid t1).
+    def grow_through_constraints(evs, seen)
+      sets = evs.map do |ev|
+        acc = {}
+        metas_of(ev.type, acc)
+        acc
+      end
+      loop do
+        changed = false
+        sets.each do |set|
+          next unless set.keys.any? { |m| seen.key?(m) }
+
+          set.each_key do |m|
+            next if seen.key?(m)
+
+            seen[m] = true
+            changed = true
+          end
+        end
+        break unless changed
+      end
+    end
+
+    def mentions_any?(t, seen)
+      acc = {}
+      metas_of(t, acc)
+      acc.keys.any? { |m| seen.key?(m) }
+    end
+
+    def ambiguous!(ev)
+      p = T::Printer.new
+      acc = {}
+      metas_of(ev.type, acc)
+      var = acc.keys.first
+      raise Error.new(:compile, "Ambiguous type variable ‘#{var ? p.type(var) : '?'}’ prevents the constraint " \
+                                "‘(#{ev.klass.name.str} #{p.type(ev.type, 2)})’ from being solved",
+                      ev.tok&.line, ev.tok&.col, @source)
+    end
+
+    # The highest level of a type variable in t, or nil if t has none.
+    def max_meta_level(t)
+      acc = {}
+      metas_of(t, acc)
+      acc.keys.map(&:level).max
     end
 
     def metas_of(t, acc)
@@ -539,7 +601,17 @@ module Rhci
       @level = saved
       all = quant + deferred
       all = resolve_ambiguity(all, [])
-      raise 'typechecker: unsolved top-level constraints' unless all.empty?
+      return if all.empty?
+
+      # Kept constraints no instance solves (`Ord (p -> a)`): defaulting
+      # may have made one ground; either way none can be solved now.
+      @level = -1
+      begin
+        simplify(all)
+      ensure
+        @level = saved
+      end
+      no_instance(all[0])
     end
 
     # ---- types from syntax -------------------------------------------------------

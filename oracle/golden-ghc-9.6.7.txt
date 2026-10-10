@@ -3080,3 +3080,123 @@ ghci> unwords ["hello", error "e1"]
 CallStack (from HasCallStack):
   error, called at <interactive>:57:19 in interactive:Ghci15
 
+
+## 44. Found by differential fuzzing: types, classes, printf, Read
+
+ghci> import Text.Printf
+ghci> import qualified Data.Map as M
+ghci> :t \x -> max (\y -> 1)
+\x -> max (\y -> 1)
+  :: (Ord (p1 -> a), Num a) => p2 -> (p1 -> a) -> p1 -> a
+ghci> let g = max (\y -> 1)
+ghci> :t g
+g :: (Ord (p -> a), Num a) => (p -> a) -> p -> a
+ghci> :t compare Left
+compare Left
+  :: Ord (a -> Either a b) => (a -> Either a b) -> Ordering
+ghci> :t succ compare
+succ compare
+  :: (Enum (a -> a -> Ordering), Ord a) => a -> a -> Ordering
+ghci> :t toEnum 1 mempty
+toEnum 1 mempty :: (Enum (t1 -> t2), Monoid t1) => t2
+ghci> :t \x -> sequence (/) (+ 1)
+\x -> sequence (/) (+ 1)
+  :: (Traversable ((->) (a -> a)), Fractional (a -> a), Num a) =>
+     p -> (a -> a) -> a -> a
+ghci> :t \x -> even (+ 1)
+
+<interactive>:1:7: error: [GHC-39999]
+    • No instance for ‘Integral (Integer -> Integer)’
+        arising from a use of ‘even’
+        (maybe you haven't applied a function to enough arguments?)
+    • In the expression: even (+ 1)
+      In the expression: \ x -> even (+ 1)
+ghci> :t \x -> (> 0) Nothing
+
+<interactive>:1:10: error: [GHC-39999]
+    • No instance for ‘Num (Maybe ())’ arising from the literal ‘0’
+    • In the expression: 0
+      In the expression: (> 0) Nothing
+      In the expression: \ x -> (> 0) Nothing
+ghci> :t max (1 :: Int -> Int)
+
+<interactive>:1:1: error: [GHC-39999]
+    • No instance for ‘Ord (Int -> Int)’ arising from a use of ‘max’
+        (maybe you haven't applied a function to enough arguments?)
+    • In the expression: max (1 :: Int -> Int)
+
+<interactive>:1:6: error: [GHC-39999]
+    • No instance for ‘Num (Int -> Int)’ arising from the literal ‘1’
+        (maybe you haven't applied a function to enough arguments?)
+    • In the first argument of ‘max’, namely ‘(1 :: Int -> Int)’
+      In the expression: max (1 :: Int -> Int)
+ghci> :t \x -> x + "s"
+
+<interactive>:1:9: error: [GHC-39999]
+    • No instance for ‘Num String’ arising from a use of ‘+’
+    • In the expression: x + "s"
+      In the expression: \ x -> x + "s"
+ghci> f x = (x == id)
+ghci> :t f
+f :: Eq (a -> a) => (a -> a) -> Bool
+ghci> (error "L" :: Integer) + error "R"
+*** Exception: R
+CallStack (from HasCallStack):
+  error, called at <interactive>:31:26 in interactive:Ghci5
+ghci> (error "L" :: Integer) - error "R"
+*** Exception: R
+CallStack (from HasCallStack):
+  error, called at <interactive>:33:26 in interactive:Ghci5
+ghci> (error "L" :: Integer) * error "R"
+*** Exception: L
+CallStack (from HasCallStack):
+  error, called at <interactive>:35:2 in interactive:Ghci5
+ghci> (error "L" :: Int) + error "R"
+*** Exception: L
+CallStack (from HasCallStack):
+  error, called at <interactive>:37:2 in interactive:Ghci5
+ghci> negate (error "L" :: Integer) + error "R"
+*** Exception: R
+CallStack (from HasCallStack):
+  error, called at <interactive>:39:33 in interactive:Ghci5
+ghci> gcd (error "L" :: Integer) (error "R")
+*** Exception: R
+CallStack (from HasCallStack):
+  error, called at <interactive>:41:29 in interactive:Ghci5
+ghci> printf "%5d|%-6s|%08.3f|%e|%x|%c|%%" (42 :: Int) "ab" (3.14159 :: Double) (1234.5 :: Double) (255 :: Integer) 'z' :: String
+"   42|ab    |0003.142|1.2345e3|ff|z|%"
+ghci> printf "% d|%+.0f|%#o|%.2s|%3c|" (7 :: Int) (2.5 :: Double) (8 :: Int) "hello" 'q' :: String
+" 7|+2|010|he|  q|"
+ghci> read (show (Just [(-1.5) :: Double, 2])) :: Maybe [Double]
+Just [-1.5,2.0]
+ghci> read " ( ( 3 , 'x' ) ) " :: (Int, Char)
+(3,'x')
+ghci> read (show (M.fromList [(1 :: Int, "a\nb")])) :: M.Map Int String
+fromList [(1,"a\nb")]
+ghci> reads "12 rest" :: [(Int, String)]
+[(12," rest")]
+ghci> reads "(1,2" :: [((Int, Int), String)]
+[]
+ghci> :{
+ghci| class Describe a where
+ghci|   describe :: a -> String
+ghci|   describe _ = "thing"
+ghci|   tag :: a -> Int
+ghci| :}
+ghci> instance Describe Int where tag n = n * 2
+ghci> instance Describe a => Describe [a] where { describe xs = concatMap describe xs; tag = sum . map tag }
+ghci> instance Describe a => Describe (Maybe a) where tag = maybe (-1) tag
+ghci> (describe (3 :: Int), describe [1, 2 :: Int], tag [Just (1 :: Int), Nothing])
+("thing","thingthing",1)
+ghci> :t describe
+describe :: Describe a => a -> String
+ghci> :t \x -> describe [x]
+\x -> describe [x] :: Describe a => a -> String
+ghci> :t describe concat
+
+<interactive>:1:1: error: [GHC-39999]
+    • No instance for ‘Describe ([[a0]] -> [a0])’
+        arising from a use of ‘describe’
+        (maybe you haven't applied a function to enough arguments?)
+    • In the expression: describe concat
+

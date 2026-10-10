@@ -23,7 +23,7 @@ module Fuzz
   WORK = File.join(ROOT, 'build', 'fuzz')
   PER_SECTION = 100
   IMPORTS = ['import Data.List', 'import Data.Char', 'import Data.Maybe', 'import qualified Data.Map as M',
-             'import qualified Data.Set as S'].freeze
+             'import qualified Data.Set as S', 'import Text.Printf'].freeze
 
   STATUS = { ok: :ok, parse_error: :parse, scope_error: :scope, compile_error: :compile,
              exception: :runtime }.freeze
@@ -85,9 +85,13 @@ module Fuzz
     stats = Hash.new(0)
     probes.each do |p|
       before = out.text.length
-      r = s.eval(p.input)
+      input = p.input.start_with?(":{\n") ? p.input.split("\n")[1..-2].join("\n") : p.input
+      r = s.eval(input)
       got = out.text[before..-1]
-      next stats[:import] += 1 if p.input.start_with?('import ', 'data ', 'infixl ')
+      if p.input.start_with?('import ', 'data ', 'infixl ', 'instance ', ':{')
+        problems << "#{p.input}\n    rhci rejected a declaration: #{r.message}" unless r.ok?
+        next stats[:import] += 1
+      end
       # Every expression prints something; no answer means GHCi's session
       # ended (its two-minute limit), so the rest of the section is unknown.
       next stats[:ghci_lost] += 1 if Rhci::Text.strip(p.text).empty?
@@ -96,7 +100,14 @@ module Fuzz
 
       want = Oracle.outcome(p.text)
       ours = STATUS[r.status] || r.status
-      if want != ours
+      if want == :ok && ours == :ok && p.input.start_with?(':t ')
+        # Types up to renaming and constraint order (the oracle's rule).
+        arg = p.input[3..-1]
+        g = p.text.split(' ').join(' ').sub("#{arg} :: ", '')
+        o = Rhci::Text.strip(got).split(' ').join(' ').sub("#{arg} :: ", '')
+        problems << "#{p.input}\n    GHCi #{g}\n    rhci #{o}" unless Oracle.normalize_type(g) == Oracle.normalize_type(o)
+        stats[:types] += 1
+      elsif want != ours
         problems << "#{p.input}\n    GHCi #{want}: #{p.text.lines.first.to_s.strip[0, 200]}\n    rhci #{ours}: #{(r.message || got).to_s.lines.first.to_s.strip[0, 200]}"
       elsif want == :ok && Rhci::Text.strip(got) != Rhci::Text.strip(p.text)
         problems << "#{p.input}\n    GHCi: #{p.text.strip[0, 300]}\n    rhci: #{got.strip[0, 300]}"

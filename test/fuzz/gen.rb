@@ -25,9 +25,44 @@ module Fuzz
     DECLS = [
       'data Shape = Circle Double | Rect Double Double | Dot deriving (Show, Eq, Ord)',
       'data R = R { rx :: Int, ry :: Maybe Integer, rs :: String } deriving (Show, Eq, Ord)',
+      ':{',
       'infixl 6 :+',
-      'data V = Int :+ Int deriving (Show, Eq, Ord)'
+      'data V = Int :+ Int deriving (Show, Eq, Ord)',
+      ':}',
+      # A class with a default, a superclass, instances with contexts, and
+      # a constructor class.
+      ':{',
+      'class Describe a where',
+      '  describe :: a -> String',
+      '  describe _ = "thing"',
+      '  tag :: a -> Int',
+      ':}',
+      ':{',
+      'class Describe a => Rank a where',
+      '  rank :: a -> Integer',
+      '  rank x = toInteger (tag x) * 10',
+      ':}',
+      'instance Describe Int where tag n = n * 2',
+      'instance Describe Bool where { describe b = if b then "yes" else "no"; tag b = fromEnum b }',
+      'instance Describe Char where { describe c = [c, c]; tag = fromEnum }',
+      'instance Describe a => Describe [a] where { describe xs = concatMap describe xs; tag = sum . map tag }',
+      'instance (Describe a, Describe b) => Describe (a, b) where { describe (a, b) = describe a ++ "&" ++ describe b; tag (a, b) = tag a - tag b }',
+      'instance Describe a => Describe (Maybe a) where { tag = maybe (-1) tag }',
+      'instance Rank Int',
+      'instance Rank Bool where rank b = if b then 1 else 0',
+      'instance Rank a => Rank [a] where rank = product . map rank',
+      ':{',
+      'class Box f where',
+      '  boxMap :: (a -> b) -> f a -> f b',
+      '  boxSize :: f a -> Int',
+      ':}',
+      'instance Box Maybe where { boxMap = fmap; boxSize = maybe 0 (const 1) }',
+      'instance Box [] where { boxMap = map; boxSize = length }'
     ].freeze
+
+    # Types with a Describe instance (Rank: those with a Rank instance).
+    DESCRIBABLE = [INT, BOOL, CHAR, STRING, [:list, INT], [:pair, INT, BOOL], [:maybe, CHAR], [:list, [:pair, BOOL, CHAR]]].freeze
+    RANKABLE = [INT, BOOL, [:list, INT], [:list, BOOL]].freeze
     ELEMS = [INT, INTEGER, DOUBLE, BOOL, CHAR].freeze
 
     # bottoms: how often a leaf is a tagged error, `(error "e17" :: T)`;
@@ -46,9 +81,29 @@ module Fuzz
       @r.rand < p
     end
 
-    # A top-level probe: an expression of a random type.
+    # A top-level probe: an expression of a random type, or `:t` of an
+    # unannotated (often polymorphic, sometimes ill-typed) one.
     def probe
+      return ":t #{poly(3)}" if chance(0.12)
+
       expr(random_type(2), 4)
+    end
+
+    POLY = %w[map filter foldr foldl (.) ($) id const flip (+) (*) (-) (==) (<) (++) concat concatMap zip zipWith
+              fst snd head tail length sum show read fmap pure return (>>=) Just maybe either Left Right uncurry curry
+              not (&&) elem lookup replicate take drop reverse sequence mapM_ print (<$>) (<*>) foldMap mempty (<>)
+              compare max succ toEnum fromEnum fromIntegral realToFrac (/) div even words unwords describe tag rank
+              boxMap boxSize].freeze
+
+    def poly(d)
+      return pick(POLY + ['1', '2.5', "'c'", '"s"', 'True', '[]', 'Nothing', '(+ 1)', '(* 2)', '(> 0)']) if d <= 0 || chance(0.25)
+
+      case @r.rand(5)
+      when 0, 1 then "(#{poly(d - 1)} #{poly(d - 1)})"
+      when 2 then "(#{poly(d - 1)} . #{poly(d - 1)})"
+      when 3 then "(\\x -> #{poly(d - 1).sub(pick(POLY), 'x')})"
+      else "(#{poly(d - 1)} #{poly(d - 1)} #{poly(d - 1)})"
+      end
     end
 
     def random_type(depth)
@@ -195,7 +250,13 @@ module Fuzz
       when 17 then "if #{sub(BOOL, d)} then #{sub(INT, d)} else #{sub(INT, d)}"
       when 18 then "case #{sub([:maybe, INT], d)} of { Nothing -> #{sub(INT, d)}; Just v -> v * 3 }"
       when 19 then "fst #{sub([:pair, INT, BOOL], d)}"
-      when 20 then "read #{sub(STRING, d)} :: Int"
+      when 20
+        case @r.rand(4)
+        when 0 then "tag #{sub(pick(DESCRIBABLE), d)}"
+        when 1 then "boxSize (boxMap #{endo(INT)} #{sub(pick([[:maybe, INT], [:list, INT]]), d)})"
+        when 2 then "length (reads #{sub(STRING, d)} :: [(Int, String)])"
+        else "read #{sub(STRING, d)} :: Int"
+        end
       else
         case @r.rand(3)
         when 0 then "M.size #{sub([:map, pick([INT, CHAR]), pick(ELEMS)], d)}"
@@ -212,7 +273,7 @@ module Fuzz
       when 2 then "#{pick(%w[div mod quot rem])} #{sub(INTEGER, d)} #{sub(INTEGER, d)}"
       when 3 then "toInteger #{sub(INT, d)}"
       when 4 then "2 ^ (#{@r.rand(0..130)} :: Int) - #{sub(INTEGER, d)}"
-      when 5 then "product [1 .. #{@r.rand(0..25)}] :: Integer"
+      when 5 then chance(0.5) ? "product [1 .. #{@r.rand(0..25)}] :: Integer" : "rank #{sub(pick(RANKABLE), d)}"
       when 6 then "#{pick(%w[negate abs signum])} #{sub(INTEGER, d)}"
       when 7 then "#{pick(%w[gcd lcm min max])} #{sub(INTEGER, d)} #{sub(INTEGER, d)}"
       when 8 then "#{pick(%w[round truncate ceiling floor])} #{sub(DOUBLE, d)} :: Integer"
@@ -295,8 +356,47 @@ module Fuzz
       when 10 then "[#{sub(CHAR, d)}, #{sub(CHAR, d)}]"
       when 11 then "showsPrec #{@r.rand(0..11)} #{sub(pick([INT, DOUBLE, [:maybe, INT]]), d)} \"\""
       when 12 then "intercalate \", \" #{sub(list_of(STRING), d)}"
+      when 13 then printf_expr(d)
+      when 14 then "describe #{sub(pick(DESCRIBABLE), d)}"
+      when 15 then "show (#{read_expr(d)})"
       else "sort #{sub(STRING, d)}"
       end
+    end
+
+    # printf with a random format: each argument gets a conversion that fits
+    # its type, with random flags, widths and precisions.
+    def printf_expr(d)
+      parts = []
+      args = []
+      @r.rand(1..3).times do
+        t = pick([INT, INTEGER, DOUBLE, STRING, CHAR])
+        flags = pick(['', '', '-', '0', '+', ' ', '#'])
+        width = pick(['', '', '3', '8'])
+        conv = case t
+               when INT, INTEGER then pick(%w[d d x X o u])
+               when DOUBLE then pick(%w[f e g])
+               when STRING then 's'
+               else 'c'
+               end
+        prec = if t == DOUBLE then pick(['', '.0', '.2', '.5'])
+               elsif t == STRING then pick(['', '', '.2'])
+               else ''
+               end
+        flags = '' if %w[s c].include?(conv) && flags != '-'
+        parts << "#{pick(['', 'x=', ' | '])}%#{flags}#{width}#{prec}#{conv}"
+        args << sub(t, d)
+      end
+      parts << pick(['', '%%', '!'])
+      "printf #{parts.join.inspect} #{args.join(' ')} :: String"
+    end
+
+    # read of a value's show (sometimes padded or parenthesised), at its type.
+    def read_expr(d)
+      t = pick(ELEMS + USER + [STRING, [:list, INT], [:maybe, INT], [:pair, INT, CHAR], [:list, [:maybe, DOUBLE]],
+                               [:map, INT, STRING], [:set, CHAR], ORDERING])
+      s = "show #{sub(t, d)}"
+      s = pick(["\" \" ++ #{s} ++ \"  \"", "\"(\" ++ #{s} ++ \")\"", "\"((\" ++ #{s} ++ \"))\"", s, s])
+      "read (#{s}) :: #{hs_type(t)}"
     end
 
     def list_expr(e, d)

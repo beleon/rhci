@@ -165,7 +165,7 @@ module Rhci
         when TMeta then var_name("m#{t.id}")
         when TGen then var_name("g#{t.index}")
         when TSkol then t.name
-        when TCon then t.name
+        when TCon then t.equal?(ARROW) ? '(->)' : t.name
         else
           h, args = Types.spine(t)
           if h.equal?(ARROW) && args.length == 2
