@@ -53,6 +53,15 @@ module Rhci
       e
     end
 
+    # A type on its own (the argument of :kind).
+    def parse_type_expression
+      t = peek
+      error_at(t) if t.kind == :eof
+      ty = parse_type
+      expect_eof
+      ty
+    end
+
     # A whole source file.
     def parse_module
       t = peek
@@ -213,7 +222,9 @@ module Rhci
       items
     end
 
-    CLOSERS = { 'in' => true, 'then' => true, 'else' => true, 'of' => true }.freeze
+    # Tokens that cannot start a block item: they end an implicit block
+    # (parse-error(t)), e.g. a `where` aligned with the alternatives above.
+    CLOSERS = { 'in' => true, 'then' => true, 'else' => true, 'of' => true, 'where' => true }.freeze
 
     def block_closer?(t)
       (t.kind == :keyword && CLOSERS.key?(t.text)) ||
@@ -792,6 +803,11 @@ module Rhci
     # btype -> btype -> ... (right-associative), built iteratively.
     def parse_type
       parts = [parse_btype]
+      # a ~ T, an equality constraint (instance contexts only).
+      if at_op?('~')
+        t = advance
+        return TApp.new(t, TCon.new(t, '~'), [parts[0], parse_btype])
+      end
       while at_op?('->')
         advance
         parts << parse_btype
@@ -878,6 +894,8 @@ module Rhci
       list = ty.is_a?(TTuple) ? ty.elems : [ty]
       list.map do |a|
         error_at(a.tok, 'malformed class assertion') unless a.is_a?(TApp) && a.fn.is_a?(TCon)
+        next ['~', a.args[0], a.args[1]] if a.fn.name == '~'
+
         unsupported(a.tok, 'multi-parameter class constraints') unless a.args.length == 1
         [a.fn.name, a.args[0]]
       end

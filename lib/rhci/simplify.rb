@@ -62,6 +62,10 @@ module Rhci
     end
 
     def run(e)
+      # Fresh names must not clash with names already in the input (a
+      # stored definition may carry names an earlier run made).
+      @taken = {}
+      names(e, @taken)
       ROUNDS.times do
         @changed = false
         @count = Hash.new(0)
@@ -80,9 +84,42 @@ module Rhci
     private
 
     def fresh(name)
-      @fresh += 1
       base = name.split('~').first
-      "#{base}~#{@fresh}"
+      loop do
+        @fresh += 1
+        n = "#{base}~#{@fresh}"
+        next if @taken && @taken.key?(n)
+
+        @taken[n] = true if @taken
+        return n
+      end
+    end
+
+    # Every variable and binder name in e.
+    def names(e, acc)
+      case e
+      when C::Var then acc[e.name] = true
+      when C::App
+        names(e.fn, acc)
+        e.args.each { |a| names(a, acc) }
+      when C::Lam
+        e.params.each { |p| acc[p] = true }
+        names(e.body, acc)
+      when C::Let
+        e.binds.each do |n, r|
+          acc[n] = true
+          names(r, acc)
+        end
+        names(e.body, acc)
+      when C::Case
+        acc[e.binder] = true if e.binder
+        names(e.scrut, acc)
+        e.alts.each do |a|
+          a.vars&.each { |v| acc[v] = true if v }
+          names(a.body, acc)
+        end
+      when C::Con, C::Prim then e.args.each { |a| names(a, acc) }
+      end
     end
 
     # ---- occurrences -------------------------------------------------------

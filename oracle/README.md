@@ -11,7 +11,17 @@ tested against it.
 uv run --no-project python run_oracle.py probes.txt > golden-ghc-9.6.7.txt
 ```
 
-The probes stay inside the feature surface of the original `ghci_test.rb`.
+- `probes_load.txt` / `golden-load-ghc-9.6.7.txt`: `:load` probes, run with
+  `--files files` (the modules in `files/`).
+- `probes_files.txt` / `golden-files-ghc-9.6.7.txt`: readFile, writeFile and
+  appendFile. They write files, so they run in a scratch copy of
+  `files_io/` (fixtures with invalid UTF-8 and a directory), on both sides:
+
+```
+cp -r files_io /tmp/fio && chmod -R a+rwX /tmp/fio
+uv run --no-project python run_oracle.py probes_files.txt --files /tmp/fio > golden-files-ghc-9.6.7.txt
+```
+
 The aim is fidelity on what we cover, not breadth.
 
 ## How to compare (semantics, not text)

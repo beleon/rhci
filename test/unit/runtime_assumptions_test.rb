@@ -54,6 +54,16 @@ RT.suite 'runtime assumptions' do
     RT.eq Rhci::Shim::MRUBY, n == n, 'mruby says NaN == NaN; CRuby does not' # documents the quirk
   end
 
+  RT.test 'a bignum compared with a fixnum is compared whole (rhci-native fixes mruby 4.0.0)' do
+    big = 2**64
+    RT.ok !(big + 7 == 7) && !(big == 0) && !big.zero? && big != 0, 'bignum == fixnum'
+    RT.ok !(7 == big + 7) && !(-big == 0), 'fixnum == bignum, negative bignum'
+    RT.ok big == 2**64 && (big + 1) - 1 == big && big == 2.0**64, 'equal values still compare equal'
+    RT.ok ![big].include?(0), 'Array#include? goes through =='
+    min = -9_223_372_036_854_775_807 - 1
+    RT.ok((-9_223_372_036_854_775_808 == min) && (min == -9_223_372_036_854_775_808), 'INT64_MIN as a bignum')
+  end
+
   RT.test 'String#rstrip on non-ASCII is broken on mruby; Rhci::Text is not' do
     RT.eq Rhci::Shim::MRUBY, "é \n".rstrip != 'é', 'documents the quirk' # lint:ok (the quirk itself)
     RT.eq 'λ é', Rhci::Text.strip("  λ é \t\n")

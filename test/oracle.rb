@@ -76,7 +76,7 @@ module Oracle
   end
 
   # A type string -> [body tokens, sorted constraint strings], with type
-  # variables renamed in order of first appearance and String spelled [Char].
+  # variables renamed in order of first appearance and String (and FilePath) spelled [Char].
   def self.normalize_type(s)
     s = s.sub('GHC.Stack.Types.HasCallStack => ', '')
     ctx = nil
@@ -118,7 +118,11 @@ module Oracle
     end
     out = []
     toks.each do |t|
-      if t == 'String'
+      # A type constructor's module qualifier (M.Map) is how it is in
+      # scope, not what it is.
+      dot = t.rindex('.')
+      t = t[(dot + 1)..-1] if dot && dot.positive? && t[0] >= 'A' && t[0] <= 'Z' && dot < t.length - 1
+      if t == 'String' || t == 'FilePath'
         out.concat(['[', 'Char', ']'])
       else
         out << t

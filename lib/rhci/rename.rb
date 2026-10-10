@@ -95,6 +95,8 @@ module Rhci
   class InstInfo
     attr_reader :klass, :tok, :binds
     attr_accessor :type_ast, :context_ast, :head, :tyvars, :context, :dict_name, :derived
+    # equalities: {tyvar index => type} from `a ~ T` in the context, or nil.
+    attr_accessor :equalities
     # context_dicts: parameter names of the dictionary function (one per
     # context constraint); super_evs: evidence for the superclass fields.
     attr_accessor :context_dicts, :super_evs
@@ -148,6 +150,17 @@ module Rhci
     end
   end
 
+  # A name a known module exports that rhci does not define yet (using it
+  # is "not implemented yet", not "not in scope").
+  class MissingName
+    attr_reader :str, :mod
+
+    def initialize(str, mod)
+      @str = str
+      @mod = mod
+    end
+  end
+
   # Session-wide names. Only committed after an input checks completely,
   # so a failed input changes nothing (as in GHCi).
   class NameEnv
@@ -155,6 +168,10 @@ module Rhci
     # Names whose definition the session refused as unsupported: using one
     # is unsupported too (GHCi would have defined it), not "not in scope".
     attr_reader :refused
+    # The prompt's `import`s: aliases (alias => [module names], for
+    # qualified names) and names imported unqualified from modules outside
+    # the default scope (str => [Name or MissingName]).
+    attr_reader :aliases, :imports, :import_types
 
     BUILTIN_TYPES = { '[]' => Types::LIST, '()' => Types::UNIT, '->' => Types::ARROW,
                       'Char' => Types::CHAR, 'Int' => Types::INT, 'Integer' => Types::INTEGER,
@@ -165,6 +182,10 @@ module Rhci
       @types = {}
       @internal = {}
       @refused = {}
+      @aliases = {}
+      @imports = {}
+      @import_types = {}
+      @defined = {}
       @uid = 0
       BUILTIN_TYPES.each do |n, tcon|
         name = fresh(n, :tycon)
@@ -204,6 +225,7 @@ module Rhci
           next
         end
         @types[s] = n
+        @defined["type:#{s}"] = true unless prelude
         @refused.delete(s)
       end
       top.values.each do |s, n|
@@ -212,11 +234,92 @@ module Rhci
           @internal[s] = n
         else
           @values[s] = n
+          @defined[s] = true unless prelude
         end
+      end
+      return unless prelude
+
+      @base_values = @values.dup
+      @base_types = @types.dup
+    end
+
+    # Defined at the prompt or by a loaded module: such a name shadows
+    # imported ones (GHCi's interactive bindings do).
+    def defined?(str)
+      @defined.key?(str)
+    end
+
+    def define(str, type: false)
+      @defined[type ? "type:#{str}" : str] = true
+    end
+
+    def clear_definitions
+      @defined.clear
+    end
+
+    def known_module?(mod)
+      MODULE_EXPORTS.key?(mod) || library_module?(mod) || @local_modules&.key?(mod)
+    end
+
+    # rhci's library modules (Data.Map.Internal, ...): every top-level name.
+    def library_module?(mod)
+      !@library.nil? && @library.key?(mod)
+    end
+
+    def register_library(mod, values, types)
+      (@library ||= {})[mod] = { values: values, types: types }
+      @module_tables = nil
+    end
+
+    # Loaded source modules' exports ({values:, types:}), for qualified
+    # names at the prompt.
+    def local_module(mod)
+      @local_modules && @local_modules[mod]
+    end
+
+    def local_modules=(table)
+      @local_modules = table
+    end
+
+    # A base module's exports as {values: str => Name or MissingName,
+    # types: ...}; nil for an unknown module.
+    def module_table(mod)
+      return @library[mod] if library_module?(mod)
+      return nil unless MODULE_EXPORTS.key?(mod)
+
+      (@module_tables ||= {})[mod] ||= begin
+        vs, ts = MODULE_EXPORTS[mod]
+        values = {}
+        types = {}
+        vs.each { |str| values[str] = implementation(mod, str, false) || MissingName.new(str, mod) }
+        ts.each { |str| types[str] = implementation(mod, str, true) || MissingName.new(str, mod) }
+        { values: values, types: types }
       end
     end
 
+    # Forget prompt imports and definitions (:load starts afresh).
+    def reset_prompt
+      @local_modules = nil
+      @aliases.clear
+      @imports.clear
+      @import_types.clear
+      @defined.clear
+    end
+
     private
+
+    def implementation(mod, str, type)
+      if (sources = LIBRARY_IMPLEMENTATIONS[mod])
+        sources.each do |src|
+          table = @library && @library[src]
+          n = table && table[type ? :types : :values][str]
+          return n if n
+        end
+        return nil
+      end
+      base = type ? (@base_types || @types)[str] : (@base_values || @values)[str]
+      base || (type ? @internal["type:#{str}"] : @internal[str])
+    end
 
     def builtin_con(str, coninfo, tyinfo)
       n = fresh(str, :con)
@@ -249,9 +352,13 @@ module Rhci
     # Prelude (or an explicitly imported base module) provides is ambiguous.
     # official: base modules the file imports; hidden: Prelude names it hides.
     # internal: rhci_* names are visible (rhci's own synthesised inputs).
+    # qualified: alias => [[module name, {values:, types:}]] for qualified
+    # names; nil at the prompt, where the prompt's imports apply and every
+    # known module can be named in full (as GHCi allows).
     def initialize(env, source = '<interactive>', prelude: false, fixity: nil, imported: nil,
-                   module_mode: false, official: [], hidden: [], internal: false)
+                   module_mode: false, official: [], hidden: [], internal: false, qualified: nil)
       @internal = internal
+      @qualified = qualified
       @env = env
       @fixity = fixity
       @imported = imported || { values: {}, types: {} }
@@ -277,6 +384,7 @@ module Rhci
         expr(node.expr)
         @top.expr = node.expr
         names = bind_pattern_names(node.pat, {})
+        pattern(node.pat, names)
         names.each { |s, n| n.global = true; @top.values[s] = n } # rubocop:disable Style/Semicolon
         @top.bind_pat = node.pat
       when ReplLet then top_decls(node.decls)
@@ -297,17 +405,42 @@ module Rhci
       @top
     end
 
+    # The entity a (possibly qualified) name denotes in kind :values or
+    # :types, or nil (for :info).
+    def lookup_entity(kind, str)
+      qual, name = Renamer.split_qualified(str)
+      n = if qual then resolve_qualified(nil, kind, qual, name)
+          elsif kind == :types then lookup_type(nil, name)
+          else lookup_value(name)
+          end
+      n.is_a?(Name) ? n : nil
+    rescue Error
+      nil
+    end
+
+    # "Data.Map.insert" => ["Data.Map", "insert"]; "M.!" => ["M", "!"];
+    # "map" => [nil, "map"].
+    def self.split_qualified(str)
+      i = 0
+      qual_end = nil
+      while i < str.length && str[i] >= 'A' && str[i] <= 'Z'
+        j = i
+        j += 1 while j < str.length && (AST.ident_start?(str[j]) || (str[j] >= '0' && str[j] <= '9') || str[j] == "'")
+        break unless j < str.length - 1 && str[j] == '.'
+
+        qual_end = j
+        i = j + 1
+      end
+      qual_end ? [str[0, qual_end], str[(qual_end + 1)..-1]] : [nil, str]
+    end
+
     def check_import(imp)
-      return if KNOWN_MODULES.key?(imp.module_name) || @imported_modules&.include?(imp.module_name)
+      return if @env.known_module?(imp.module_name) || @imported_modules&.include?(imp.module_name)
 
       raise Error.new(:scope, "Could not find module ‘#{imp.module_name}’", imp.tok.line, imp.tok.col, @source)
     end
 
     attr_writer :imported_modules
-
-    KNOWN_MODULES = {}
-    %w[Prelude Data.List Data.Maybe Data.Char Data.Tuple Data.Function Data.Ord Data.Either
-       Control.Monad System.IO System.Environment Text.Read].each { |m| KNOWN_MODULES[m] = true }
 
     private
 
@@ -338,7 +471,55 @@ module Rhci
 
         raise Error.new(:compile, "Ambiguous occurrence ‘#{str}’", nil, nil, @source)
       end
-      own || base || ((@allow_internal || @internal) && str.start_with?('rhci_') ? @env.internal[str] : nil)
+      return own if own
+      return prompt_import(str, base, @env.imports) if !@module_mode && !@env.defined?(str) && @env.imports.key?(str)
+
+      base || ((@allow_internal || @internal) && str.start_with?('rhci_') ? @env.internal[str] : nil)
+    end
+
+    # A name the prompt imported unqualified (with the default scope's own
+    # name of that spelling, if any): one entity, or ambiguous.
+    def prompt_import(str, base, table)
+      candidates = base ? [base] : []
+      table[str].each { |n| candidates << n unless candidates.include?(n) }
+      return candidates[0] if candidates.length == 1
+
+      raise Error.new(:compile, "Ambiguous occurrence ‘#{str}’", nil, nil, @source)
+    end
+
+    # The modules an alias names: [[module, {values:, types:}], ...].
+    def qualified_tables(qual)
+      return @qualified[qual] || [] if @qualified
+
+      mods = @env.aliases[qual] || []
+      mods += [qual] if @env.known_module?(qual) && !mods.include?(qual)
+      mods.map { |m| [m, @env.module_table(m) || @env.local_module(m)] }.reject { |_, t| t.nil? }
+    end
+
+    # Q.x: the entity the modules named Q export as x.
+    def resolve_qualified(tok, kind, qual, str)
+      tables = qualified_tables(qual)
+      err(:scope, tok, "No module named ‘#{qual}’ is imported.") if tables.empty?
+      found = []
+      missing = nil
+      tables.each do |_, t|
+        n = t[kind][str]
+        next if n.nil?
+
+        if n.is_a?(MissingName)
+          missing ||= n
+        elsif !found.include?(n)
+          found << n
+        end
+      end
+      return found[0] if found.length == 1
+      err(:compile, tok, "Ambiguous occurrence ‘#{qual}.#{str}’") if found.length > 1
+      if missing
+        raise UnsupportedError.new("‘#{qual}.#{str}’ (from #{missing.mod}) is not implemented yet",
+                                   tok&.line, tok&.col, @source)
+      end
+      what = kind == :types ? 'type constructor or class' : 'value'
+      err(:scope, tok, "Not in scope: #{what} ‘#{qual}.#{str}’")
     end
 
     # A base module whose names count as imported by the file being renamed.
@@ -347,12 +528,17 @@ module Rhci
     end
 
     def resolve_value(node, str, qual, what)
-      unsupported(node.tok, 'qualified names') if qual
+      if qual
+        n = resolve_qualified(node.tok, :values, qual, str)
+        note_reference(n)
+        return n
+      end
       begin
         n = lookup_value(str)
       rescue Error => e
         raise Error.new(e.kind, e.detail, node.tok&.line, node.tok&.col, @source)
       end
+      not_yet(node.tok, str, n.mod) if n.is_a?(MissingName)
       if n.nil?
         if what == :con && (@top.types[str] || @imported[:types][str] || @env.types[str])
           err(:compile, node.tok, "Illegal term-level use of the type constructor or class ‘#{str}’")
@@ -368,7 +554,20 @@ module Rhci
     def lookup_type(tok, str)
       return @env.tuple_con(str.length - 1).tyinfo.name if str.start_with?('(,')
 
-      n = @top.types[str] || @imported[:types][str] || (@hidden.key?(str) ? nil : @env.types[str])
+      dot = str.rindex('.')
+      if dot && dot.positive? && str[0] >= 'A' && str[0] <= 'Z'
+        return resolve_qualified(tok, :types, str[0, dot], str[(dot + 1)..-1])
+      end
+      n = @top.types[str] || @imported[:types][str]
+      if n.nil? && !@hidden.key?(str)
+        base = @env.types[str]
+        n = if !@module_mode && !@env.defined?("type:#{str}") && @env.import_types.key?(str)
+              prompt_import(str, base, @env.import_types)
+            else
+              base
+            end
+      end
+      not_yet(tok, str, n.mod) if n.is_a?(MissingName)
       unless n
         not_yet(tok, str, BASE_TYPES[str])
         err(:scope, tok, "Not in scope: type constructor or class ‘#{str}’")
@@ -504,8 +703,13 @@ module Rhci
       err(:compile, d.tok, "‘#{d.name}’ is not a class") unless cn.kind == :class
       ci = cn.klass
       type(d.type)
-      ctx = d.context.map do |c, t|
+      ctx = d.context.map do |c, t, rhs|
         unsupported(t.tok, 'instance contexts other than `C a`') unless t.is_a?(TVar)
+        if c == '~'
+          type(rhs)
+          next [:eq, t.name, rhs]
+        end
+
         n = lookup_type(t.tok, c)
         err(:compile, t.tok, "‘#{c}’ is not a class") unless n.kind == :class
         [n.klass, t.name]

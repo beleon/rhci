@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require 'open3'
+require 'fileutils'
+require 'tmpdir'
 
 # The same command-line cases against both executables: the CRuby launcher
 # and the mruby binary. Their behaviour must be identical.
@@ -33,6 +35,24 @@ EXECUTABLES.each do |label, cmd|
       _, err, code = run_exe(cmd, ['-c', 'putStrLn "x"'])
       RT.eq 3, code
       RT.ok err.include?('use rhci -x'), err
+    end
+
+    RT.test 'readFile, writeFile, appendFile: errors, locks, decoding (as GHCi)' do
+      script = "writeFile \"a\" \"x\\n\"\nappendFile \"a\" \"y\"\nreadFile \"a\"\ns <- readFile \"a\"\n" \
+               "writeFile \"a\" \"\"\nlength s\nwriteFile \"a\" \"z\"\nreadFile \"a\"\nreadFile \"bad.txt\"\n" \
+               "readFile \"none\"\nreadFile \"dir\"\nwriteFile \"dir/../dir\" \"q\"\nlines <$> readFile \"text.txt\"\n"
+      Dir.mktmpdir('rhci-e2e') do |dir|
+        FileUtils.cp_r(File.join(ROOT, 'oracle', 'files_io', '.'), dir)
+        out, err, status = Open3.capture3(*cmd, stdin_data: script, chdir: dir)
+        RT.eq 0, status.exitstatus
+        RT.eq "rhci> rhci> rhci> \"x\\ny\"\nrhci> rhci> rhci> 3\nrhci> rhci> \"z\"\nrhci> \"abrhci> rhci> rhci> rhci> " \
+              "[\"line one\",\"\\955\\8594x\",\"last\"]\nrhci> \n", out
+        RT.eq "*** Exception: a: withFile: resource busy (file is locked)\n" \
+              "*** Exception: bad.txt: hGetContents: invalid argument (cannot decode byte sequence starting from 255)\n" \
+              "*** Exception: none: openFile: does not exist (No such file or directory)\n" \
+              "*** Exception: dir: openFile: inappropriate type (is a directory)\n" \
+              "*** Exception: dir/../dir: withFile: inappropriate type (Is a directory)\n", err
+      end
     end
 
     RT.test 'REPL quits on :q' do

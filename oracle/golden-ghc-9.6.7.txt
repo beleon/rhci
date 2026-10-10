@@ -1928,3 +1928,1005 @@ getContents :: IO String
 ghci> :t interact
 interact :: (String -> String) -> IO ()
 
+## 33. Qualified names and imports
+
+ghci> Data.Char.toUpper 'a'
+'A'
+ghci> Prelude.map (+1) [1,2,3]
+[2,3,4]
+ghci> Data.List.sortOn negate [3,1,2]
+[3,2,1]
+ghci> import qualified Data.Char as C
+ghci> C.ord 'a'
+97
+ghci> C.isDigit '7'
+True
+ghci> C.nope
+
+<interactive>:13:1: error: [GHC-76037] Not in scope: ‘C.nope’
+ghci> X.y
+
+<interactive>:15:1: error: [GHC-76037]
+    Not in scope: ‘X.y’
+    NB: no module named ‘X’ is imported.
+ghci> import Data.Foo
+
+<no location info>: error:
+    Could not find module ‘Data.Foo’
+    Perhaps you meant Data.Bool (from base-4.18.3.0)
+ghci> let map = 3
+ghci> map
+3
+ghci> Prelude.map (*2) [1]
+[2]
+ghci> import qualified Data.Map as M
+ghci> M.fromList [(1,'a')]
+fromList [(1,'a')]
+ghci> :t M.empty
+M.empty :: M.Map k a
+ghci> import Data.Map (Map, fromList)
+ghci> :t (fromList [(1,True)])
+(fromList [(1,True)]) :: (Ord k, Num k) => Map k Bool
+ghci> import Data.List (nub)
+ghci> nub [1,1,2]
+[1,2]
+ghci> import Data.Maybe (frobnicate)
+
+<interactive>:39:20: error:
+    Module ‘Data.Maybe’ does not export ‘frobnicate’
+ghci> :t (undefined :: M.Map Int Bool)
+(undefined :: M.Map Int Bool) :: Map Int Bool
+ghci> import qualified Data.Set as S
+ghci> S.fromList "set"
+fromList "est"
+ghci> Data.Map.size (Data.Map.fromList [(1,1),(2,2)])
+2
+ghci> import Data.Map
+ghci> filter even [1,2,3,4]
+
+<interactive>:51:1: error:
+    Ambiguous occurrence ‘filter’
+    It could refer to
+       either ‘Data.Map.filter’,
+              imported from ‘Data.Map’
+              (and originally defined in ‘Data.Map.Internal’)
+           or ‘Prelude.filter’,
+              imported from ‘Prelude’ (and originally defined in ‘GHC.List’)
+ghci> lookup 1 [(1,2)]
+
+<interactive>:53:1: error:
+    Ambiguous occurrence ‘lookup’
+    It could refer to
+       either ‘Data.Map.lookup’,
+              imported from ‘Data.Map’
+              (and originally defined in ‘Data.Map.Internal’)
+           or ‘Prelude.lookup’,
+              imported from ‘Prelude’ (and originally defined in ‘GHC.List’)
+
+## 34. Data.Map
+
+ghci> import qualified Data.Map as M
+ghci> import qualified Data.Map.Strict as MS
+ghci> M.fromList [(3,"c"),(1,"a"),(2,"b")]
+fromList [(1,"a"),(2,"b"),(3,"c")]
+ghci> M.fromList [(1,'a'),(1,'b')]
+fromList [(1,'b')]
+ghci> M.empty :: M.Map Int Int
+fromList []
+ghci> M.singleton 'k' True
+fromList [('k',True)]
+ghci> M.lookup 2 (M.fromList [(1,'a'),(2,'b')])
+Just 'b'
+ghci> M.lookup 3 (M.fromList [(1,'a'),(2,'b')])
+Nothing
+ghci> M.fromList [(1,'a')] M.! 1
+'a'
+ghci> M.fromList [(1,'a')] M.! 2
+*** Exception: Map.!: given key is not an element in the map
+CallStack (from HasCallStack):
+  error, called at libraries/containers/containers/src/Data/Map/Internal.hs:617:17 in containers-0.6.7:Data.Map.Internal
+ghci> M.fromList [(1,'a')] M.!? 2
+Nothing
+ghci> M.member 1 (M.fromList [(1,())])
+True
+ghci> M.notMember 1 (M.fromList [(1,())])
+False
+ghci> M.findWithDefault 0 5 (M.fromList [(1,1)])
+0
+ghci> M.size (M.fromList (zip [1..100] [1..]))
+100
+ghci> M.null M.empty
+True
+ghci> M.insert 2 "two" (M.fromList [(1,"one")])
+fromList [(1,"one"),(2,"two")]
+ghci> M.insert 1 "uno" (M.fromList [(1,"one")])
+fromList [(1,"uno")]
+ghci> M.insertWith (++) 1 "x" (M.fromList [(1,"y")])
+fromList [(1,"xy")]
+ghci> M.insertWith (++) 2 "x" (M.fromList [(1,"y")])
+fromList [(1,"y"),(2,"x")]
+ghci> M.insertWithKey (\k a b -> show k ++ a ++ b) 1 "x" (M.fromList [(1,"y")])
+fromList [(1,"1xy")]
+ghci> M.delete 1 (M.fromList [(1,'a'),(2,'b')])
+fromList [(2,'b')]
+ghci> M.adjust (*10) 2 (M.fromList [(1,1),(2,2)])
+fromList [(1,1),(2,20)]
+ghci> M.alter (fmap (+1)) 1 (M.fromList [(1,1)])
+fromList [(1,2)]
+ghci> M.alter (const (Just 0)) 5 (M.fromList [(1,1)])
+fromList [(1,1),(5,0)]
+ghci> M.alter (const Nothing) 1 (M.fromList [(1,1)])
+fromList []
+ghci> M.update (\v -> if v > 1 then Just (v * 2) else Nothing) 1 (M.fromList [(1,1),(2,2)])
+fromList [(2,2)]
+ghci> M.fromListWith (++) [(1,"a"),(1,"b"),(2,"c")]
+fromList [(1,"ba"),(2,"c")]
+ghci> M.fromListWith (+) [(c, 1) | c <- "mississippi"]
+fromList [('i',4),('m',1),('p',2),('s',4)]
+ghci> M.toList (M.map (*2) (M.fromList (zip [1..5] [1..5])))
+[(1,2),(2,4),(3,6),(4,8),(5,10)]
+ghci> M.mapWithKey (\k v -> k + v) (M.fromList [(1,10),(2,20)])
+fromList [(1,11),(2,22)]
+ghci> M.keys (M.fromList [(c, ()) | c <- "hello"])
+"ehlo"
+ghci> M.elems (M.fromList [(2,'b'),(1,'a')])
+"ab"
+ghci> M.assocs (M.fromList [(2,'b'),(1,'a')])
+[(1,'a'),(2,'b')]
+ghci> M.toDescList (M.fromList (zip [1..4] "abcd"))
+[(4,'d'),(3,'c'),(2,'b'),(1,'a')]
+ghci> M.foldr (:) [] (M.fromList [(2,'b'),(1,'a')])
+"ab"
+ghci> M.foldrWithKey (\k v acc -> k + v + acc) 0 (M.fromList [(1,2),(3,4)])
+10
+ghci> M.foldlWithKey (\acc k v -> acc ++ [(k,v)]) [] (M.fromList [(2,'b'),(1,'a')])
+[(1,'a'),(2,'b')]
+ghci> M.foldr' (+) 0 (M.fromList [(1,1),(2,2)])
+3
+ghci> sum (M.fromList [(1,10),(2,20)])
+30
+ghci> length (M.fromList [(1,10),(2,20)])
+2
+ghci> maximum (M.fromList [(1,10),(2,20)])
+20
+ghci> elem 20 (M.fromList [(1,10),(2,20)])
+True
+ghci> fmap length (M.fromList [(1,"ab")])
+fromList [(1,2)]
+ghci> traverse (\v -> if v > 0 then Just v else Nothing) (M.fromList [(1,1),(2,2)])
+Just (fromList [(1,1),(2,2)])
+ghci> M.union (M.fromList [(1,'a'),(2,'b')]) (M.fromList [(2,'X'),(3,'c')])
+fromList [(1,'a'),(2,'b'),(3,'c')]
+ghci> M.unionWith (+) (M.fromList [(1,1),(2,2)]) (M.fromList [(2,10),(3,30)])
+fromList [(1,1),(2,12),(3,30)]
+ghci> M.unions [M.fromList [(1,'a')], M.fromList [(1,'b'),(2,'c')]]
+fromList [(1,'a'),(2,'c')]
+ghci> M.unionsWith (+) [M.fromList [(1,1)], M.fromList [(1,2)], M.fromList [(2,5)]]
+fromList [(1,3),(2,5)]
+ghci> M.difference (M.fromList [(1,'a'),(2,'b')]) (M.fromList [(2,())])
+fromList [(1,'a')]
+ghci> M.fromList [(1,'a'),(2,'b')] M.\\ M.fromList [(1,())]
+fromList [(2,'b')]
+ghci> M.intersection (M.fromList [(1,'a'),(2,'b')]) (M.fromList [(2,'x'),(3,'y')])
+fromList [(2,'b')]
+ghci> M.intersectionWith (,) (M.fromList [(1,'a'),(2,'b')]) (M.fromList [(2,'x'),(3,'y')])
+fromList [(2,('b','x'))]
+ghci> M.differenceWith (\a b -> if b then Nothing else Just a) (M.fromList [(1,'a'),(2,'b')]) (M.fromList [(1,True),(2,False)])
+fromList [(2,'b')]
+ghci> M.filter even (M.fromList (zip [1..6] [1..6]))
+fromList [(2,2),(4,4),(6,6)]
+ghci> M.filterWithKey (\k _ -> k > 3) (M.fromList (zip [1..6] [1..6]))
+fromList [(4,4),(5,5),(6,6)]
+ghci> M.partition even (M.fromList (zip [1..6] [1..6]))
+(fromList [(2,2),(4,4),(6,6)],fromList [(1,1),(3,3),(5,5)])
+ghci> M.mapMaybe (\v -> if even v then Just (v * 10) else Nothing) (M.fromList (zip [1..4] [1..4]))
+fromList [(2,20),(4,40)]
+ghci> M.mapKeys (* 2) (M.fromList [(1,'a'),(2,'b')])
+fromList [(2,'a'),(4,'b')]
+ghci> M.mapKeysWith (++) (`div` 2) (M.fromList [(1,"a"),(2,"b"),(3,"c")])
+fromList [(0,"a"),(1,"cb")]
+ghci> M.lookupMin (M.fromList [(2,'b'),(1,'a')])
+Just (1,'a')
+ghci> M.lookupMax (M.fromList [(2,'b'),(1,'a')])
+Just (2,'b')
+ghci> M.lookupMin (M.empty :: M.Map Int Int)
+Nothing
+ghci> M.findMin (M.fromList [(2,'b'),(1,'a')])
+(1,'a')
+ghci> M.findMax (M.empty :: M.Map Int Int)
+*** Exception: Map.findMax: empty map has no maximal element
+CallStack (from HasCallStack):
+  error, called at libraries/containers/containers/src/Data/Map/Internal.hs:1659:17 in containers-0.6.7:Data.Map.Internal
+ghci> M.deleteMin (M.fromList [(2,'b'),(1,'a')])
+fromList [(2,'b')]
+ghci> M.minViewWithKey (M.fromList [(2,'b'),(1,'a')])
+Just ((1,'a'),fromList [(2,'b')])
+ghci> M.maxView (M.fromList [(2,'b'),(1,'a')])
+Just ('b',fromList [(1,'a')])
+ghci> M.lookupLT 3 (M.fromList (zip [1,3,5] "abc"))
+Just (1,'a')
+ghci> M.lookupGE 4 (M.fromList (zip [1,3,5] "abc"))
+Just (5,'c')
+ghci> M.elemAt 1 (M.fromList (zip "abc" [1..]))
+('b',2)
+ghci> M.elemAt 5 (M.fromList (zip "abc" [1..]))
+*** Exception: Map.elemAt: index out of range
+CallStack (from HasCallStack):
+  error, called at libraries/containers/containers/src/Data/Map/Internal.hs:1485:17 in containers-0.6.7:Data.Map.Internal
+ghci> M.findIndex 'b' (M.fromList (zip "abc" [1..]))
+1
+ghci> M.lookupIndex 'z' (M.fromList (zip "abc" [1..]))
+Nothing
+ghci> M.take 2 (M.fromList (zip [1..5] "abcde"))
+fromList [(1,'a'),(2,'b')]
+ghci> M.drop 2 (M.fromList (zip [1..5] "abcde"))
+fromList [(3,'c'),(4,'d'),(5,'e')]
+ghci> M.splitAt 2 (M.fromList (zip [1..5] "abcde"))
+(fromList [(1,'a'),(2,'b')],fromList [(3,'c'),(4,'d'),(5,'e')])
+ghci> M.split 3 (M.fromList (zip [1..5] "abcde"))
+(fromList [(1,'a'),(2,'b')],fromList [(4,'d'),(5,'e')])
+ghci> M.splitLookup 3 (M.fromList (zip [1..5] "abcde"))
+(fromList [(1,'a'),(2,'b')],Just 'c',fromList [(4,'d'),(5,'e')])
+ghci> M.keysSet (M.fromList [(1,'a'),(2,'b')])
+fromList [1,2]
+ghci> M.fromSet show (M.keysSet (M.fromList [(1,'a'),(2,'b')]))
+fromList [(1,"1"),(2,"2")]
+ghci> M.restrictKeys (M.fromList (zip [1..5] "abcde")) (M.keysSet (M.fromList [(2,()),(4,())]))
+fromList [(2,'b'),(4,'d')]
+ghci> M.isSubmapOf (M.fromList [(1,'a')]) (M.fromList [(1,'a'),(2,'b')])
+True
+ghci> M.mapAccum (\acc v -> (acc + v, acc)) 0 (M.fromList (zip "abc" [1..]))
+(6,fromList [('a',0),('b',1),('c',3)])
+ghci> M.mapAccumWithKey (\acc k v -> (acc ++ [k], v * 2)) "" (M.fromList (zip "abc" [1..]))
+("abc",fromList [('a',2),('b',4),('c',6)])
+ghci> M.fromAscList [(1,'a'),(1,'b'),(2,'c')]
+fromList [(1,'b'),(2,'c')]
+ghci> M.fromDistinctAscList [(1,'a'),(2,'c')]
+fromList [(1,'a'),(2,'c')]
+ghci> M.fromList [(1,2)] == M.fromList [(1,2)]
+True
+ghci> compare (M.fromList [(1,2)]) (M.fromList [(1,3)])
+LT
+ghci> M.fromList [(1,"a")] <> M.fromList [(1,"b"),(2,"c")]
+fromList [(1,"a"),(2,"c")]
+ghci> mconcat [M.fromList [(1,'x')], M.fromList [(2,'y')]]
+fromList [(1,'x'),(2,'y')]
+ghci> show (Just (M.fromList [(1,1)]))
+"Just (fromList [(1,1)])"
+ghci> read "fromList [(1,\"a\")]" :: M.Map Int String
+fromList [(1,"a")]
+ghci> M.size (M.insert 1 undefined M.empty)
+1
+ghci> MS.size (MS.insert 1 undefined MS.empty)
+*** Exception: Prelude.undefined
+CallStack (from HasCallStack):
+  undefined, called at <interactive>:189:22 in interactive:Ghci92
+ghci> M.size (M.fromList [(1, undefined)])
+1
+ghci> MS.size (MS.fromList [(1, undefined)])
+*** Exception: Prelude.undefined
+CallStack (from HasCallStack):
+  undefined, called at <interactive>:193:27 in interactive:Ghci93
+ghci> M.size (M.map (const undefined) (M.fromList [(1,1)]))
+1
+ghci> MS.size (MS.map (const undefined) (MS.fromList [(1,1)]))
+*** Exception: Prelude.undefined
+CallStack (from HasCallStack):
+  undefined, called at <interactive>:197:24 in interactive:Ghci94
+ghci> M.size (M.insertWith (\_ _ -> undefined) 1 1 (M.fromList [(1,1)]))
+1
+ghci> MS.size (MS.insertWith (\_ _ -> undefined) 1 1 (MS.fromList [(1,1)]))
+*** Exception: Prelude.undefined
+CallStack (from HasCallStack):
+  undefined, called at <interactive>:201:33 in interactive:Ghci95
+ghci> M.size (M.fromList [(undefined, 1)])
+*** Exception: Prelude.undefined
+CallStack (from HasCallStack):
+  undefined, called at <interactive>:203:22 in interactive:Ghci95
+ghci> M.member undefined (M.empty :: M.Map Int Int)
+*** Exception: Prelude.undefined
+CallStack (from HasCallStack):
+  undefined, called at <interactive>:205:10 in interactive:Ghci95
+ghci> take 3 (M.keys (M.fromList [(i, i * i) | i <- [1..10000]]))
+[1,2,3]
+ghci> M.foldlWithKey (\a k v -> a + k * v) 0 (M.fromList (zip [1..1000] [1..1000]))
+333833500
+ghci> MS.insertWith (+) 'a' 1 (MS.fromList [('a',1)])
+fromList [('a',2)]
+ghci> MS.adjust (+1) 'a' (MS.fromList [('a',1)])
+fromList [('a',2)]
+ghci> :t M.insertWith
+M.insertWith
+  :: Ord k => (a -> a -> a) -> k -> a -> M.Map k a -> M.Map k a
+ghci> :t M.foldrWithKey
+M.foldrWithKey :: (k -> a -> b -> b) -> b -> M.Map k a -> b
+ghci> :t M.alter
+M.alter
+  :: Ord k => (Maybe a -> Maybe a) -> k -> M.Map k a -> M.Map k a
+ghci> :t M.unionWith
+M.unionWith
+  :: Ord k => (a -> a -> a) -> M.Map k a -> M.Map k a -> M.Map k a
+ghci> :t MS.fromListWith
+MS.fromListWith :: Ord k => (a -> a -> a) -> [(k, a)] -> M.Map k a
+
+## 35. Data.Set
+
+ghci> import qualified Data.Set as S
+ghci> S.fromList [3,1,2,3]
+fromList [1,2,3]
+ghci> S.empty :: S.Set Int
+fromList []
+ghci> S.singleton 'x'
+fromList "x"
+ghci> S.member 2 (S.fromList [1,2,3])
+True
+ghci> S.notMember 2 (S.fromList [1,2,3])
+False
+ghci> S.size (S.fromList "mississippi")
+4
+ghci> S.toList (S.fromList "mississippi")
+"imps"
+ghci> S.toDescList (S.fromList "abc")
+"cba"
+ghci> S.elems (S.fromList [2,1])
+[1,2]
+ghci> S.insert 0 (S.fromList [1,2])
+fromList [0,1,2]
+ghci> S.delete 1 (S.fromList [1,2])
+fromList [2]
+ghci> S.union (S.fromList "hello") (S.fromList "world")
+fromList "dehlorw"
+ghci> S.unions [S.fromList [1], S.fromList [2,3], S.fromList [1]]
+fromList [1,2,3]
+ghci> S.difference (S.fromList [1..10]) (S.fromList [2,4..10])
+fromList [1,3,5,7,9]
+ghci> S.fromList [1..5] S.\\ S.fromList [2,3]
+fromList [1,4,5]
+ghci> S.intersection (S.fromList [1..5]) (S.fromList [3..8])
+fromList [3,4,5]
+ghci> S.filter even (S.fromList [1..10])
+fromList [2,4,6,8,10]
+ghci> S.partition even (S.fromList [1..10])
+(fromList [2,4,6,8,10],fromList [1,3,5,7,9])
+ghci> S.map (`div` 2) (S.fromList [1..10])
+fromList [0,1,2,3,4,5]
+ghci> S.findMin (S.fromList "hello")
+'e'
+ghci> S.findMax (S.fromList "hello")
+'o'
+ghci> S.findMin (S.empty :: S.Set Int)
+*** Exception: Set.findMin: empty set has no minimal element
+CallStack (from HasCallStack):
+  error, called at libraries/containers/containers/src/Data/Set/Internal.hs:776:17 in containers-0.6.7:Data.Set.Internal
+ghci> S.lookupMin (S.empty :: S.Set Int)
+Nothing
+ghci> S.deleteMin (S.fromList [1,2,3])
+fromList [2,3]
+ghci> S.minView (S.fromList [1,2,3])
+Just (1,fromList [2,3])
+ghci> S.maxView (S.fromList [1,2,3])
+Just (3,fromList [1,2])
+ghci> S.isSubsetOf (S.fromList [1,2]) (S.fromList [1,2,3])
+True
+ghci> S.isProperSubsetOf (S.fromList [1,2,3]) (S.fromList [1,2,3])
+False
+ghci> S.disjoint (S.fromList [1,2]) (S.fromList [3,4])
+True
+ghci> S.split 5 (S.fromList [1..9])
+(fromList [1,2,3,4],fromList [6,7,8,9])
+ghci> S.splitMember 5 (S.fromList [1..9])
+(fromList [1,2,3,4],True,fromList [6,7,8,9])
+ghci> S.elemAt 3 (S.fromList "abcdef")
+'d'
+ghci> S.elemAt 9 (S.fromList "abcdef")
+*** Exception: Set.elemAt: index out of range
+CallStack (from HasCallStack):
+  error, called at libraries/containers/containers/src/Data/Set/Internal.hs:1381:17 in containers-0.6.7:Data.Set.Internal
+ghci> S.findIndex 'c' (S.fromList "abcdef")
+2
+ghci> S.lookupIndex 'z' (S.fromList "abcdef")
+Nothing
+ghci> S.take 2 (S.fromList [5,4..1])
+fromList [1,2]
+ghci> S.drop 2 (S.fromList [5,4..1])
+fromList [3,4,5]
+ghci> S.lookupLT 3 (S.fromList [1,3,5])
+Just 1
+ghci> S.lookupGE 4 (S.fromList [1,3,5])
+Just 5
+ghci> S.powerSet (S.fromList [1,2,3])
+fromList [fromList [],fromList [1],fromList [1,2],fromList [1,2,3],fromList [1,3],fromList [2],fromList [2,3],fromList [3]]
+ghci> S.cartesianProduct (S.fromList [1,2]) (S.fromList "ab")
+fromList [(1,'a'),(1,'b'),(2,'a'),(2,'b')]
+ghci> S.foldr (:) [] (S.fromList "cab")
+"abc"
+ghci> S.foldl (flip (:)) [] (S.fromList "cab")
+"cba"
+ghci> sum (S.fromList [1..100])
+5050
+ghci> length (S.fromList "hello")
+4
+ghci> elem 'e' (S.fromList "hello")
+True
+ghci> maximum (S.fromList [3,1,2])
+3
+ghci> S.fromList [1,2] == S.fromList [2,1]
+True
+ghci> compare (S.fromList [1,2]) (S.fromList [1,3])
+LT
+ghci> S.fromList [1] <> S.fromList [2]
+fromList [1,2]
+ghci> read "fromList [3,2,1]" :: S.Set Int
+fromList [1,2,3]
+ghci> show (Just (S.fromList "ab"))
+"Just (fromList \"ab\")"
+ghci> S.member undefined (S.empty :: S.Set Int)
+*** Exception: Prelude.undefined
+CallStack (from HasCallStack):
+  undefined, called at <interactive>:107:10 in interactive:Ghci52
+ghci> S.size (S.fromList [1, undefined])
+*** Exception: Prelude.undefined
+CallStack (from HasCallStack):
+  undefined, called at <interactive>:109:24 in interactive:Ghci52
+ghci> S.toList (S.fromList [(i * 7) `mod` 10 | i <- [1..100]])
+[0,1,2,3,4,5,6,7,8,9]
+ghci> :t S.fromList
+S.fromList :: Ord a => [a] -> S.Set a
+ghci> :t S.foldr
+S.foldr :: (a -> b -> b) -> b -> S.Set a -> b
+ghci> :t S.map
+S.map :: Ord b => (a -> b) -> S.Set a -> S.Set b
+
+## 36. More of Control.Monad and Data.List
+
+ghci> import Control.Monad
+ghci> import Control.Applicative
+ghci> import Data.List
+ghci> guard True :: [()]
+[()]
+ghci> guard False :: Maybe ()
+Nothing
+ghci> [x | x <- [1..10], _ <- guard (even x)]
+[2,4,6,8,10]
+ghci> msum [Nothing, Just 2, Just 3]
+Just 2
+ghci> mzero :: [Int]
+[]
+ghci> mplus [1] [2]
+[1,2]
+ghci> Just 1 <|> Nothing
+Just 1
+ghci> Nothing <|> Just 2
+Just 2
+ghci> empty :: Maybe Int
+Nothing
+ghci> mfilter even (Just 4)
+Just 4
+ghci> mfilter even (Just 3)
+Nothing
+ghci> foldM_ (\a x -> print (a + x) >> return (a + x)) 0 [1,2,3]
+1
+3
+6
+ghci> liftM3 (,,) (Just 1) (Just 'a') (Just True)
+Just (1,'a',True)
+ghci> liftA3 (,,) [1] "a" [True]
+[(1,'a',True)]
+ghci> (+1) <$!> Just 1
+Just 2
+ghci> optional (Just 3)
+Just (Just 3)
+ghci> optional (Nothing :: Maybe Int)
+Just Nothing
+ghci> mapAndUnzipM (\x -> Just (x, x * 2)) [1,2,3]
+Just ([1,2,3],[2,4,6])
+ghci> :t guard
+guard :: Alternative f => Bool -> f ()
+ghci> :t msum
+msum :: (Foldable t, MonadPlus m) => t (m a) -> m a
+ghci> :t forever
+forever :: Applicative f => f a -> f b
+ghci> :t mapAccumL
+mapAccumL
+  :: Traversable t => (s -> a -> (s, b)) -> s -> t a -> (s, t b)
+ghci> mapAccumL (\a x -> (a+x, a*x)) 0 [1..5]
+(15,[0,2,9,24,50])
+ghci> mapAccumR (\a x -> (a+x, a*x)) 0 [1..5]
+(15,[14,24,27,20,0])
+ghci> take 3 (snd (mapAccumL (\a x -> (a+x, a)) 0 [1..]))
+[0,1,3]
+ghci> mapAccumL (\a x -> (a + x, show a)) 0 (Just 5)
+(5,Just "0")
+ghci> genericTake (2 :: Integer) "abc"
+"ab"
+ghci> genericDrop (2 :: Integer) "abc"
+"c"
+ghci> genericSplitAt (1 :: Integer) "abc"
+("a","bc")
+ghci> genericIndex "abc" (1 :: Integer)
+'b'
+ghci> genericIndex "abc" (5 :: Integer)
+*** Exception: List.genericIndex: index too large.
+ghci> genericReplicate (3 :: Integer) 'x'
+"xxx"
+ghci> zip5 [1] "a" [True] [()] [2.5]
+[(1,'a',True,(),2.5)]
+ghci> zipWith4 (\a b c d -> a + b + c + d) [1] [2] [3] [4]
+[10]
+ghci> unzip4 [(1,'a',True,"x")]
+([1],"a",[True],["x"])
+ghci> foldl1' max [3,1,2]
+3
+ghci> foldl1' max ([] :: [Int])
+*** Exception: Prelude.foldl1': empty list
+CallStack (from HasCallStack):
+  error, called at libraries/base/GHC/List.hs:1644:3 in base:GHC.List
+  errorEmptyList, called at libraries/base/GHC/List.hs:398:29 in base:GHC.List
+  foldl1', called at <interactive>:79:1 in interactive:Ghci35
+ghci> singleton 'a'
+"a"
+ghci> deleteFirstsBy (==) [1,2,3,2] [2]
+[1,3,2]
+
+## 37. Data.Bits
+
+ghci> import Data.Bits
+ghci> 5 .&. 3 :: Int
+1
+ghci> 5 .|. 3 :: Int
+7
+ghci> xor 5 3 :: Int
+6
+ghci> complement 0 :: Int
+-1
+ghci> complement 0 :: Integer
+-1
+ghci> shiftL 1 10 :: Int
+1024
+ghci> shiftL 1 64 :: Int
+0
+ghci> shiftL 1 100 :: Integer
+1267650600228229401496703205376
+ghci> shiftR (-16) 2 :: Int
+-4
+ghci> shiftR (-16) 2 :: Integer
+-4
+ghci> shift 1 (-1) :: Int
+0
+ghci> 1 `shiftL` 63 :: Int
+-9223372036854775808
+ghci> rotateL (1 :: Int) 64
+1
+ghci> rotateR (1 :: Int) 1
+-9223372036854775808
+ghci> rotate (minBound :: Int) 1
+1
+ghci> popCount (255 :: Int)
+8
+ghci> popCount (-1 :: Int)
+64
+ghci> popCount (-1 :: Integer)
+-1
+ghci> testBit (5 :: Int) 2
+True
+ghci> testBit (5 :: Integer) 1
+False
+ghci> bit 4 :: Int
+16
+ghci> setBit (0 :: Integer) 70
+1180591620717411303424
+ghci> clearBit (15 :: Int) 0
+14
+ghci> complementBit (5 :: Int) 1
+7
+ghci> finiteBitSize (0 :: Int)
+64
+ghci> bitSizeMaybe (0 :: Integer)
+Nothing
+ghci> bitSizeMaybe (0 :: Int)
+Just 64
+ghci> isSigned (0 :: Int)
+True
+ghci> countLeadingZeros (1 :: Int)
+63
+ghci> countTrailingZeros (8 :: Int)
+3
+ghci> countLeadingZeros (0 :: Int)
+64
+ghci> zeroBits :: Int
+0
+ghci> (5 :: Int) .<<. 2
+20
+ghci> (-8 :: Int) .>>. 1
+-4
+ghci> (.^.) 6 (3 :: Int)
+5
+ghci> True .&. False
+False
+ghci> xor True True
+False
+ghci> popCount True
+1
+ghci> unsafeShiftL (1 :: Int) 3
+8
+ghci> shiftL (1 :: Int) (-1)
+*** Exception: arithmetic overflow
+ghci> toIntegralSized (300 :: Int) :: Maybe Integer
+Just 300
+ghci> oneBits :: Int
+-1
+ghci> :t (.&.)
+(.&.) :: Bits a => a -> a -> a
+ghci> :t popCount
+popCount :: Bits a => a -> Int
+ghci> :t finiteBitSize
+finiteBitSize :: FiniteBits b => b -> Int
+
+## 38. Data.Ratio
+
+ghci> import Data.Ratio
+ghci> 3 % 4
+3 % 4
+ghci> 6 % 8 :: Rational
+3 % 4
+ghci> (-3) % 6 :: Rational
+(-1) % 2
+ghci> 3 % (-6) :: Rational
+(-1) % 2
+ghci> 1 % 0 :: Rational
+*** Exception: Ratio has zero denominator
+ghci> numerator (6 % 8)
+3
+ghci> denominator (6 % 8)
+4
+ghci> 1 % 3 + 1 % 6 :: Rational
+1 % 2
+ghci> (1 % 3) * (3 % 4) :: Rational
+1 % 4
+ghci> recip (3 % 4 :: Rational)
+4 % 3
+ghci> recip (0 :: Rational)
+*** Exception: Ratio has zero denominator
+ghci> negate (3 % 4) :: Rational
+(-3) % 4
+ghci> abs ((-3) % 4) :: Rational
+3 % 4
+ghci> signum ((-3) % 4) :: Rational
+(-1) % 1
+ghci> toRational (0.75 :: Double)
+3 % 4
+ghci> toRational (0.1 :: Double)
+3602879701896397 % 36028797018963968
+ghci> fromRational (3 % 4) :: Double
+0.75
+ghci> truncate (7 % 2 :: Rational) :: Integer
+3
+ghci> round (5 % 2 :: Rational) :: Integer
+2
+ghci> round (7 % 2 :: Rational) :: Integer
+4
+ghci> floor ((-7) % 2 :: Rational) :: Integer
+-4
+ghci> ceiling ((-7) % 2 :: Rational) :: Integer
+-3
+ghci> properFraction ((-7) % 2 :: Rational) :: (Integer, Rational)
+(-3,(-1) % 2)
+ghci> compare (1 % 3) (1 % 2 :: Rational)
+LT
+ghci> show (Just (3 % 4 :: Rational))
+"Just (3 % 4)"
+ghci> showsPrec 8 (3 % 4 :: Rational) ""
+"(3 % 4)"
+ghci> read "3 % 4" :: Rational
+3 % 4
+ghci> read "(-3) % 4" :: Rational
+(-3) % 4
+ghci> [1 % 2, 1 .. 3] :: [Rational]
+[1 % 2,1 % 1,3 % 2,2 % 1,5 % 2,3 % 1]
+ghci> approxRational (pi :: Double) 0.001
+201 % 64
+ghci> 3 % 4 :: Ratio Int
+3 % 4
+ghci> maxBound % 1 + 1 % 1 :: Ratio Int
+(-9223372036854775808) % 1
+ghci> realToFrac (1.5 :: Double) :: Rational
+3 % 2
+ghci> :t (%)
+(%) :: Integral a => a -> a -> Ratio a
+ghci> :t numerator
+numerator :: Ratio a -> a
+
+## 39. Data.IORef and binding at the prompt
+
+ghci> import Data.IORef
+ghci> r <- newIORef (0 :: Int)
+ghci> readIORef r
+0
+ghci> writeIORef r 5
+ghci> readIORef r
+5
+ghci> modifyIORef r (+ 1)
+ghci> readIORef r
+6
+ghci> modifyIORef' r (* 2)
+ghci> readIORef r
+12
+ghci> atomicModifyIORef r (\x -> (x + 1, x * 10))
+120
+ghci> readIORef r
+13
+ghci> atomicModifyIORef' r (\x -> (x - 1, "done"))
+"done"
+ghci> readIORef r
+12
+ghci> atomicWriteIORef r 42
+ghci> readIORef r
+42
+ghci> q <- newIORef [1, 2, 3]
+ghci> modifyIORef q (map (* 2))
+ghci> readIORef q
+[2,4,6]
+ghci> r == r
+True
+ghci> s <- newIORef 'a'
+ghci> :t r
+r :: IORef Int
+ghci> :t q
+q :: IORef [Integer]
+ghci> lazy <- newIORef (undefined :: Int)
+ghci> writeIORef lazy 1
+ghci> readIORef lazy
+1
+ghci> modifyIORef lazy (\_ -> undefined)
+ghci> modifyIORef lazy (const 3)
+ghci> readIORef lazy
+3
+ghci> modifyIORef' lazy (\_ -> undefined)
+*** Exception: Prelude.undefined
+CallStack (from HasCallStack):
+  undefined, called at <interactive>:57:26 in interactive:Ghci27
+ghci> (a, b) <- return (1, 'x')
+ghci> a
+1
+ghci> b
+'x'
+ghci> (c, Nothing) <- return (1, Just 2)
+*** Exception: user error (Pattern match failure in interactive GHCi command at <interactive>:65:1-12)
+ghci> c
+
+<interactive>:67:1: error: [GHC-88464] Variable not in scope: c
+ghci> Just d <- return (Just 3)
+ghci> d
+3
+ghci> :t d
+d :: Integer
+ghci> [e, f] <- return "ab"
+ghci> f
+'b'
+ghci> (g, ~(Just h)) <- return (1, Nothing)
+ghci> g
+1
+ghci> h
+
+<interactive>:83:1: error: [GHC-39999]
+    • No instance for ‘Show GHC.Types.Any’
+        arising from a use of ‘print’
+    • In a stmt of an interactive GHCi command: print it
+ghci> n <- return 5
+ghci> n + 1
+6
+ghci> :t n
+n :: Integer
+
+## 40. Text.Printf
+
+ghci> import Text.Printf
+ghci> printf "hi %d\n" (5 :: Int)
+hi 5
+ghci> printf "hi %d\n" 5
+hi 5
+ghci> printf "%s %d %.2f\n" "a" (1 :: Int) (3.14159 :: Double)
+a 1 3.14
+ghci> x <- printf "q\n"
+q
+ghci> x
+()
+ghci> :t x
+x :: ()
+ghci> let s = printf "%d" (3 :: Int) :: String
+ghci> s
+"3"
+ghci> printf "%5.1f|%-6s|%03d|%x|%X|%o|%e|%g|%c|%%\n" (3.14159 :: Double) "ab" (7 :: Int) (255 :: Int) (255 :: Int) (8 :: Int) (1234.5 :: Double) (0.0001 :: Double) 'z'
+  3.1|ab    |007|ff|FF|10|1.2345e3|1.0e-4|z|%
+ghci> printf "%d\n"
+*** Exception: printf: argument list ended prematurely
+ghci> printf "%d\n" (1 :: Int) (2 :: Int)
+1
+*** Exception: printf: formatting string ended prematurely
+ghci> printf "%#-x|\n" (-1 :: Integer)
+0x*** Exception: printf: bad argument
+ghci> printf "%y\n" (1 :: Int)
+*** Exception: printf: bad formatting char 'y'
+ghci> printf "%s\n" (5 :: Int)
+*** Exception: printf: bad formatting char 's'
+ghci> :t printf "%d" (1 :: Int)
+printf "%d" (1 :: Int) :: PrintfType t => t
+ghci> printf "%v %v\n" (1 :: Int) "s"
+1 s
+ghci> printf "%10.3e|%-10.2g|%+d|% d\n" (123.456 :: Double) (0.5 :: Double) (5 :: Int) (5 :: Int)
+   1.235e2|0.50      |+5| 5
+ghci> printf "%.0f %.0f %.0f %.1f\n" (0.5 :: Double) (1.5 :: Double) (2.5 :: Double) (0.05 :: Double)
+0 2 2 0.0
+ghci> printf "%*d|%-*d|\n" (5 :: Int) (42 :: Int) (4 :: Int) (7 :: Int)
+   42|7   |
+ghci> printf "%hhd %hd %ld\n" (300 :: Int) (70000 :: Int) (5 :: Int)
+300 70000 5
+ghci> printf "%hhx %hx\n" (-1 :: Int) (-1 :: Int)
+ff ffff
+ghci> printf "%u\n" (-1 :: Int)
+18446744073709551615
+ghci> printf "%5c|%-3c|\n" 'a' 'b'
+    a|b  |
+ghci> printf "%.3s|%10s|%-10s|\n" "abcdef" "right" "left"
+abc|     right|left      |
+ghci> printf "%f %e %g\n" (1/0 :: Double) (0/0 :: Double) (-0.0 :: Double)
+Infinity NaN -0.0
+ghci> printf "%g %g %g\n" (1e7 :: Double) (1e-2 :: Double) (123456.789 :: Double)
+1.0e7 1.0e-2 123456.789
+ghci> printf "%#o %#x %#b\n" (8 :: Int) (0 :: Int) (5 :: Int)
+010 0 0b101
+ghci> printf "%.3d|%8.3d|%-8.3d|%08.3d|\n" (5 :: Int) (5 :: Int) (5 :: Int) (5 :: Int)
+005|     005|005     |     005|
+ghci> printf "%08.3f|%-8.3f|%+.2e\n" (3.14159 :: Double) (-2.5 :: Double) (12345.678 :: Double)
+0003.142|-2.500  |+1.23e4
+ghci> printf "%#.0f %#g %G %E %F\n" (3 :: Double) (2 :: Double) (1e-10 :: Double) (1234.5 :: Double) (0.25 :: Double)
+3. 2.0 1.0E-10 1.2345E3 0.25
+ghci> printf "%d %d\n" (2 ^ 70 :: Integer) (minBound :: Int)
+1180591620717411303424 -9223372036854775808
+ghci> printf "%x\n" (2 ^ 70 :: Integer)
+400000000000000000
+ghci> printf "%c%c%c\n" 'a' 'b' 'c'
+abc
+ghci> printf "%s\n" (show [1, 2, 3])
+[1,2,3]
+ghci> printf "100%%\n"
+100%
+ghci> printf "%-5d|%5s|\n" (-3 :: Int) "λx"
+-3   |   λx|
+ghci> printf "%.1f\n" (0.25 :: Double)
+0.2
+ghci> printf "%.2f %.2f\n" (1.005 :: Double) (2.675 :: Double)
+1.00 2.68
+ghci> printf "%5.2s|\n" "abc"
+   ab|
+ghci> printf "%d" (3 :: Int) ++ "!"
+"3!"
+ghci> length (printf "%d" (12345 :: Int) :: String)
+5
+ghci> printf "%d %s\n" (1 :: Int)
+1 *** Exception: printf: argument list ended prematurely
+ghci> printf "%c\n" (65 :: Int)
+A
+ghci> printf "%d\n" 'A'
+65
+ghci> printf "%.3x\n" (5 :: Int)
+005
+
+## 41. Numeric
+
+ghci> import Numeric
+ghci> showHex (255 :: Int) ""
+"ff"
+ghci> showOct (8 :: Int) ""
+"10"
+ghci> showBin (5 :: Int) ""
+"101"
+ghci> showHex (2 ^ 70 :: Integer) ""
+"400000000000000000"
+ghci> showHex (-1 :: Int) ""
+"*** Exception: Numeric.showIntAtBase: applied to negative number -1
+ghci> showIntAtBase 36 (\d -> toEnum (d + 48)) (100 :: Int) ""
+"2L"
+ghci> showIntAtBase 1 (const 'x') (5 :: Int) ""
+"*** Exception: Numeric.showIntAtBase: applied to unsupported base 1
+ghci> showInt (123 :: Int) ""
+"123"
+ghci> showInt (-1 :: Int) ""
+"*** Exception: Numeric.showInt: can't show negative numbers
+ghci> showSigned showInt 7 (-5 :: Int) ""
+"(-5)"
+ghci> showSigned showInt 0 (-5 :: Int) ""
+"-5"
+ghci> showFFloat (Just 2) (3.14159 :: Double) ""
+"3.14"
+ghci> showFFloat Nothing (3.14159 :: Double) ""
+"3.14159"
+ghci> showFFloat (Just 0) (2.5 :: Double) ""
+"2"
+ghci> showFFloat (Just 3) (1e-4 :: Double) ""
+"0.000"
+ghci> showFFloat (Just 2) (1e22 :: Double) ""
+"10000000000000000000000.00"
+ghci> showFFloat Nothing (1e22 :: Double) ""
+"10000000000000000000000.0"
+ghci> showFFloat Nothing (1.0e-2 :: Double) ""
+"0.01"
+ghci> showEFloat (Just 2) (1234.5 :: Double) ""
+"1.23e3"
+ghci> showEFloat Nothing (0.001 :: Double) ""
+"1.0e-3"
+ghci> showEFloat (Just 0) (1234.5 :: Double) ""
+"1e3"
+ghci> showEFloat (Just 2) (0 :: Double) ""
+"0.00e0"
+ghci> showGFloat (Just 2) (0.5 :: Double) ""
+"0.50"
+ghci> showGFloat (Just 2) (1e8 :: Double) ""
+"1.00e8"
+ghci> showGFloat Nothing (123.0 :: Double) ""
+"123.0"
+ghci> showFFloatAlt (Just 0) (3 :: Double) ""
+"3."
+ghci> showGFloatAlt (Just 0) (3 :: Double) ""
+"3."
+ghci> showFFloat (Just 2) (-0.0 :: Double) ""
+"-0.00"
+ghci> showFFloat (Just 2) (0/0 :: Double) ""
+"NaN"
+ghci> showEFloat (Just 2) (-1/0 :: Double) ""
+"-Infinity"
+ghci> showFloat (1.5 :: Double) ""
+"1.5"
+ghci> showFloat (1e-3 :: Double) ""
+"1.0e-3"
+ghci> showHFloat (212.21 :: Double) ""
+"0x1.a86b851eb851fp7"
+ghci> showHFloat (-0 :: Double) ""
+"-0x0p+0"
+ghci> showHFloat (1 :: Double) ""
+"0x1p0"
+ghci> showHFloat (5.0e-324 :: Double) ""
+"0x1p-1074"
+ghci> floatToDigits 10 (0.3 :: Double)
+([3],0)
+ghci> floatToDigits 10 (1234.5 :: Double)
+([1,2,3,4,5],4)
+ghci> floatToDigits 2 (0.75 :: Double)
+([1,1],0)
+ghci> floatToDigits 16 (255.5 :: Double)
+([15,15,8],2)
+ghci> floatToDigits 10 (5.0e-324 :: Double)
+([5],-323)
+ghci> floatToDigits 10 (1.7976931348623157e308 :: Double)
+([1,7,9,7,6,9,3,1,3,4,8,6,2,3,1,5,7],309)
+ghci> readHex "ff rest" :: [(Int, String)]
+[(255," rest")]
+ghci> readHex "FFz" :: [(Integer, String)]
+[(255,"z")]
+ghci> readOct "777" :: [(Int, String)]
+[(511,"")]
+ghci> readDec "123abc" :: [(Int, String)]
+[(123,"abc")]
+ghci> readBin "1012" :: [(Int, String)]
+[(5,"2")]
+ghci> readHex "xyz" :: [(Int, String)]
+[]
+ghci> readSigned readDec "-42 rest" :: [(Int, String)]
+[(-42," rest")]
+ghci> readSigned readDec "(-42)" :: [(Int, String)]
+[(-42,"")]
+ghci> readInt 2 (`elem` "01") (\c -> fromEnum c - 48) "1101" :: [(Int, String)]
+[(13,"")]
+ghci> lexDigits "123abc"
+[("123","abc")]
+ghci> fst . head $ readHex "deadbeef" :: Int
+3735928559
+ghci> :t showHex
+showHex :: Integral a => a -> ShowS
+ghci> :t showFFloat
+showFFloat :: RealFloat a => Maybe Int -> a -> ShowS
+ghci> :t floatToDigits
+floatToDigits :: RealFloat a => Integer -> a -> ([Int], Int)
+ghci> :t readHex
+readHex :: (Eq a, Num a) => ReadS a
+

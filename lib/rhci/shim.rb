@@ -198,6 +198,68 @@ module Rhci
       nil
     end
 
+    # ---- files for readFile/writeFile/appendFile ----------------------------
+    # The failure is classified by inspecting the path, the same way on
+    # both runtimes (mruby's lean build has no Errno classes): :enoent,
+    # :enotdir, :eisdir or :eacces.
+
+    # A file's bytes (an Array of Integers), or a failure Symbol.
+    def self.read_bytes(path)
+      why = path_problem(path, false)
+      return why if why
+
+      File.open(path, 'rb') { |f| f.read }.bytes
+    rescue StandardError
+      :eacces
+    end
+
+    # Truncates (or, appending, creates) the file; nil or a failure Symbol.
+    def self.open_for_write(path, append)
+      why = path_problem(path, true)
+      return why if why
+
+      File.open(path, append ? 'ab' : 'wb') { |_| nil }
+      nil
+    rescue StandardError
+      :eacces
+    end
+
+    def self.append_bytes(path, str)
+      File.open(path, 'ab') { |f| f.write(str) }
+      nil
+    end
+
+    # The canonical name of an existing file (what GHC's per-file lock is
+    # keyed on), or nil.
+    def self.real_path(path)
+      File.realpath(path)
+    rescue StandardError
+      nil
+    end
+
+    def self.path_problem(path, writing)
+      return :enoent if path.empty?
+
+      parts = path.split('/')
+      prefix = path.start_with?('/') ? '/' : ''
+      i = 0
+      while i < parts.length - 1
+        part = parts[i]
+        i += 1
+        next if part.empty?
+
+        prefix += part
+        return :enoent unless File.exist?(prefix)
+        return :enotdir unless File.directory?(prefix)
+
+        prefix += '/'
+      end
+      return :eisdir if File.directory?(path)
+      return :enoent if !writing && !File.exist?(path)
+
+      nil
+    end
+
     def self.write(io, str)
       io.write(str)
       nil

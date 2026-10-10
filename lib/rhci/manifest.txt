@@ -23,5 +23,6 @@ desugar
 derive
 snapshot
 session
+info
 line_editor
 cli

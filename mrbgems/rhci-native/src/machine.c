@@ -682,6 +682,7 @@ machine_run_native(mrb_state *mrb, mrb_value self)
 }
 
 void rhci_term_init(mrb_state *mrb);
+void rhci_bigint_eq_init(mrb_state *mrb);
 void rhci_term_final(mrb_state *mrb);
 
 #define SYM(x) mrb_intern_lit(mrb, x)
@@ -690,6 +691,7 @@ void
 mrb_rhci_native_gem_init(mrb_state *mrb)
 {
   rhci_term_init(mrb);
+  rhci_bigint_eq_init(mrb);
   s_op = SYM("@op"); s_index = SYM("@index"); s_cell = SYM("@cell"); s_value = SYM("@value");
   s_fn = SYM("@fn"); s_args = SYM("@args"); s_binds = SYM("@binds"); s_body = SYM("@body");
   s_scrut = SYM("@scrut"); s_binder = SYM("@binder"); s_con_alts = SYM("@con_alts");

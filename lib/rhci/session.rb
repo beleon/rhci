@@ -26,14 +26,15 @@ module Rhci
   class Session
     # GHCi commands, in the order GHCi resolves abbreviations (`:t` is
     # `:type`). :quit is the CLI's business.
-    COMMANDS = %w[? help load quit reload type].freeze
+    COMMANDS = %w[? help info kind load quit reload type].freeze
 
     # prelude: :source (compile prelude/Prelude.hs), :snapshot (decode the
     # build-time snapshot), or :auto (the snapshot when this runtime has one
     # embedded, as the mruby binary does).
-    # cwd: the directory :load resolves relative paths and module names in
-    # (default: the process's working directory).
-    def initialize(stdout: nil, stdin: nil, stderr: nil, limits: nil, prelude: :auto, cwd: nil)
+    # cwd: the directory :load and readFile/writeFile resolve relative paths
+    # and module names in (default: the process's working directory).
+    # files: false makes readFile/writeFile/appendFile fail.
+    def initialize(stdout: nil, stdin: nil, stderr: nil, limits: nil, prelude: :auto, cwd: nil, files: true)
       @prelude_mode = prelude
       @cwd = cwd
       @stdout = stdout
@@ -51,7 +52,7 @@ module Rhci
       @full_cores = {}
       @specs = {}
       @fixities = {}
-      @machine = VM::Machine.new(stdout, limits, input: stdin, err: stderr)
+      @machine = VM::Machine.new(stdout, limits, input: stdin, err: stderr, cwd: cwd, files: files)
       @prelude_loaded = false
     end
 
@@ -122,7 +123,7 @@ module Rhci
       when AST::ReplBind then eval_bind(node, layer)
       else
         rtop = Renamer.new(@names, fixity: fixity_lookup).repl(node)
-        return Result.new(:ok) if rtop.import
+        return prompt_import(rtop.import) if rtop.import
 
         tc = TypeChecker.new(@names, @tenv)
         tc.top(rtop)
@@ -212,15 +213,21 @@ module Rhci
       tc = TypeChecker.new(@names, @tenv)
       tc.top(rtop)
       defs, core = Desugar.new(@names).top(rtop)
-      commit(rtop, tc, defs, layer)
+      install(defs)
       value = run_io_value(eval_core(core))
       cell = value_cell(value)
       ds = Desugar.new(@names)
+      # The pattern is matched now, as GHCi's `pat <- io` does: a failure
+      # is a (MonadFail) IO error and binds nothing.
+      tok = node.pat.tok
+      msg = "user error (Pattern match failure in interactive GHCi command at <interactive>:#{tok&.line || 1}:#{tok&.col || 1})"
+      fail_now = Core::Prim.new(:raise, [value_cell(@machine.haskell_string(msg))])
+      eval_core(ds.match_value(cell.name, node.pat, Core::Con.new(VM::Builtins::UNIT, []), fail_now))
       fail = Core::Prim.new(:raise, [value_cell(@machine.haskell_string('Irrefutable pattern failed'))])
       bind_defs = rtop.values.values.map do |n|
-        [n.core, ds.match_value(cell.name, node.pat, Core::Var.new(n.core), fail)]
+        [n.core, ds.match_binding(cell.name, node.pat, n, fail)]
       end
-      install(bind_defs)
+      commit(rtop, tc, bind_defs, layer)
       Result.new(:ok)
     end
 
@@ -357,7 +364,17 @@ module Rhci
       @names.types.replace(@baseline[:types].dup)
       @baseline[:instances].each { |ci, inst| ci.instances.replace(inst.dup) }
       @names.refused.clear
+      @names.clear_definitions
+      @names.local_modules = nil
       @fixities = {}
+      prompt_alias_fixities
+    end
+
+    # The prompt's imports survive :load; so do their operators' fixities.
+    def prompt_alias_fixities
+      @names.aliases.each do |a, mods|
+        mods.each { |m| alias_fixities(a, m).each { |k, v| @fixities[k] = v } }
+      end
     end
 
     # A :load argument: a file path (with or without .hs), or a module name.
@@ -398,9 +415,11 @@ module Rhci
       hidden = []
       fixities = {}
       local = []
+      # Qualified names: the Prelude is implicitly importable as Prelude.x.
+      qualified = { 'Prelude' => [['Prelude', @names.module_table('Prelude')]] }
       raw.imports.each do |imp|
-        if Renamer::KNOWN_MODULES.key?(imp.module_name)
-          base_import(imp, official, hidden)
+        if MODULE_EXPORTS.key?(imp.module_name) || @names.library_module?(imp.module_name)
+          base_import(imp, official, hidden, imported, qualified, fixities, path)
           next
         end
         target = module_path(imp.module_name)
@@ -409,12 +428,13 @@ module Rhci
         end
         mod = load_module_file(target, imp.module_name)
         local << imp.module_name
-        add_imports(imported, mod, imp, path)
+        add_qualified(qualified, imp.as || imp.module_name, imp.module_name, mod[:exports])
+        add_imports(imported, mod, imp, path) unless imp.qualified
         fixities.merge!(mod[:fixities])
       end
       m = Frontend.resolve_module(raw, fixities, path)
       renamer = Renamer.new(@names, path, fixity: fixity_lookup, imported: imported, module_mode: true,
-                                          official: official, hidden: hidden)
+                                          official: official, hidden: hidden, qualified: qualified)
       renamer.imported_modules = local
       rtop = renamer.module_decls(m)
       tc = TypeChecker.new(@names, @tenv, path, mode: :file)
@@ -431,22 +451,109 @@ module Rhci
       mod
     end
 
-    # import Prelude hiding (..) / import Data.List (sortOn): base modules.
-    def base_import(imp, official, hidden)
-      raise UnsupportedError, 'qualified imports are not supported yet' if imp.qualified || imp.as
+    # A file's import of a base module. The default-scope modules are
+    # visible anyway (`official` makes their names clash with the file's
+    # own); others add their names; every import is a qualifier.
+    def base_import(imp, official, hidden, imported, qualified, fixities, path)
+      mod = imp.module_name
+      table = @names.module_table(mod)
+      selection = import_selection(table, imp, path)
+      add_qualified(qualified, imp.as || mod, mod, table)
+      alias_fixities(imp.as || mod, mod).each { |k, v| fixities[k] = v }
+      return if imp.qualified
 
-      official << imp.module_name
-      return unless imp.hiding && imp.items
+      if DEFAULT_MODULES.include?(mod)
+        official << mod
+        return unless imp.hiding && imp.items
 
-      imp.items.each do |n, subs|
-        hidden << n
-        hidden.concat(subs) if subs.is_a?(Array)
+        imp.items.each do |n, subs|
+          hidden << n
+          hidden.concat(subs) if subs.is_a?(Array)
+        end
+        return
+      end
+      selection[:values].each { |str, n| add_import(imported[:values], str, n) }
+      selection[:types].each { |str, n| imported[:types][str] = n }
+    end
+
+    def add_qualified(qualified, alias_name, mod, table)
+      list = (qualified[alias_name] ||= [])
+      list << [mod, table] unless list.any? { |m, _| m == mod }
+    end
+
+    # The names an import brings in unqualified: {values:, types:}, from a
+    # module table; an item the module does not export is an error.
+    def import_selection(table, imp, source = '<interactive>')
+      wanted = nil
+      if imp.items
+        wanted = {}
+        imp.items.each do |n, subs|
+          unless table[:values].key?(n) || table[:types].key?(n)
+            raise Error.new(:compile, "Module ‘#{imp.module_name}’ does not export ‘#{n}’", imp.tok.line, imp.tok.col,
+                            source)
+          end
+          wanted[n] = true
+          t = table[:types][n]
+          if subs == :all && t.is_a?(Name)
+            sub_names(t).each { |x| wanted[x] = true }
+          elsif subs.is_a?(Array)
+            subs.each { |x| wanted[x] = true }
+          end
+        end
+      end
+      out = { values: {}, types: {} }
+      %i[values types].each do |kind|
+        table[kind].each do |str, n|
+          out[kind][str] = n if wanted.nil? || (imp.hiding ? !wanted.key?(str) : wanted.key?(str))
+        end
+      end
+      out
+    end
+
+    # A type's constructors and fields, or a class's methods (T(..)).
+    def sub_names(n)
+      if n.kind == :class
+        n.klass.methods.map(&:str)
+      elsif n.tyinfo
+        n.tyinfo.cons.flat_map { |c| [c.str] + (c.fields || []).map(&:str) }
+      else
+        []
       end
     end
 
-    def add_imports(imported, mod, imp, path)
-      raise UnsupportedError, 'qualified imports are not supported yet' if imp.qualified || imp.as
+    # `alias.op` fixities for the operators of a module outside the default
+    # scope (the default ones are the Prelude's).
+    def alias_fixities(alias_name, mod)
+      out = {}
+      (FixityResolver::MODULE_FIXITIES[mod] || {}).each { |op, f| out["#{alias_name}.#{op}"] = f }
+      out
+    end
 
+    # `import M`, `import qualified M as N`, `import M (x, T(..))` at the
+    # prompt (GHCi: interactive definitions shadow imported names).
+    def prompt_import(imp)
+      mod = imp.module_name
+      table = @names.module_table(mod) || @names.local_module(mod)
+      raise Error.new(:compile, "Could not find module ‘#{mod}’", imp.tok.line, imp.tok.col) unless table
+
+      selection = import_selection(table, imp)
+      alias_name = imp.as || mod
+      list = (@names.aliases[alias_name] ||= [])
+      list << mod unless list.include?(mod)
+      alias_fixities(alias_name, mod).each { |k, v| @fixities[k] = v }
+      unless imp.qualified || DEFAULT_MODULES.include?(mod) || @names.local_module(mod)
+        selection[:values].each { |str, n| add_prompt_import(@names.imports, str, n) }
+        selection[:types].each { |str, n| add_prompt_import(@names.import_types, str, n) }
+      end
+      Result.new(:ok)
+    end
+
+    def add_prompt_import(table, str, n)
+      list = (table[str] ||= [])
+      list << n unless list.include?(n)
+    end
+
+    def add_imports(imported, mod, imp, path)
       exports = mod[:exports]
       wanted = nil
       if imp.items
@@ -520,11 +627,33 @@ module Rhci
 
     # After a load the prompt sees the module's full scope (GHCi's *M).
     def expose_module_scope(mod)
-      mod[:imported][:values].each { |s, n| @names.values[s] = n unless n.is_a?(Array) }
-      mod[:imported][:types].each { |s, n| @names.types[s] = n }
-      mod[:rtop].values.each { |s, n| @names.values[s] = n unless s.start_with?('rhci_') }
-      mod[:rtop].types.each { |s, n| @names.types[s] = n }
+      mod[:imported][:values].each do |s, n|
+        next if n.is_a?(Array) || n.is_a?(MissingName)
+
+        @names.values[s] = n
+        @names.define(s)
+      end
+      mod[:imported][:types].each do |s, n|
+        next if n.is_a?(MissingName)
+
+        @names.types[s] = n
+        @names.define(s, type: true)
+      end
+      mod[:rtop].values.each do |s, n|
+        next if s.start_with?('rhci_')
+
+        @names.values[s] = n
+        @names.define(s)
+      end
+      mod[:rtop].types.each do |s, n|
+        @names.types[s] = n
+        @names.define(s, type: true)
+      end
+      local = {}
+      @modules.each { |name, m| local[name] = m[:exports] }
+      @names.local_modules = local
       @fixities = mod[:fixities].dup
+      prompt_alias_fixities
     end
 
     # The build-time snapshot text, if this runtime has one embedded.
@@ -571,10 +700,35 @@ module Rhci
       tc.top(rtop)
       defs, = Desugar.new(@names, '<Prelude>').top(rtop)
       commit(rtop, tc, defs, nil, prelude: true)
+      LIBRARY_MODULES.each { |mod| compile_library_module(mod) }
       capture_baseline
     rescue StandardError => e
       @prelude_loaded = false
       raise "rhci: the Prelude failed to load: #{e.message}"
+    end
+
+    # A library module (prelude/Data/...): compiled like a loaded file, its
+    # every top-level name registered for the public modules it implements.
+    def compile_library_module(mod)
+      label = "<#{mod}>"
+      raw = Frontend.parse_module_raw(LIBRARY_SOURCES.fetch(mod), label)
+      imported = { values: {}, types: {} }
+      official = []
+      hidden = []
+      fixities = {}
+      qualified = { 'Prelude' => [['Prelude', @names.module_table('Prelude')]] }
+      raw.imports.each { |imp| base_import(imp, official, hidden, imported, qualified, fixities, label) }
+      m = Frontend.resolve_module(raw, fixities, label)
+      renamer = Renamer.new(@names, label, fixity: fixity_lookup, imported: imported, module_mode: true,
+                                           official: official, hidden: hidden, qualified: qualified, internal: true)
+      rtop = renamer.module_decls(m)
+      tc = TypeChecker.new(@names, @tenv, label, mode: :file)
+      tc.top(rtop)
+      defs, = Desugar.new(@names, label).top(rtop)
+      install(defs)
+      tc.pending.each { |n, sc| @tenv[n] = sc if n.global || n.kind != :var }
+      tc.new_instances.each { |(klass, key), inst| klass.instances[key] = inst }
+      @names.register_library(mod, rtop.values, rtop.types)
     end
 
     # ---- committing and running --------------------------------------------------
@@ -769,6 +923,8 @@ module Rhci
         line = type_of(Rhci::Text.strip(arg))
         Shim.write(@stdout, "#{line}\n") if @stdout
         Result.new(:ok)
+      when 'info' then info(arg)
+      when 'kind' then kind_of(arg)
       when 'load' then load(Rhci::Text.strip(arg).split(' '))
       when 'reload' then reload
       when nil

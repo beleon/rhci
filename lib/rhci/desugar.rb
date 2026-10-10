@@ -47,6 +47,12 @@ module Rhci
       mp([[var, pat]], -> { success }, fail)
     end
 
+    # Match var against pat and return the value pat binds to name n
+    # (a `pat <- io` binding at the prompt).
+    def match_binding(var, pat, n, fail)
+      mp([[var, pat]], -> { var(core_name(n)) }, fail)
+    end
+
     private
 
     def fresh(hint = 'ds')

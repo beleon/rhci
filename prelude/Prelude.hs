@@ -29,6 +29,13 @@ infixl 9 !!
 infix 5 \\
 infixl 7 :%
 infixr 5 +++, <++
+infixl 3 <|>
+infixl 4 <$!>, <**>
+infixl 8 `shift`, `rotate`, `shiftL`, `shiftR`, `rotateL`, `rotateR`, `unsafeShiftL`, `unsafeShiftR`, .<<., .>>., !<<., !>>.
+infixl 7 .&.
+infixl 6 `xor`, .^.
+infixl 5 .|.
+infixl 7 %
 
 -- ---- primitives -------------------------------------------------------------
 
@@ -746,9 +753,106 @@ fromIntegral = fromInteger . toInteger
 realToFrac :: (Real a, Fractional b) => a -> b
 realToFrac = fromRational . toRational
 
--- Ratio: only what fractional literals and toRational need.
+-- ---- Data.Ratio (from GHC.Real) ----------------------------------------------------
+
 instance (Integral a) => Eq (Ratio a) where
   (x :% y) == (x' :% y') = x == x' && y == y'
+
+(%) :: Integral a => a -> a -> Ratio a
+x % y = rhci_reduceR (x * signum y) (abs y)
+
+rhci_reduceR :: Integral a => a -> a -> Ratio a
+rhci_reduceR _ 0 = rhci_raise "Ratio has zero denominator"
+rhci_reduceR x y = (x `quot` d) :% (y `quot` d)
+  where d = gcd x y
+
+numerator :: Ratio a -> a
+numerator (x :% _) = x
+
+denominator :: Ratio a -> a
+denominator (_ :% y) = y
+
+instance (Integral a) => Ord (Ratio a) where
+  (x :% y) <= (x' :% y') = x * y' <= x' * y
+  (x :% y) < (x' :% y') = x * y' < x' * y
+  compare (x :% y) (x' :% y') = compare (x * y') (x' * y)
+
+instance (Integral a) => Num (Ratio a) where
+  (x :% y) + (x' :% y') = rhci_reduceR (x * y' + x' * y) (y * y')
+  (x :% y) - (x' :% y') = rhci_reduceR (x * y' - x' * y) (y * y')
+  (x :% y) * (x' :% y') = rhci_reduceR (x * x') (y * y')
+  negate (x :% y) = negate x :% y
+  abs (x :% y) = abs x :% y
+  signum (x :% _) = signum x :% 1
+  fromInteger x = fromInteger x :% 1
+
+instance (Integral a) => Fractional (Ratio a) where
+  (x :% y) / (x' :% y') = (x * y') % (y * x')
+  recip (x :% y)
+    | x == 0 = rhci_raise "Ratio has zero denominator"
+    | x < 0 = negate y :% negate x
+    | otherwise = y :% x
+  fromRational (x :% y) = fromInteger x % fromInteger y
+
+instance (Integral a) => Real (Ratio a) where
+  toRational (x :% y) = toInteger x :% toInteger y
+
+instance (Integral a) => RealFrac (Ratio a) where
+  properFraction (x :% y) = (fromInteger (toInteger q), r :% y)
+    where (q, r) = quotRem x y
+  truncate x = fst (properFraction x)
+  round r =
+    let (n, f) = properFraction r
+        x = if r < 0 then -1 else 1
+    in case (compare (abs f) (1 :% 2), odd n) of
+         (LT, _) -> n
+         (EQ, False) -> n
+         (EQ, True) -> n + x
+         (GT, _) -> n + x
+  ceiling x = if r > 0 then n + 1 else n
+    where (n, r) = properFraction x
+  floor x = if r < 0 then n - 1 else n
+    where (n, r) = properFraction x
+
+instance (Show a) => Show (Ratio a) where
+  showsPrec p (x :% y) = showParen (p > 7) $ showsPrec 8 x . showString " % " . showsPrec 8 y
+
+instance (Integral a) => Enum (Ratio a) where
+  succ x = x + 1
+  pred x = x - 1
+  toEnum n = fromIntegral n :% 1
+  fromEnum = fromInteger . truncate
+  enumFrom = numericEnumFrom
+  enumFromThen = numericEnumFromThen
+  enumFromTo = numericEnumFromTo
+  enumFromThenTo = numericEnumFromThenTo
+
+approxRational :: (RealFrac a) => a -> a -> Rational
+approxRational rat eps = simplest (toRational rat - toRational eps) (toRational rat + toRational eps)
+  where
+    simplest x y
+      | y < x = simplest y x
+      | x == y = xr
+      | x > 0 = simplest' n d n' d'
+      | y < 0 = negate (simplest' (negate n') d' (negate n) d)
+      | otherwise = 0 :% 1
+      where
+        xr = toRational x
+        n = numerator xr
+        d = denominator xr
+        nd' = toRational y
+        n' = numerator nd'
+        d' = denominator nd'
+    simplest' n d n' d'
+      | r == 0 = q :% 1
+      | q /= q' = (q + 1) :% 1
+      | otherwise = (q * n'' + d'') :% n''
+      where
+        (q, r) = quotRem n d
+        (q', r') = quotRem n' d'
+        nd'' = simplest' d' r' d r
+        n'' = numerator nd''
+        d'' = denominator nd''
 
 -- ---- Enum and Bounded ---------------------------------------------------------------------
 
@@ -1200,6 +1304,55 @@ hGetContents h = rhci_stdinOnly "hGetContents" h getContents
 
 interact :: (String -> String) -> IO ()
 interact f = getContents `rhci_bindIO` \s -> putStr (f s)
+
+-- ---- Files ----------------------------------------------------------------------
+
+type FilePath = String
+
+data RhciBuf
+data RhciReader
+
+foreign import prim "bufNew" rhci_bufNew :: () -> RhciBuf
+foreign import prim "bufPush" rhci_bufPush :: RhciBuf -> Char -> ()
+foreign import prim "openRead" rhci_openRead :: () -> RhciBuf -> RhciReader
+foreign import prim "readerChar" rhci_readerChar :: RhciReader -> Int
+foreign import prim "openWrite" rhci_openWrite :: RhciBuf -> Int -> ()
+foreign import prim "commitWrite" rhci_commitWrite :: RhciBuf -> RhciBuf -> ()
+
+rhci_fillBuf :: RhciBuf -> String -> RhciBuf
+rhci_fillBuf b [] = b
+rhci_fillBuf b (c:cs) = case rhci_bufPush b c of () -> rhci_fillBuf b cs
+
+-- The file is opened (and its errors raised) at once; its characters
+-- come as the String is consumed, and its lock goes at the end.
+readFile :: FilePath -> IO String
+readFile p = IO (\w -> case rhci_openRead w (rhci_fillBuf (rhci_bufNew w) p) of
+  r -> r `seq` IORes (rhci_lazyFile r))
+
+rhci_lazyFile :: RhciReader -> String
+rhci_lazyFile r = case rhci_readerChar r of
+  c -> if rhci_intLt c 0 then [] else rhci_chr c : rhci_lazyFile r
+
+writeFile :: FilePath -> String -> IO ()
+writeFile = rhci_writeFile 0
+
+appendFile :: FilePath -> String -> IO ()
+appendFile = rhci_writeFile 1
+
+rhci_writeFile :: Int -> FilePath -> String -> IO ()
+rhci_writeFile mode p s = IO (\w -> case rhci_fillBuf (rhci_bufNew w) p of
+  pb -> case rhci_openWrite pb mode of
+    () -> case rhci_shove pb (rhci_bufNew w) 0 s of () -> IORes ())
+
+-- GHC's hPutStr (writeBlocks): characters fill a 2048-slot buffer, which is
+-- committed (encoded and written) whenever a next character arrives with
+-- one slot left, so a String that fails part way leaves exactly the chunks
+-- committed before the failure in the file.
+rhci_shove :: RhciBuf -> RhciBuf -> Int -> String -> ()
+rhci_shove pb b _ [] = rhci_commitWrite pb b
+rhci_shove pb b n (c:cs)
+  | rhci_intGe n 2047 = case rhci_commitWrite pb b of () -> rhci_shove pb b 0 (c:cs)
+  | otherwise = case rhci_bufPush b c of () -> rhci_shove pb b (rhci_intAdd n 1) cs
 
 getArgs :: IO [String]
 getArgs = IO (\w -> case rhci_getArgs w of a -> a `seq` IORes a)
@@ -2711,6 +2864,11 @@ instance Read Double where
   readListPrec = readListPrecDefault
   readList = readListDefault
 
+instance (Integral a, Read a) => Read (Ratio a) where
+  readPrec = parens (prec 7 (step readPrec >>= \x -> rhci_expectP (Symbol "%") >> step readPrec >>= \y -> return (x % y)))
+  readListPrec = readListPrecDefault
+  readList = readListDefault
+
 instance Read () where
   readPrec = parens (rhci_paren (return ()))
   readListPrec = readListPrecDefault
@@ -2778,3 +2936,1155 @@ readIO s = case [x | (x, t) <- reads s, (a, b) <- lex t, null a, null b] of
 
 readLn :: Read a => IO a
 readLn = getLine >>= readIO
+
+-- ---- Alternative, MonadPlus and the rest of Control.Monad ---------------------------
+
+class Applicative f => Alternative f where
+  empty :: f a
+  (<|>) :: f a -> f a -> f a
+  some :: f a -> f [a]
+  many :: f a -> f [a]
+  some v = some_v
+    where
+      many_v = some_v <|> pure []
+      some_v = liftA2 (:) v many_v
+  many v = many_v
+    where
+      many_v = some_v <|> pure []
+      some_v = liftA2 (:) v many_v
+
+instance Alternative Maybe where
+  empty = Nothing
+  Nothing <|> r = r
+  l <|> _ = l
+
+instance Alternative [] where
+  empty = []
+  (<|>) = (++)
+
+instance Alternative ReadP where
+  empty = rhci_pfailP
+  (<|>) = rhci_plusP
+
+instance Alternative ReadPrec where
+  empty = pfail
+  (<|>) = (+++)
+
+class (Alternative m, Monad m) => MonadPlus m where
+  mzero :: m a
+  mplus :: m a -> m a -> m a
+  mzero = empty
+  mplus = (<|>)
+
+instance MonadPlus Maybe
+instance MonadPlus []
+instance MonadPlus ReadP
+instance MonadPlus ReadPrec
+
+guard :: Alternative f => Bool -> f ()
+guard True = pure ()
+guard False = empty
+
+asum :: (Foldable t, Alternative f) => t (f a) -> f a
+asum = foldr (<|>) empty
+
+msum :: (Foldable t, MonadPlus m) => t (m a) -> m a
+msum = asum
+
+mfilter :: MonadPlus m => (a -> Bool) -> m a -> m a
+mfilter p ma = do
+  a <- ma
+  if p a then return a else mzero
+
+optional :: Alternative f => f a -> f (Maybe a)
+optional v = Just <$> v <|> pure Nothing
+
+forever :: Applicative f => f a -> f b
+forever a = let a' = a *> a' in a'
+
+foldM_ :: (Foldable t, Monad m) => (b -> a -> m b) -> b -> t a -> m ()
+foldM_ f a xs = foldM f a xs >> return ()
+
+foldrM :: (Foldable t, Monad m) => (a -> b -> m b) -> b -> t a -> m b
+foldrM f z0 xs = foldl c return xs z0
+  where c k x z = f x z >>= k
+
+foldlM :: (Foldable t, Monad m) => (b -> a -> m b) -> b -> t a -> m b
+foldlM f z0 xs = foldr c return xs z0
+  where c x k z = f z x >>= k
+
+for_ :: (Foldable t, Applicative f) => t a -> (a -> f b) -> f ()
+for_ = flip traverse_
+
+liftA :: Applicative f => (a -> b) -> f a -> f b
+liftA f a = pure f <*> a
+
+liftA3 :: Applicative f => (a -> b -> c -> d) -> f a -> f b -> f c -> f d
+liftA3 f a b c = liftA2 f a b <*> c
+
+liftM3 :: Monad m => (a1 -> a2 -> a3 -> r) -> m a1 -> m a2 -> m a3 -> m r
+liftM3 f m1 m2 m3 = do { x1 <- m1; x2 <- m2; x3 <- m3; return (f x1 x2 x3) }
+
+liftM4 :: Monad m => (a1 -> a2 -> a3 -> a4 -> r) -> m a1 -> m a2 -> m a3 -> m a4 -> m r
+liftM4 f m1 m2 m3 m4 = do { x1 <- m1; x2 <- m2; x3 <- m3; x4 <- m4; return (f x1 x2 x3 x4) }
+
+liftM5 :: Monad m => (a1 -> a2 -> a3 -> a4 -> a5 -> r) -> m a1 -> m a2 -> m a3 -> m a4 -> m a5 -> m r
+liftM5 f m1 m2 m3 m4 m5 = do { x1 <- m1; x2 <- m2; x3 <- m3; x4 <- m4; x5 <- m5; return (f x1 x2 x3 x4 x5) }
+
+mapAndUnzipM :: Applicative m => (a -> m (b, c)) -> [a] -> m ([b], [c])
+mapAndUnzipM f xs = unzip <$> traverse f xs
+
+(<$!>) :: Monad m => (a -> b) -> m a -> m b
+f <$!> m = do
+  x <- m
+  let z = f x
+  z `seq` return z
+
+(<**>) :: Applicative f => f a -> f (a -> b) -> f b
+(<**>) = liftA2 (\a f -> f a)
+
+-- mapAccumL/R (Data.Traversable's, which Data.List exports): base's state
+-- applicatives, so they stay as lazy as GHC's.
+newtype StateL s a = StateL (s -> (s, a))
+newtype StateR s a = StateR (s -> (s, a))
+
+rhci_runStateL :: StateL s a -> s -> (s, a)
+rhci_runStateL (StateL f) = f
+
+rhci_runStateR :: StateR s a -> s -> (s, a)
+rhci_runStateR (StateR f) = f
+
+instance Functor (StateL s) where
+  fmap f (StateL k) = StateL (\s -> let (s', v) = k s in (s', f v))
+
+instance Applicative (StateL s) where
+  pure x = StateL (\s -> (s, x))
+  StateL kf <*> StateL kv = StateL (\s -> let (s', f) = kf s
+                                              (s'', v) = kv s'
+                                          in (s'', f v))
+  liftA2 f (StateL kx) (StateL ky) = StateL (\s -> let (s', x) = kx s
+                                                       (s'', y) = ky s'
+                                                   in (s'', f x y))
+
+instance Functor (StateR s) where
+  fmap f (StateR k) = StateR (\s -> let (s', v) = k s in (s', f v))
+
+instance Applicative (StateR s) where
+  pure x = StateR (\s -> (s, x))
+  StateR kf <*> StateR kv = StateR (\s -> let (s', v) = kv s
+                                              (s'', f) = kf s'
+                                          in (s'', f v))
+  liftA2 f (StateR kx) (StateR ky) = StateR (\s -> let (s', y) = ky s
+                                                       (s'', x) = kx s'
+                                                   in (s'', f x y))
+
+mapAccumL :: Traversable t => (s -> a -> (s, b)) -> s -> t a -> (s, t b)
+mapAccumL f s t = rhci_runStateL (traverse (\a -> StateL (\s' -> f s' a)) t) s
+
+mapAccumR :: Traversable t => (s -> a -> (s, b)) -> s -> t a -> (s, t b)
+mapAccumR f s t = rhci_runStateR (traverse (\a -> StateR (\s' -> f s' a)) t) s
+
+-- ---- the rest of Data.List -------------------------------------------------------
+
+singleton :: a -> [a]
+singleton x = [x]
+
+foldl1' :: (a -> a -> a) -> [a] -> a
+foldl1' f (x:xs) = foldl' f x xs
+foldl1' _ [] = errorWithoutStackTrace "Prelude.foldl1': empty list"
+
+deleteFirstsBy :: (a -> a -> Bool) -> [a] -> [a] -> [a]
+deleteFirstsBy eq = foldl (flip (deleteBy eq))
+
+genericTake :: Integral i => i -> [a] -> [a]
+genericTake n _ | n <= 0 = []
+genericTake _ [] = []
+genericTake n (x:xs) = x : genericTake (n - 1) xs
+
+genericDrop :: Integral i => i -> [a] -> [a]
+genericDrop n xs | n <= 0 = xs
+genericDrop _ [] = []
+genericDrop n (_:xs) = genericDrop (n - 1) xs
+
+genericSplitAt :: Integral i => i -> [a] -> ([a], [a])
+genericSplitAt n xs | n <= 0 = ([], xs)
+genericSplitAt _ [] = ([], [])
+genericSplitAt n (x:xs) = (x : xs', xs'')
+  where (xs', xs'') = genericSplitAt (n - 1) xs
+
+genericIndex :: Integral i => [a] -> i -> a
+genericIndex (x:_) 0 = x
+genericIndex (_:xs) n
+  | n > 0 = genericIndex xs (n - 1)
+  | otherwise = errorWithoutStackTrace "List.genericIndex: negative argument."
+genericIndex _ _ = errorWithoutStackTrace "List.genericIndex: index too large."
+
+genericReplicate :: Integral i => i -> a -> [a]
+genericReplicate n x = genericTake n (repeat x)
+
+zip5 :: [a] -> [b] -> [c] -> [d] -> [e] -> [(a, b, c, d, e)]
+zip5 = zipWith5 (,,,,)
+
+zip6 :: [a] -> [b] -> [c] -> [d] -> [e] -> [f] -> [(a, b, c, d, e, f)]
+zip6 = zipWith6 (,,,,,)
+
+zip7 :: [a] -> [b] -> [c] -> [d] -> [e] -> [f] -> [g] -> [(a, b, c, d, e, f, g)]
+zip7 = zipWith7 (,,,,,,)
+
+zipWith4 :: (a -> b -> c -> d -> e) -> [a] -> [b] -> [c] -> [d] -> [e]
+zipWith4 z (a:as) (b:bs) (c:cs) (d:ds) = z a b c d : zipWith4 z as bs cs ds
+zipWith4 _ _ _ _ _ = []
+
+zipWith5 :: (a -> b -> c -> d -> e -> f) -> [a] -> [b] -> [c] -> [d] -> [e] -> [f]
+zipWith5 z (a:as) (b:bs) (c:cs) (d:ds) (e:es) = z a b c d e : zipWith5 z as bs cs ds es
+zipWith5 _ _ _ _ _ _ = []
+
+zipWith6 :: (a -> b -> c -> d -> e -> f -> g) -> [a] -> [b] -> [c] -> [d] -> [e] -> [f] -> [g]
+zipWith6 z (a:as) (b:bs) (c:cs) (d:ds) (e:es) (f:fs) = z a b c d e f : zipWith6 z as bs cs ds es fs
+zipWith6 _ _ _ _ _ _ _ = []
+
+zipWith7 :: (a -> b -> c -> d -> e -> f -> g -> h) -> [a] -> [b] -> [c] -> [d] -> [e] -> [f] -> [g] -> [h]
+zipWith7 z (a:as) (b:bs) (c:cs) (d:ds) (e:es) (f:fs) (g:gs) = z a b c d e f g : zipWith7 z as bs cs ds es fs gs
+zipWith7 _ _ _ _ _ _ _ _ = []
+
+unzip4 :: [(a, b, c, d)] -> ([a], [b], [c], [d])
+unzip4 = rhci_foldr (\(a, b, c, d) ~(as, bs, cs, ds) -> (a : as, b : bs, c : cs, d : ds)) ([], [], [], [])
+
+unzip5 :: [(a, b, c, d, e)] -> ([a], [b], [c], [d], [e])
+unzip5 = rhci_foldr (\(a, b, c, d, e) ~(as, bs, cs, ds, es) -> (a : as, b : bs, c : cs, d : ds, e : es))
+                    ([], [], [], [], [])
+
+unzip6 :: [(a, b, c, d, e, f)] -> ([a], [b], [c], [d], [e], [f])
+unzip6 = rhci_foldr (\(a, b, c, d, e, f) ~(as, bs, cs, ds, es, fs) ->
+                       (a : as, b : bs, c : cs, d : ds, e : es, f : fs)) ([], [], [], [], [], [])
+
+unzip7 :: [(a, b, c, d, e, f, g)] -> ([a], [b], [c], [d], [e], [f], [g])
+unzip7 = rhci_foldr (\(a, b, c, d, e, f, g) ~(as, bs, cs, ds, es, fs, gs) ->
+                       (a : as, b : bs, c : cs, d : ds, e : es, f : fs, g : gs)) ([], [], [], [], [], [], [])
+
+-- ---- Data.Bits (from base) -------------------------------------------------------------
+
+foreign import prim "intAnd" rhci_intAnd :: Int -> Int -> Int
+foreign import prim "intOr" rhci_intOr :: Int -> Int -> Int
+foreign import prim "intXor" rhci_intXor :: Int -> Int -> Int
+foreign import prim "intComplement" rhci_intComplement :: Int -> Int
+foreign import prim "intShiftL" rhci_intShiftL :: Int -> Int -> Int
+foreign import prim "intShiftRA" rhci_intShiftRA :: Int -> Int -> Int
+foreign import prim "intShiftRL" rhci_intShiftRL :: Int -> Int -> Int
+foreign import prim "intPopCount" rhci_intPopCount :: Int -> Int
+foreign import prim "intClz" rhci_intClz :: Int -> Int
+foreign import prim "intCtz" rhci_intCtz :: Int -> Int
+foreign import prim "integerAnd" rhci_integerAnd :: Integer -> Integer -> Integer
+foreign import prim "integerOr" rhci_integerOr :: Integer -> Integer -> Integer
+foreign import prim "integerXor" rhci_integerXor :: Integer -> Integer -> Integer
+foreign import prim "integerComplement" rhci_integerComplement :: Integer -> Integer
+foreign import prim "integerShiftL" rhci_integerShiftL :: Integer -> Int -> Integer
+foreign import prim "integerShiftR" rhci_integerShiftR :: Integer -> Int -> Integer
+foreign import prim "integerPopCount" rhci_integerPopCount :: Integer -> Int
+foreign import prim "integerTestBit" rhci_integerTestBit :: Integer -> Int -> Bool
+
+class Eq a => Bits a where
+  (.&.) :: a -> a -> a
+  (.|.) :: a -> a -> a
+  xor :: a -> a -> a
+  complement :: a -> a
+  shift :: a -> Int -> a
+  rotate :: a -> Int -> a
+  zeroBits :: a
+  bit :: Int -> a
+  setBit :: a -> Int -> a
+  clearBit :: a -> Int -> a
+  complementBit :: a -> Int -> a
+  testBit :: a -> Int -> Bool
+  bitSizeMaybe :: a -> Maybe Int
+  bitSize :: a -> Int
+  isSigned :: a -> Bool
+  shiftL :: a -> Int -> a
+  unsafeShiftL :: a -> Int -> a
+  shiftR :: a -> Int -> a
+  unsafeShiftR :: a -> Int -> a
+  rotateL :: a -> Int -> a
+  rotateR :: a -> Int -> a
+  popCount :: a -> Int
+  x `shift` i | i < 0 = x `shiftR` (negate i)
+              | i > 0 = x `shiftL` i
+              | otherwise = x
+  x `rotate` i | i < 0 = x `rotateR` (negate i)
+               | i > 0 = x `rotateL` i
+               | otherwise = x
+  zeroBits = clearBit (bit 0) 0
+  bitSize b = fromMaybe (errorWithoutStackTrace "bitSize is undefined") (bitSizeMaybe b)
+  x `setBit` i = x .|. bit i
+  x `clearBit` i = x .&. complement (bit i)
+  x `complementBit` i = x `xor` bit i
+  x `shiftL` i = x `shift` i
+  unsafeShiftL = shiftL
+  x `shiftR` i = x `shift` (negate i)
+  unsafeShiftR = shiftR
+  x `rotateL` i = x `rotate` i
+  x `rotateR` i = x `rotate` (negate i)
+
+class Bits b => FiniteBits b where
+  finiteBitSize :: b -> Int
+  countLeadingZeros :: b -> Int
+  countTrailingZeros :: b -> Int
+  countLeadingZeros x = (w - 1) - go (w - 1)
+    where
+      go i | i < 0 = i
+           | testBit x i = i
+           | otherwise = go (i - 1)
+      w = finiteBitSize x
+  countTrailingZeros x = go 0
+    where
+      go i | i >= w = i
+           | testBit x i = i
+           | otherwise = go (i + 1)
+      w = finiteBitSize x
+
+bitDefault :: (Bits a, Num a) => Int -> a
+bitDefault = \i -> 1 `shiftL` i
+
+testBitDefault :: (Bits a, Num a) => a -> Int -> Bool
+testBitDefault = \x i -> (x .&. bit i) /= 0
+
+popCountDefault :: (Bits a, Num a) => a -> Int
+popCountDefault = go 0
+  where
+    go c 0 = c
+    go c w = c `seq` go (c + 1) (w .&. (w - 1))
+
+toIntegralSized :: (Integral a, Integral b, Bits a, Bits b) => a -> Maybe b
+toIntegralSized x = let y = fromIntegral x in if toInteger y == toInteger x then Just y else Nothing
+
+oneBits :: Bits a => a
+oneBits = complement zeroBits
+
+(.^.) :: Bits a => a -> a -> a
+(.^.) = xor
+
+(.>>.) :: Bits a => a -> Int -> a
+(.>>.) = shiftR
+
+(.<<.) :: Bits a => a -> Int -> a
+(.<<.) = shiftL
+
+(!>>.) :: Bits a => a -> Int -> a
+(!>>.) = unsafeShiftR
+
+(!<<.) :: Bits a => a -> Int -> a
+(!<<.) = unsafeShiftL
+
+-- unsafeShift with a count outside 0..63 is undefined in GHC (the result
+-- depends on the machine): rhci refuses it.
+rhci_unsafeShiftCount :: Int -> Int
+rhci_unsafeShiftCount i
+  | i >= 0 && i < 64 = i
+  | otherwise = errorWithoutStackTrace "rhci: unsafeShiftL/unsafeShiftR by a count outside 0..63 is undefined in GHC"
+
+instance Bits Int where
+  (.&.) = rhci_intAnd
+  (.|.) = rhci_intOr
+  xor = rhci_intXor
+  complement = rhci_intComplement
+  zeroBits = 0
+  x `shift` i | i >= 0 = rhci_intShiftL x i
+              | otherwise = rhci_intShiftRA x (negate i)
+  x `shiftL` i | i >= 0 = rhci_intShiftL x i
+               | otherwise = overflowError
+  x `unsafeShiftL` i = rhci_intShiftL x (rhci_unsafeShiftCount i)
+  x `shiftR` i | i >= 0 = rhci_intShiftRA x i
+               | otherwise = overflowError
+  x `unsafeShiftR` i = rhci_intShiftRA x (rhci_unsafeShiftCount i)
+  x `rotate` i = let r = i .&. 63
+                 in if r == 0 then x else rhci_intShiftL x r .|. rhci_intShiftRL x (64 - r)
+  bit = bitDefault
+  testBit = testBitDefault
+  bitSizeMaybe _ = Just 64
+  bitSize _ = 64
+  isSigned _ = True
+  popCount = rhci_intPopCount
+
+instance FiniteBits Int where
+  finiteBitSize _ = 64
+  countLeadingZeros = rhci_intClz
+  countTrailingZeros = rhci_intCtz
+
+instance Bits Integer where
+  (.&.) = rhci_integerAnd
+  (.|.) = rhci_integerOr
+  xor = rhci_integerXor
+  complement = rhci_integerComplement
+  zeroBits = 0
+  x `shift` i | i >= 0 = rhci_integerShiftL x i
+              | otherwise = rhci_integerShiftR x (negate i)
+  x `shiftL` i | i >= 0 = rhci_integerShiftL x i
+               | otherwise = overflowError
+  x `unsafeShiftL` i = rhci_integerShiftL x (rhci_unsafeShiftCount i)
+  x `shiftR` i | i >= 0 = rhci_integerShiftR x i
+               | otherwise = overflowError
+  x `unsafeShiftR` i = rhci_integerShiftR x (rhci_unsafeShiftCount i)
+  x `rotate` i = shift x i
+  bit i | i >= 0 = rhci_integerShiftL 1 i
+        | otherwise = overflowError
+  testBit x i = i >= 0 && rhci_integerTestBit x i
+  bitSizeMaybe _ = Nothing
+  bitSize _ = errorWithoutStackTrace "Data.Bits.bitSize(Integer)"
+  isSigned _ = True
+  popCount = rhci_integerPopCount
+
+instance Bits Bool where
+  (.&.) = (&&)
+  (.|.) = (||)
+  xor = (/=)
+  complement = not
+  shift x 0 = x
+  shift _ _ = False
+  rotate x _ = x
+  bit 0 = True
+  bit _ = False
+  testBit x 0 = x
+  testBit _ _ = False
+  bitSizeMaybe _ = Just 1
+  bitSize _ = 1
+  isSigned _ = False
+  popCount False = 0
+  popCount True = 1
+
+instance FiniteBits Bool where
+  finiteBitSize _ = 1
+  countTrailingZeros x = if x then 0 else 1
+  countLeadingZeros x = if x then 0 else 1
+
+-- ---- Data.IORef ----------------------------------------------------------------------
+
+-- The reference itself is a machine object; the box keeps the value lazy.
+data IORef a
+data RhciBox a = RhciBox a
+
+foreign import prim "newRef" rhci_newRef :: () -> RhciBox a -> IORef a
+foreign import prim "readRef" rhci_readRef :: () -> IORef a -> RhciBox a
+foreign import prim "writeRef" rhci_writeRef :: IORef a -> RhciBox a -> ()
+foreign import prim "refEq" rhci_refEq :: IORef a -> IORef a -> Bool
+
+instance Eq (IORef a) where
+  a == b = rhci_refEq a b
+
+newIORef :: a -> IO (IORef a)
+newIORef v = IO (\w -> case rhci_newRef w (RhciBox v) of r -> r `seq` IORes r)
+
+readIORef :: IORef a -> IO a
+readIORef r = IO (\w -> case rhci_readRef w r of RhciBox v -> IORes v)
+
+writeIORef :: IORef a -> a -> IO ()
+writeIORef r v = IO (\_ -> case rhci_writeRef r (RhciBox v) of () -> IORes ())
+
+modifyIORef :: IORef a -> (a -> a) -> IO ()
+modifyIORef ref f = readIORef ref >>= writeIORef ref . f
+
+modifyIORef' :: IORef a -> (a -> a) -> IO ()
+modifyIORef' ref f = do
+  x <- readIORef ref
+  let x' = f x
+  x' `seq` writeIORef ref x'
+
+atomicModifyIORef :: IORef a -> (a -> (a, b)) -> IO b
+atomicModifyIORef ref f = do
+  x <- readIORef ref
+  let r = f x
+  writeIORef ref (fst r)
+  return (snd r)
+
+atomicModifyIORef' :: IORef a -> (a -> (a, b)) -> IO b
+atomicModifyIORef' ref f = do
+  x <- readIORef ref
+  case f x of
+    (a, b) -> a `seq` b `seq` (writeIORef ref a >> return b)
+
+atomicWriteIORef :: IORef a -> a -> IO ()
+atomicWriteIORef = writeIORef
+
+-- ---- Numeric (from base: Numeric, GHC.Float) ----------------------------------------
+
+showSigned :: Real a => (a -> ShowS) -> Int -> a -> ShowS
+showSigned showPos p x
+  | x < 0 = showParen (p > 6) (showChar '-' . showPos (negate x))
+  | otherwise = showPos x
+
+showInt :: Integral a => a -> ShowS
+showInt n0 cs0
+  | n0 < 0 = errorWithoutStackTrace "Numeric.showInt: can't show negative numbers"
+  | otherwise = go n0 cs0
+  where
+    go n cs
+      | n < 10 = chr (ord '0' + fromIntegral n) : cs
+      | otherwise = case n `quotRem` 10 of (q, r) -> go q (chr (ord '0' + fromIntegral r) : cs)
+
+showIntAtBase :: Integral a => a -> (Int -> Char) -> a -> ShowS
+showIntAtBase base toChr n0 r0
+  | base <= 1 = errorWithoutStackTrace ("Numeric.showIntAtBase: applied to unsupported base " ++ show (toInteger base))
+  | n0 < 0 = errorWithoutStackTrace ("Numeric.showIntAtBase: applied to negative number " ++ show (toInteger n0))
+  | otherwise = showIt (quotRem n0 base) r0
+  where
+    showIt (n, d) r = seq c $ case n of
+        0 -> r'
+        _ -> showIt (quotRem n base) r'
+      where
+        c = toChr (fromIntegral d)
+        r' = c : r
+
+showHex :: Integral a => a -> ShowS
+showHex = showIntAtBase 16 intToDigit
+
+showOct :: Integral a => a -> ShowS
+showOct = showIntAtBase 8 intToDigit
+
+showBin :: Integral a => a -> ShowS
+showBin = showIntAtBase 2 intToDigit
+
+data RhciFFFormat = RhciFFExponent | RhciFFFixed | RhciFFGeneric
+
+showEFloat :: RealFloat a => Maybe Int -> a -> ShowS
+showEFloat d x = showString (rhci_formatRealFloatAlt RhciFFExponent d False x)
+
+showFFloat :: RealFloat a => Maybe Int -> a -> ShowS
+showFFloat d x = showString (rhci_formatRealFloatAlt RhciFFFixed d False x)
+
+showGFloat :: RealFloat a => Maybe Int -> a -> ShowS
+showGFloat d x = showString (rhci_formatRealFloatAlt RhciFFGeneric d False x)
+
+showFFloatAlt :: RealFloat a => Maybe Int -> a -> ShowS
+showFFloatAlt d x = showString (rhci_formatRealFloatAlt RhciFFFixed d True x)
+
+showGFloatAlt :: RealFloat a => Maybe Int -> a -> ShowS
+showGFloatAlt d x = showString (rhci_formatRealFloatAlt RhciFFGeneric d True x)
+
+showFloat :: RealFloat a => a -> ShowS
+showFloat x = showString (rhci_formatRealFloatAlt RhciFFGeneric Nothing False x)
+
+rhci_formatRealFloatAlt :: RealFloat a => RhciFFFormat -> Maybe Int -> Bool -> a -> String
+rhci_formatRealFloatAlt fmt decs alt x
+  | isNaN x = "NaN"
+  | isInfinite x = if x < 0 then "-Infinity" else "Infinity"
+  | x < 0 || isNegativeZero x = '-' : doFmt fmt (floatToDigits (toInteger base) (negate x))
+  | otherwise = doFmt fmt (floatToDigits (toInteger base) x)
+  where
+    base = 10
+
+    doFmt format (is, e) =
+      let ds = map intToDigit is in
+      case format of
+        RhciFFGeneric ->
+          doFmt (if e < 0 || e > 7 then RhciFFExponent else RhciFFFixed) (is, e)
+        RhciFFExponent ->
+          case decs of
+            Nothing ->
+              let show_e' = show (e - 1) in
+              case ds of
+                "0" -> "0.0e0"
+                [d] -> d : ".0e" ++ show_e'
+                (d:ds') -> d : '.' : ds' ++ "e" ++ show_e'
+                [] -> errorWithoutStackTrace "formatRealFloat/doFmt/FFExponent: []"
+            Just d | d <= 0 ->
+              case is of
+                [0] -> "0e0"
+                _ ->
+                  let (ei, is') = rhci_roundTo base 1 is
+                      n:_ = map intToDigit (if ei > 0 then init is' else is')
+                  in n : 'e' : show (e - 1 + ei)
+            Just dec ->
+              let dec' = max dec 1 in
+              case is of
+                [0] -> '0' : '.' : take dec' (repeat '0') ++ "e0"
+                _ ->
+                  let (ei, is') = rhci_roundTo base (dec' + 1) is
+                      (d:ds') = map intToDigit (if ei > 0 then init is' else is')
+                  in d : '.' : ds' ++ 'e' : show (e - 1 + ei)
+        RhciFFFixed ->
+          let mk0 ls = case ls of { "" -> "0" ; _ -> ls } in
+          case decs of
+            Nothing
+              | e <= 0 -> "0." ++ replicate (negate e) '0' ++ ds
+              | otherwise ->
+                  let f 0 s rs = mk0 (reverse s) ++ '.' : mk0 rs
+                      f n s "" = f (n - 1) ('0' : s) ""
+                      f n s (r:rs) = f (n - 1) (r : s) rs
+                  in f e "" ds
+            Just dec ->
+              let dec' = max dec 0 in
+              if e >= 0
+                then
+                  let (ei, is') = rhci_roundTo base (dec' + e) is
+                      (ls, rs) = splitAt (e + ei) (map intToDigit is')
+                  in mk0 ls ++ (if null rs && not alt then "" else '.' : rs)
+                else
+                  let (ei, is') = rhci_roundTo base dec' (replicate (negate e) 0 ++ is)
+                      d:ds' = map intToDigit (if ei > 0 then is' else 0 : is')
+                  in d : (if null ds' && not alt then "" else '.' : ds')
+
+rhci_roundTo :: Int -> Int -> [Int] -> (Int, [Int])
+rhci_roundTo base d is =
+  case f d True is of
+    x@(0, _) -> x
+    (1, xs) -> (1, 1 : xs)
+    _ -> errorWithoutStackTrace "roundTo: bad Value"
+  where
+    b2 = base `quot` 2
+    f n _ [] = (0, replicate n 0)
+    f 0 e (x:xs)
+      | x == b2 && e && all (== 0) xs = (0, [])
+      | otherwise = (if x >= b2 then 1 else 0, [])
+    f n _ (i:xs)
+      | i' == base = (1, 0 : ds)
+      | otherwise = (0, i' : ds)
+      where
+        (c, ds) = f (n - 1) (even i) xs
+        i' = c + i
+
+-- GHC.Float's floatToDigits. Where GHC estimates the exponent k with Float
+-- logarithms (bases other than 10), this starts below the estimate and
+-- counts up, which gives the exact k.
+floatToDigits :: RealFloat a => Integer -> a -> ([Int], Int)
+floatToDigits _ 0 = ([0], 0)
+floatToDigits base x =
+  let
+    (f0, e0) = decodeFloat x
+    (minExp0, _) = floatRange x
+    p = floatDigits x
+    b = floatRadix x
+    minExp = minExp0 - p
+    (f, e) =
+      let n = minExp - e0 in
+      if n > 0 then (f0 `quot` (b ^ n), e0 + n) else (f0, e0)
+    (r, s, mUp, mDn) =
+      if e >= 0
+        then
+          let be = b ^ e in
+          if f == b ^ (p - 1)
+            then (f * be * b * 2, 2 * b, be * b, be)
+            else (f * be * 2, 2, be, be)
+        else
+          if e > minExp && f == b ^ (p - 1)
+            then (f * b * 2, b ^ (negate e + 1) * 2, b, 1)
+            else (f * 2, b ^ negate e * 2, 1, 1)
+    k :: Int
+    k =
+      let
+        k0 :: Int
+        k0 =
+          if b == 2 && base == 10
+            then
+              let lx = p - 1 + e0
+                  k1 = (lx * 8651) `quot` 28738
+              in if lx >= 0 then k1 + 1 else k1
+            else
+              ceiling ((log (fromInteger (f + 1) :: Double) + fromIntegral e * log (fromInteger b))
+                         / log (fromInteger base)) - 2
+        fixup n =
+          if n >= 0
+            then if r + mUp <= base ^ n * s then n else fixup (n + 1)
+            else if base ^ negate n * (r + mUp) <= s then n else fixup (n + 1)
+      in fixup k0
+    gen ds rn sN mUpN mDnN =
+      let
+        (dn, rn') = (rn * base) `quotRem` sN
+        mUpN' = mUpN * base
+        mDnN' = mDnN * base
+      in
+      case (rn' < mDnN', rn' + mUpN' > sN) of
+        (True, False) -> dn : ds
+        (False, True) -> dn + 1 : ds
+        (True, True) -> if rn' * 2 < sN then dn : ds else dn + 1 : ds
+        (False, False) -> gen (dn : ds) rn' sN mUpN' mDnN'
+    rds =
+      if k >= 0
+        then gen [] r (s * base ^ k) mUp mDn
+        else
+          let bk = base ^ negate k in
+          gen [] (r * bk) s (mUp * bk) (mDn * bk)
+  in
+  (map fromIntegral (reverse rds), k)
+
+showHFloat :: RealFloat a => a -> ShowS
+showHFloat = showString . fmt
+  where
+    fmt x
+      | isNaN x = "NaN"
+      | isInfinite x = (if x < 0 then "-" else "") ++ "Infinity"
+      | x < 0 || isNegativeZero x = '-' : cvt (negate x)
+      | otherwise = cvt x
+    cvt x
+      | x == 0 = "0x0p+0"
+      | otherwise =
+          case floatToDigits 2 x of
+            r@([], _) -> error $ "Impossible happened: showHFloat: " ++ show r
+            (d:ds, e) -> "0x" ++ show d ++ frac ds ++ "p" ++ show (e - 1)
+    frac digits
+      | allZ digits = ""
+      | otherwise = "." ++ hex digits
+      where
+        hex ds =
+          case ds of
+            [] -> ""
+            [a] -> hexDigit a 0 0 0 ""
+            [a, b] -> hexDigit a b 0 0 ""
+            [a, b, c] -> hexDigit a b c 0 ""
+            a : b : c : d : r -> hexDigit a b c d (hex r)
+    hexDigit a b c d = showHex (8 * a + 4 * b + 2 * c + d)
+    allZ xs = case xs of
+      x : more -> x == 0 && allZ more
+      [] -> True
+
+readInt :: Num a => a -> (Char -> Bool) -> (Char -> Int) -> ReadS a
+readInt base isDig valDigit = rhci_readP_to_S (rhci_readIntP base isDig valDigit)
+
+rhci_readIntP :: Num a => a -> (Char -> Bool) -> (Char -> Int) -> ReadP a
+rhci_readIntP base isDig valDigit =
+  rhci_munch1 isDig >>= \s -> return (foldl (\n d -> n * base + fromIntegral d) 0 (map valDigit s))
+
+rhci_readIntP' :: (Eq a, Num a) => Int -> ReadP a
+rhci_readIntP' base = rhci_readIntP (fromIntegral base) isDig valDigit
+  where
+    isDig c = maybe False (const True) (rhci_valDigit base c)
+    valDigit c = maybe 0 id (rhci_valDigit base c)
+
+rhci_valDigit :: Int -> Char -> Maybe Int
+rhci_valDigit 2 c
+  | c == '0' || c == '1' = Just (ord c - ord '0')
+  | otherwise = Nothing
+rhci_valDigit base c = rhci_valDig base c
+
+readBin :: (Eq a, Num a) => ReadS a
+readBin = rhci_readP_to_S (rhci_readIntP' 2)
+
+readOct :: (Eq a, Num a) => ReadS a
+readOct = rhci_readP_to_S (rhci_readIntP' 8)
+
+readDec :: (Eq a, Num a) => ReadS a
+readDec = rhci_readP_to_S (rhci_readIntP' 10)
+
+readHex :: (Eq a, Num a) => ReadS a
+readHex = rhci_readP_to_S (rhci_readIntP' 16)
+
+readSigned :: Real a => ReadS a -> ReadS a
+readSigned readPos = readParen False read'
+  where
+    read' r = read'' r ++ [(negate x, t) | ("-", s) <- lex r, (x, t) <- read'' s]
+    read'' r = [(n, s) | (str, s) <- lex r, (n, "") <- readPos str]
+
+lexDigits :: ReadS String
+lexDigits = rhci_readP_to_S (rhci_munch1 isDigit)
+
+-- ---- Text.Printf (from base) -----------------------------------------------------------
+
+printf :: PrintfType r => String -> r
+printf fmts = spr fmts []
+
+hPrintf :: HPrintfType r => Handle -> String -> r
+hPrintf hdl fmts = hspr hdl fmts []
+
+class PrintfType t where
+  spr :: String -> [UPrintf] -> t
+
+class HPrintfType t where
+  hspr :: Handle -> String -> [UPrintf] -> t
+
+instance IsChar c => PrintfType [c] where
+  spr fmts args = map fromChar (uprintf fmts (reverse args))
+
+instance (a ~ ()) => PrintfType (IO a) where
+  spr fmts args = putStr $ map fromChar $ uprintf fmts $ reverse args
+
+instance (a ~ ()) => HPrintfType (IO a) where
+  hspr hdl fmts args = hPutStr hdl (uprintf fmts (reverse args))
+
+instance (PrintfArg a, PrintfType r) => PrintfType (a -> r) where
+  spr fmts args = \a -> spr fmts ((parseFormat a, formatArg a) : args)
+
+instance (PrintfArg a, HPrintfType r) => HPrintfType (a -> r) where
+  hspr hdl fmts args = \a -> hspr hdl fmts ((parseFormat a, formatArg a) : args)
+
+class PrintfArg a where
+  formatArg :: a -> FieldFormatter
+  parseFormat :: a -> ModifierParser
+  parseFormat _ (c : cs) = FormatParse "" c cs
+  parseFormat _ "" = errorShortFormat
+
+instance PrintfArg Char where
+  formatArg = formatChar
+  parseFormat _ cf = parseIntFormat (undefined :: Int) cf
+
+instance IsChar c => PrintfArg [c] where
+  formatArg = formatString
+
+instance PrintfArg Int where
+  formatArg = formatInt
+  parseFormat = parseIntFormat
+
+instance PrintfArg Integer where
+  formatArg = formatInteger
+  parseFormat = parseIntFormat
+
+instance PrintfArg Double where
+  formatArg = formatRealFloat
+
+class IsChar c where
+  toChar :: c -> Char
+  fromChar :: Char -> c
+
+instance IsChar Char where
+  toChar c = c
+  fromChar c = c
+
+data FormatAdjustment = LeftAdjust | ZeroPad
+
+data FormatSign = SignPlus | SignSpace
+
+data FieldFormat = FieldFormat {
+  fmtWidth :: Maybe Int,
+  fmtPrecision :: Maybe Int,
+  fmtAdjust :: Maybe FormatAdjustment,
+  fmtSign :: Maybe FormatSign,
+  fmtAlternate :: Bool,
+  fmtModifiers :: String,
+  fmtChar :: Char
+  }
+
+data FormatParse = FormatParse {
+  fpModifiers :: String,
+  fpChar :: Char,
+  fpRest :: String
+  }
+
+rhci_intModifierMap :: [(String, Integer)]
+rhci_intModifierMap = [
+  ("hh", negate 128),
+  ("h", negate 32768),
+  ("l", negate 2147483648),
+  ("ll", toInteger (minBound :: Int)),
+  ("L", toInteger (minBound :: Int)) ]
+
+parseIntFormat :: a -> String -> FormatParse
+parseIntFormat _ s =
+  case foldr matchPrefix Nothing rhci_intModifierMap of
+    Just m -> m
+    Nothing ->
+      case s of
+        c : cs -> FormatParse "" c cs
+        "" -> errorShortFormat
+  where
+    matchPrefix (p, _) m@(Just (FormatParse p0 _ _))
+      | length p0 >= length p = m
+      | otherwise = case getFormat p of
+          Nothing -> m
+          Just fp -> Just fp
+    matchPrefix (p, _) Nothing = getFormat p
+    getFormat p = stripPrefix p s >>= fp
+      where
+        fp (c : cs) = Just $ FormatParse p c cs
+        fp "" = errorShortFormat
+
+type FieldFormatter = FieldFormat -> ShowS
+
+type ModifierParser = String -> FormatParse
+
+vFmt :: Char -> FieldFormat -> FieldFormat
+vFmt c ufmt@(FieldFormat {fmtChar = 'v'}) = ufmt {fmtChar = c}
+vFmt _ ufmt = ufmt
+
+formatChar :: Char -> FieldFormatter
+formatChar x ufmt = formatIntegral (Just 0) (toInteger $ ord x) $ vFmt 'c' ufmt
+
+formatString :: IsChar a => [a] -> FieldFormatter
+formatString x ufmt =
+  case fmtChar $ vFmt 's' ufmt of
+    's' -> map toChar . (adjust ufmt ("", ts) ++)
+      where
+        ts = map toChar $ trunc $ fmtPrecision ufmt
+          where
+            trunc Nothing = x
+            trunc (Just n) = take n x
+    c -> errorBadFormat c
+
+rhci_fixupMods :: FieldFormat -> Maybe Integer -> Maybe Integer
+rhci_fixupMods ufmt m =
+  let mods = fmtModifiers ufmt in
+  case mods of
+    "" -> m
+    _ -> case lookup mods rhci_intModifierMap of
+      Just m0 -> Just m0
+      Nothing -> perror "unknown format modifier"
+
+formatInt :: (Integral a, Bounded a) => a -> FieldFormatter
+formatInt x ufmt =
+  let lb = toInteger $ minBound `asTypeOf` x
+      m = rhci_fixupMods ufmt (Just lb)
+      ufmt' = case lb of
+        0 -> vFmt 'u' ufmt
+        _ -> ufmt
+  in formatIntegral m (toInteger x) ufmt'
+
+formatInteger :: Integer -> FieldFormatter
+formatInteger x ufmt =
+  let m = rhci_fixupMods ufmt Nothing in
+  formatIntegral m x ufmt
+
+formatIntegral :: Maybe Integer -> Integer -> FieldFormatter
+formatIntegral m x ufmt0 =
+  let prec = fmtPrecision ufmt0 in
+  case fmtChar ufmt of
+    'd' -> (adjustSigned ufmt (fmti prec x) ++)
+    'i' -> (adjustSigned ufmt (fmti prec x) ++)
+    'x' -> (adjust ufmt (fmtu 16 (alt "0x" x) prec m x) ++)
+    'X' -> (adjust ufmt (upcase $ fmtu 16 (alt "0X" x) prec m x) ++)
+    'b' -> (adjust ufmt (fmtu 2 (alt "0b" x) prec m x) ++)
+    'o' -> (adjust ufmt (fmtu 8 (alt "0" x) prec m x) ++)
+    'u' -> (adjust ufmt (fmtu 10 Nothing prec m x) ++)
+    'c' | x >= fromIntegral (ord (minBound :: Char)) &&
+          x <= fromIntegral (ord (maxBound :: Char)) &&
+          fmtPrecision ufmt == Nothing &&
+          fmtModifiers ufmt == "" ->
+            formatString [chr $ fromIntegral x] (ufmt { fmtChar = 's' })
+    'c' -> perror "illegal char conversion"
+    c -> errorBadFormat c
+  where
+    ufmt = vFmt 'd' $ case ufmt0 of
+      FieldFormat { fmtPrecision = Just _, fmtAdjust = Just ZeroPad } ->
+        ufmt0 { fmtAdjust = Nothing }
+      _ -> ufmt0
+    alt _ 0 = Nothing
+    alt p _ = case fmtAlternate ufmt of
+      True -> Just p
+      False -> Nothing
+    upcase (s1, s2) = (s1, map toUpper s2)
+
+formatRealFloat :: RealFloat a => a -> FieldFormatter
+formatRealFloat x ufmt =
+  let c = fmtChar $ vFmt 'g' ufmt
+      prec = fmtPrecision ufmt
+      alt = fmtAlternate ufmt
+  in
+  case c of
+    'e' -> (adjustSigned ufmt (dfmt c prec alt x) ++)
+    'E' -> (adjustSigned ufmt (dfmt c prec alt x) ++)
+    'f' -> (adjustSigned ufmt (dfmt c prec alt x) ++)
+    'F' -> (adjustSigned ufmt (dfmt c prec alt x) ++)
+    'g' -> (adjustSigned ufmt (dfmt c prec alt x) ++)
+    'G' -> (adjustSigned ufmt (dfmt c prec alt x) ++)
+    _ -> errorBadFormat c
+
+type UPrintf = (ModifierParser, FieldFormatter)
+
+uprintf :: String -> [UPrintf] -> String
+uprintf s us = uprintfs s us ""
+
+uprintfs :: String -> [UPrintf] -> ShowS
+uprintfs "" [] = id
+uprintfs "" (_:_) = errorShortFormat
+uprintfs ('%':'%':cs) us = ('%' :) . uprintfs cs us
+uprintfs ('%':_) [] = errorMissingArgument
+uprintfs ('%':cs) us@(_:_) = fmt cs us
+uprintfs (c:cs) us = (c :) . uprintfs cs us
+
+fmt :: String -> [UPrintf] -> ShowS
+fmt cs0 us0 =
+  case getSpecs False False Nothing False cs0 us0 of
+    (_, _, []) -> errorMissingArgument
+    (ufmt, cs, (_, u) : us) -> u ufmt . uprintfs cs us
+
+adjust :: FieldFormat -> (String, String) -> String
+adjust ufmt (pre, str) =
+  let naturalWidth = length pre + length str
+      zero = case fmtAdjust ufmt of
+        Just ZeroPad -> True
+        _ -> False
+      left = case fmtAdjust ufmt of
+        Just LeftAdjust -> True
+        _ -> False
+      fill = case fmtWidth ufmt of
+        Just width | naturalWidth < width ->
+          let fillchar = if zero then '0' else ' ' in
+          replicate (width - naturalWidth) fillchar
+        _ -> ""
+  in
+  if left
+    then pre ++ str ++ fill
+    else if zero
+      then pre ++ fill ++ str
+      else fill ++ pre ++ str
+
+adjustSigned :: FieldFormat -> (String, String) -> String
+adjustSigned ufmt@(FieldFormat {fmtSign = Just SignPlus}) ("", str) = adjust ufmt ("+", str)
+adjustSigned ufmt@(FieldFormat {fmtSign = Just SignSpace}) ("", str) = adjust ufmt (" ", str)
+adjustSigned ufmt ps = adjust ufmt ps
+
+fmti :: Maybe Int -> Integer -> (String, String)
+fmti prec i
+  | i < 0 = ("-", integral_prec prec (show (negate i)))
+  | otherwise = ("", integral_prec prec (show i))
+
+fmtu :: Integer -> Maybe String -> Maybe Int -> Maybe Integer -> Integer -> (String, String)
+fmtu b (Just pre) prec m i =
+  let ("", s) = fmtu b Nothing prec m i in
+  case pre of
+    "0" -> case s of
+      '0' : _ -> ("", s)
+      _ -> (pre, s)
+    _ -> (pre, s)
+fmtu b Nothing prec0 m0 i0 =
+  case fmtu' prec0 m0 i0 of
+    Just s -> ("", s)
+    Nothing -> errorBadArgument
+  where
+    fmtu' :: Maybe Int -> Maybe Integer -> Integer -> Maybe String
+    fmtu' prec (Just m) i | i < 0 = fmtu' prec Nothing (-2 * m + i)
+    fmtu' (Just prec) _ i | i >= 0 = fmap (integral_prec (Just prec)) $ fmtu' Nothing Nothing i
+    fmtu' Nothing _ i | i >= 0 = Just $ showIntAtBase b intToDigit i ""
+    fmtu' _ _ _ = Nothing
+
+integral_prec :: Maybe Int -> String -> String
+integral_prec Nothing integral = integral
+integral_prec (Just 0) "0" = ""
+integral_prec (Just prec) integral = replicate (prec - length integral) '0' ++ integral
+
+stoi :: String -> (Int, String)
+stoi cs =
+  let (as, cs') = span isDigit cs in
+  case as of
+    "" -> (0, cs')
+    _ -> (read as, cs')
+
+adjustment :: Maybe Int -> Maybe a -> Bool -> Bool -> Maybe FormatAdjustment
+adjustment w p l z =
+  case w of
+    Just n | n < 0 -> adjl p True z
+    _ -> adjl p l z
+  where
+    adjl _ True _ = Just LeftAdjust
+    adjl _ False True = Just ZeroPad
+    adjl _ _ _ = Nothing
+
+getSpecs :: Bool -> Bool -> Maybe FormatSign -> Bool -> String -> [UPrintf] -> (FieldFormat, String, [UPrintf])
+getSpecs _ z s a ('-' : cs0) us = getSpecs True z s a cs0 us
+getSpecs l z _ a ('+' : cs0) us = getSpecs l z (Just SignPlus) a cs0 us
+getSpecs l z s a (' ' : cs0) us = getSpecs l z ss a cs0 us
+  where
+    ss = case s of
+      Just SignPlus -> Just SignPlus
+      _ -> Just SignSpace
+getSpecs l _ s a ('0' : cs0) us = getSpecs l True s a cs0 us
+getSpecs l z s _ ('#' : cs0) us = getSpecs l z s True cs0 us
+getSpecs l z s a ('*' : cs0) us =
+  let (us', n) = getStar us
+      ((p, cs''), us'') = case cs0 of
+        '.':'*':r ->
+          let (us''', p') = getStar us' in ((Just p', r), us''')
+        '.':r ->
+          let (p', r') = stoi r in ((Just p', r'), us')
+        _ ->
+          ((Nothing, cs0), us')
+      FormatParse ms c cs =
+        case us'' of
+          (ufmt, _) : _ -> ufmt cs''
+          [] -> errorMissingArgument
+  in
+  (FieldFormat {
+      fmtWidth = Just (abs n),
+      fmtPrecision = p,
+      fmtAdjust = adjustment (Just n) p l z,
+      fmtSign = s,
+      fmtAlternate = a,
+      fmtModifiers = ms,
+      fmtChar = c}, cs, us'')
+getSpecs l z s a ('.' : cs0) us =
+  let ((p, cs'), us') = case cs0 of
+        '*':cs'' -> let (us'', p') = getStar us in ((p', cs''), us'')
+        _ -> (stoi cs0, us)
+      FormatParse ms c cs =
+        case us' of
+          (ufmt, _) : _ -> ufmt cs'
+          [] -> errorMissingArgument
+  in
+  (FieldFormat {
+      fmtWidth = Nothing,
+      fmtPrecision = Just p,
+      fmtAdjust = adjustment Nothing (Just p) l z,
+      fmtSign = s,
+      fmtAlternate = a,
+      fmtModifiers = ms,
+      fmtChar = c}, cs, us')
+getSpecs l z s a cs0@(c0 : _) us | isDigit c0 =
+  let (n, cs') = stoi cs0
+      ((p, cs''), us') = case cs' of
+        '.' : '*' : r ->
+          let (us'', p') = getStar us in ((Just p', r), us'')
+        '.' : r ->
+          let (p', r') = stoi r in ((Just p', r'), us)
+        _ ->
+          ((Nothing, cs'), us)
+      FormatParse ms c cs =
+        case us' of
+          (ufmt, _) : _ -> ufmt cs''
+          [] -> errorMissingArgument
+  in
+  (FieldFormat {
+      fmtWidth = Just (abs n),
+      fmtPrecision = p,
+      fmtAdjust = adjustment (Just n) p l z,
+      fmtSign = s,
+      fmtAlternate = a,
+      fmtModifiers = ms,
+      fmtChar = c}, cs, us')
+getSpecs l z s a cs0@(_ : _) us =
+  let FormatParse ms c cs =
+        case us of
+          (ufmt, _) : _ -> ufmt cs0
+          [] -> errorMissingArgument
+  in
+  (FieldFormat {
+      fmtWidth = Nothing,
+      fmtPrecision = Nothing,
+      fmtAdjust = adjustment Nothing Nothing l z,
+      fmtSign = s,
+      fmtAlternate = a,
+      fmtModifiers = ms,
+      fmtChar = c}, cs, us)
+getSpecs _ _ _ _ "" _ = errorShortFormat
+
+getStar :: [UPrintf] -> ([UPrintf], Int)
+getStar us =
+  let ufmt = FieldFormat {
+        fmtWidth = Nothing,
+        fmtPrecision = Nothing,
+        fmtAdjust = Nothing,
+        fmtSign = Nothing,
+        fmtAlternate = False,
+        fmtModifiers = "",
+        fmtChar = 'd' } in
+  case us of
+    [] -> errorMissingArgument
+    (_, nu) : us' -> (us', read (nu ufmt ""))
+
+dfmt :: RealFloat a => Char -> Maybe Int -> Bool -> a -> (String, String)
+dfmt c p a d =
+  let caseConvert = if isUpper c then map toUpper else id
+      showFunction = case toLower c of
+        'e' -> showEFloat
+        'f' -> if a then showFFloatAlt else showFFloat
+        'g' -> if a then showGFloatAlt else showGFloat
+        _ -> perror "internal error: impossible dfmt"
+      result = caseConvert $ showFunction p d ""
+  in
+  case result of
+    '-' : cs -> ("-", cs)
+    cs -> ("", cs)
+
+perror :: String -> a
+perror s = errorWithoutStackTrace $ "printf: " ++ s
+
+errorBadFormat :: Char -> a
+errorBadFormat c = perror $ "bad formatting char " ++ show c
+
+errorShortFormat, errorMissingArgument, errorBadArgument :: a
+errorShortFormat = perror "formatting string ended prematurely"
+errorMissingArgument = perror "argument list ended prematurely"
+errorBadArgument = perror "bad argument"

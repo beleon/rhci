@@ -1,0 +1,177 @@
+## 1. readFile, writeFile, appendFile
+
+-- Run in a fresh directory holding oracle/files_io (see oracle/README.md).
+ghci> readFile "nofile"
+*** Exception: nofile: openFile: does not exist (No such file or directory)
+ghci> readFile ""
+*** Exception: : openFile: does not exist (No such file or directory)
+ghci> readFile "/"
+*** Exception: /: openFile: inappropriate type (is a directory)
+ghci> readFile "dir"
+*** Exception: dir: openFile: inappropriate type (is a directory)
+ghci> readFile "bad.txt/x"
+*** Exception: bad.txt/x: openFile: inappropriate type (Not a directory)
+ghci> readFile "text.txt"
+"line one\n\955\8594x\nlast"
+ghci> lines <$> readFile "text.txt"
+["line one","\955\8594x","last"]
+ghci> length <$> readFile "text.txt"
+17
+ghci> writeFile "a.txt" "hello\nworld\n"
+ghci> readFile "a.txt"
+"hello\nworld\n"
+ghci> appendFile "a.txt" "more\n"
+ghci> readFile "a.txt" >>= putStr
+hello
+world
+more
+ghci> appendFile "new.txt" "created"
+ghci> readFile "new.txt"
+"created"
+ghci> writeFile "e" ""
+ghci> readFile "e"
+""
+ghci> writeFile "n" "a\nb\r\nc"
+ghci> lines <$> readFile "n"
+["a","b\r","c"]
+ghci> writeFile "u.txt" "λ→\955"
+ghci> readFile "u.txt"
+"\955\8594\955"
+ghci> length <$> readFile "u.txt"
+3
+ghci> writeFile "nodir/x" "a"
+*** Exception: nodir/x: withFile: does not exist (No such file or directory)
+ghci> appendFile "nodir/x" "a"
+*** Exception: nodir/x: withFile: does not exist (No such file or directory)
+ghci> writeFile "dir" "x"
+*** Exception: dir: withFile: inappropriate type (Is a directory)
+ghci> appendFile "dir" "x"
+*** Exception: dir: withFile: inappropriate type (Is a directory)
+ghci> writeFile "bad.txt/x" "a"
+*** Exception: bad.txt/x: withFile: inappropriate type (Not a directory)
+ghci> writeFile "" "a"
+*** Exception: : withFile: does not exist (No such file or directory)
+ghci> writeFile "/proc/version" "x"
+*** Exception: /proc/version: withFile: permission denied (Permission denied)
+ghci> :t readFile
+readFile :: FilePath -> IO String
+ghci> :t writeFile
+writeFile :: FilePath -> String -> IO ()
+ghci> :t appendFile
+appendFile :: FilePath -> String -> IO ()
+
+## 2. Lazy reading and locks
+
+ghci> writeFile "a.txt" "0123456789"
+ghci> s <- readFile "a.txt"
+ghci> take 3 s
+"012"
+ghci> writeFile "a.txt" "x"
+*** Exception: a.txt: withFile: resource busy (file is locked)
+ghci> appendFile "./a.txt" "x"
+*** Exception: ./a.txt: withFile: resource busy (file is locked)
+ghci> length s
+10
+ghci> writeFile "a.txt" "x"
+ghci> readFile "a.txt"
+"x"
+ghci> x <- readFile "a.txt"
+ghci> y <- readFile "a.txt"
+ghci> x
+"x"
+ghci> writeFile "a.txt" "q"
+*** Exception: a.txt: withFile: resource busy (file is locked)
+ghci> y
+"x"
+ghci> writeFile "a.txt" "q"
+ghci> readFile "a.txt" >>= \s -> writeFile "a.txt" (map succ s)
+*** Exception: a.txt: withFile: resource busy (file is locked)
+ghci> readFile "a.txt" >>= \s -> length s `seq` writeFile "a.txt" (s ++ "!")
+*** Exception: a.txt: withFile: resource busy (file is locked)
+ghci> readFile "a.txt"
+"q"
+ghci> r <- readFile "bad2.txt"
+ghci> length r
+*** Exception: bad2.txt: hGetContents: invalid argument (cannot decode byte sequence starting from 255)
+ghci> writeFile "bad2.txt" "ok"
+ghci> readFile "bad2.txt"
+"ok"
+
+## 3. Decoding errors
+
+ghci> readFile "bad.txt"
+"ab*** Exception: bad.txt: hGetContents: invalid argument (cannot decode byte sequence starting from 255)
+ghci> readFile "trunc.txt"
+"ab*** Exception: trunc.txt: hGetContents: invalid argument (cannot decode byte sequence starting from 226)
+ghci> readFile "sur8.txt"
+"*** Exception: sur8.txt: hGetContents: invalid argument (cannot decode byte sequence starting from 237)
+ghci> readFile "over.txt"
+"*** Exception: over.txt: hGetContents: invalid argument (cannot decode byte sequence starting from 192)
+ghci> readFile "big.txt"
+"a*** Exception: big.txt: hGetContents: invalid argument (cannot decode byte sequence starting from 244)
+
+## 4. Writing a String that fails part way
+
+ghci> writeFile "w1" (replicate 3000 'a' ++ undefined)
+*** Exception: Prelude.undefined
+CallStack (from HasCallStack):
+  undefined, called at <interactive>:1:39 in interactive:Ghci1
+ghci> length <$> readFile "w1"
+2047
+ghci> writeFile "w2" (replicate 10000 'a' ++ undefined)
+*** Exception: Prelude.undefined
+CallStack (from HasCallStack):
+  undefined, called at <interactive>:5:40 in interactive:Ghci2
+ghci> length <$> readFile "w2"
+8188
+ghci> writeFile "w4" (replicate 5000 'λ' ++ undefined)
+*** Exception: Prelude.undefined
+CallStack (from HasCallStack):
+  undefined, called at <interactive>:9:39 in interactive:Ghci3
+ghci> length <$> readFile "w4"
+4094
+ghci> writeFile "w5" (replicate 2048 'a' ++ undefined)
+*** Exception: Prelude.undefined
+CallStack (from HasCallStack):
+  undefined, called at <interactive>:13:39 in interactive:Ghci4
+ghci> length <$> readFile "w5"
+2047
+ghci> writeFile "l" (replicate 2047 'a' ++ undefined)
+*** Exception: Prelude.undefined
+CallStack (from HasCallStack):
+  undefined, called at <interactive>:17:38 in interactive:Ghci5
+ghci> length <$> readFile "l"
+0
+ghci> writeFile "l2" (replicate 2047 'a' ++ [undefined])
+*** Exception: Prelude.undefined
+CallStack (from HasCallStack):
+  undefined, called at <interactive>:21:40 in interactive:Ghci6
+ghci> length <$> readFile "l2"
+2047
+ghci> appendFile "l2" (replicate 2047 'b' ++ [undefined])
+*** Exception: Prelude.undefined
+CallStack (from HasCallStack):
+  undefined, called at <interactive>:25:41 in interactive:Ghci7
+ghci> length <$> readFile "l2"
+4094
+ghci> writeFile "nl" (concat (replicate 1000 "ab\n") ++ undefined)
+*** Exception: Prelude.undefined
+CallStack (from HasCallStack):
+  undefined, called at <interactive>:29:51 in interactive:Ghci8
+ghci> length <$> readFile "nl"
+2047
+ghci> writeFile "v.txt" ('a' : undefined)
+*** Exception: Prelude.undefined
+CallStack (from HasCallStack):
+  undefined, called at <interactive>:33:26 in interactive:Ghci9
+ghci> readFile "v.txt"
+""
+ghci> writeFile "sur" "ab\55296cd"
+*** Exception: sur: withFile: invalid argument (cannot encode character '\55296')
+ghci> readFile "sur"
+"ab"
+ghci> writeFile "sur2" (replicate 3000 'a' ++ "\55296")
+*** Exception: sur2: withFile: invalid argument (cannot encode character '\55296')
+ghci> length <$> readFile "sur2"
+3000
+

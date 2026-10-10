@@ -129,6 +129,53 @@ module Rhci
       end
     end
 
+    # An IORef: a mutable cell holding a box (see Machine#p_newRef).
+    class Ref
+      attr_accessor :box
+
+      def initialize(box)
+        @box = box
+      end
+
+      def inspect
+        '<IORef>'
+      end
+    end
+
+    # A Haskell String collected one character at a time (a file name, or
+    # the characters of one chunk written to a file).
+    class CharBuf
+      attr_reader :chars
+
+      def initialize
+        @chars = []
+      end
+
+      def inspect
+        '<CharBuf>'
+      end
+    end
+
+    # A file being read by readFile: decoded when opened, handed out a
+    # character at a time. `stop` is where decoding failed (or the end),
+    # and `lock` the file's key in Machine's read locks until the String
+    # reaches its end.
+    class FileReader
+      attr_accessor :chars, :pos, :stop, :error, :lock
+
+      def initialize(chars, stop, error, lock)
+        @chars = chars
+        @pos = 0
+        @stop = stop
+        @error = error
+        @lock = lock
+      end
+
+      def inspect
+        '<FileReader>'
+      end
+    end
+
     # A global binding. Redefining a name at the prompt makes a new Cell;
     # code compiled earlier keeps pointing at the old one (GHCi shadowing).
     class Cell
@@ -345,7 +392,9 @@ module Rhci
       # out: an IO-like object (write/flush). limits: Hash with optional
       # :steps, :stack (frames), :deadline (monotonic seconds).
       # input: stdin (gets/getc); err: stderr; args: what getArgs returns.
-      def initialize(out = nil, limits = nil, input: nil, err: nil, args: [])
+      # cwd: where relative file names resolve; files: false refuses
+      # file access (an embedding host's choice).
+      def initialize(out = nil, limits = nil, input: nil, err: nil, args: [], cwd: nil, files: true)
         if limits && limits[:deadline] && Shim.now.nil?
           raise UnsupportedError, 'time limits need a clock, which this runtime lacks'
         end
@@ -356,6 +405,9 @@ module Rhci
         @peeked = nil
         @stdin_state = :open
         @buffering = {}
+        @cwd = cwd
+        @files = files
+        @read_locks = {}
         @out = out
         @buf = ''.dup
         @stack = FrameStack.new
@@ -914,6 +966,10 @@ module Rhci
       PRIM_METHODS[:doubleShow] = :p_doubleShow
       PRIM_METHODS[:chr] = :p_chr
       PRIM_METHODS[:coerce] = :p_coerce
+      %i[intAnd intOr intXor intComplement intShiftL intShiftRA intShiftRL intPopCount intClz intCtz
+         integerAnd integerOr integerXor integerComplement integerShiftL integerShiftR integerPopCount
+         integerTestBit newRef readRef writeRef refEq bufNew bufPush openRead readerChar openWrite
+         commitWrite].each { |op| PRIM_METHODS[op] = :"p_#{op}" }
       PRIM_METHODS[:putChar] = :p_putChar
       PRIM_METHODS[:hPutChar] = :p_hPutChar
       PRIM_METHODS[:hFlush] = :p_hFlush
@@ -1264,6 +1320,286 @@ module Rhci
                Unicode.category(c) == 22
              end
         Builtins.bool(sp)
+      end
+
+      # ---- Data.IORef -----------------------------------------------------------
+      # A reference holds a box (a one-field constructor value) so that the
+      # value inside stays as lazy as GHC's: primitives see only WHNF.
+
+      def p_newRef(_, box)
+        Ref.new(box)
+      end
+
+      def p_readRef(_, ref)
+        ref.box
+      end
+
+      def p_writeRef(ref, box)
+        ref.box = box
+        UNIT_V
+      end
+
+      def p_refEq(a, b)
+        Builtins.bool(a.equal?(b))
+      end
+
+      # ---- files ------------------------------------------------------------------
+      # readFile reads and decodes the whole file when it is opened and holds
+      # GHC's read lock (writers fail with "file is locked") until the lazy
+      # String reaches its end or a decoding error. writeFile and appendFile
+      # write the chunks Prelude's rhci_shove commits, as GHC's hPutStr does.
+
+      IO_ERRORS = {
+        enoent: 'does not exist (No such file or directory)',
+        enotdir: 'inappropriate type (Not a directory)',
+        eisdir: 'inappropriate type (Is a directory)',
+        eacces: 'permission denied (Permission denied)'
+      }.freeze
+
+      def p_bufNew(_)
+        CharBuf.new
+      end
+
+      def p_bufPush(buf, c)
+        buf.chars << c
+        UNIT_V
+      end
+
+      def p_openRead(_, pbuf)
+        name = buf_string(pbuf)
+        path = file_path(name, 'openFile')
+        bytes = Shim.read_bytes(path)
+        if bytes.is_a?(Symbol)
+          # GHC's own check, worded in lower case.
+          raise HsException, "#{name}: openFile: inappropriate type (is a directory)" if bytes == :eisdir
+
+          raise HsException, "#{name}: openFile: #{IO_ERRORS[bytes]}"
+        end
+        chars, bad = Machine.decode_utf8(bytes)
+        error = bad && "#{name}: hGetContents: invalid argument (cannot decode byte sequence starting from #{bytes[bad]})"
+        lock = Shim.real_path(path)
+        @read_locks[lock] = (@read_locks[lock] || 0) + 1 if lock
+        FileReader.new(chars, chars.length, error, lock)
+      end
+
+      # The next code point, or -1 at the end.
+      def p_readerChar(r)
+        if r.pos < r.stop
+          c = r.chars[r.pos]
+          r.pos += 1
+          return c
+        end
+        release(r)
+        raise HsException, r.error if r.error
+
+        -1
+      end
+
+      # mode 0 truncates (writeFile), 1 appends (appendFile).
+      def p_openWrite(pbuf, mode)
+        name = buf_string(pbuf)
+        path = file_path(name, 'withFile')
+        lock = Shim.real_path(path)
+        raise HsException, "#{name}: withFile: resource busy (file is locked)" if lock && @read_locks[lock]
+
+        why = Shim.open_for_write(path, mode == 1)
+        raise HsException, "#{name}: withFile: #{IO_ERRORS[why]}" if why
+
+        UNIT_V
+      end
+
+      # Encodes and appends buf's characters, then empties it. A surrogate
+      # cannot be encoded: what precedes it is written, then the error.
+      def p_commitWrite(pbuf, buf)
+        out = ''.dup
+        bad = nil
+        buf.chars.each do |c|
+          if c >= 0xD800 && c <= 0xDFFF
+            bad = c
+            break
+          end
+          out << c
+        end
+        buf.chars.clear
+        name = buf_string(pbuf)
+        Shim.append_bytes(file_path(name, 'withFile'), out) unless out.empty?
+        raise HsException, "#{name}: withFile: invalid argument (cannot encode character '\\#{bad}')" if bad
+
+        UNIT_V
+      end
+
+      # Strict UTF-8 (GHC's locale encoding here): the code points, and the
+      # index of the byte where decoding failed (nil if it did not).
+      def self.decode_utf8(bytes)
+        out = []
+        i = 0
+        n = bytes.length
+        while i < n
+          b = bytes[i]
+          if b < 0x80
+            out << b
+            i += 1
+            next
+          end
+          len, min, c = if b >= 0xC2 && b <= 0xDF then [2, 0x80, b & 0x1F]
+                        elsif b >= 0xE0 && b <= 0xEF then [3, 0x800, b & 0x0F]
+                        elsif b >= 0xF0 && b <= 0xF4 then [4, 0x10000, b & 0x07]
+                        else [0, 0, 0]
+                        end
+          return [out, i] if len.zero? || i + len > n
+
+          j = 1
+          while j < len
+            cb = bytes[i + j]
+            return [out, i] unless cb >= 0x80 && cb <= 0xBF
+
+            c = (c << 6) | (cb & 0x3F)
+            j += 1
+          end
+          return [out, i] if c < min || c > 0x10FFFF || (c >= 0xD800 && c <= 0xDFFF)
+
+          out << c
+          i += len
+        end
+        [out, nil]
+      end
+
+      def buf_string(buf)
+        s = ''.dup
+        buf.chars.each do |c|
+          raise HsException, 'openFile: invalid argument (file name)' if c.zero? || (c >= 0xD800 && c <= 0xDFFF)
+
+          s << c
+        end
+        s
+      end
+
+      def file_path(name, op)
+        raise HsException, "#{name}: #{op}: permission denied (file access is disabled)" unless @files
+        return name if @cwd.nil? || name.start_with?('/') || name.empty?
+
+        "#{@cwd}/#{name}"
+      end
+
+      def release(r)
+        return unless r.lock
+
+        n = @read_locks[r.lock] - 1
+        if n.zero?
+          @read_locks.delete(r.lock)
+        else
+          @read_locks[r.lock] = n
+        end
+        r.lock = nil
+      end
+
+      # ---- Data.Bits ------------------------------------------------------------
+      # Int is 64-bit two's complement; Ruby's bitwise operators already
+      # treat Integers as infinite two's complement, which is Integer's
+      # semantics, and keep Int results in range (shifts excepted).
+
+      MASK64 = (1 << 64) - 1
+
+      def p_intAnd(a, b)
+        a & b
+      end
+
+      def p_intOr(a, b)
+        a | b
+      end
+
+      def p_intXor(a, b)
+        a ^ b
+      end
+
+      def p_intComplement(a)
+        ~a
+      end
+
+      # Shift counts are non-negative (the Prelude checks); 64 or more
+      # shifts everything out, as GHC's iShiftL# does.
+      def p_intShiftL(a, n)
+        n >= 64 ? 0 : Num.wrap_int(a << n)
+      end
+
+      def p_intShiftRA(a, n)
+        return (a.negative? ? -1 : 0) if n >= 64
+
+        a >> n
+      end
+
+      def p_intShiftRL(a, n)
+        return 0 if n >= 64
+
+        Num.wrap_int((a & MASK64) >> n)
+      end
+
+      def p_intPopCount(a)
+        popcount(a & MASK64)
+      end
+
+      def p_intClz(a)
+        u = a & MASK64
+        n = 64
+        while u.positive?
+          u >>= 1
+          n -= 1
+        end
+        n
+      end
+
+      def p_intCtz(a)
+        u = a & MASK64
+        return 64 if u.zero?
+
+        n = 0
+        while (u & 1).zero?
+          u >>= 1
+          n += 1
+        end
+        n
+      end
+
+      def p_integerAnd(a, b)
+        a & b
+      end
+
+      def p_integerOr(a, b)
+        a | b
+      end
+
+      def p_integerXor(a, b)
+        a ^ b
+      end
+
+      def p_integerComplement(a)
+        ~a
+      end
+
+      def p_integerShiftL(a, n)
+        a << n
+      end
+
+      def p_integerShiftR(a, n)
+        a >> n
+      end
+
+      # GHC's integerPopCount#: negated for negative arguments.
+      def p_integerPopCount(a)
+        a.negative? ? -popcount(-a) : popcount(a)
+      end
+
+      def p_integerTestBit(a, i)
+        Builtins.bool(((a >> i) & 1) == 1)
+      end
+
+      def popcount(u)
+        n = 0
+        while u.positive?
+          u &= u - 1
+          n += 1
+        end
+        n
       end
 
       # The identity at a different type (ReadP's rank-2 encoding).

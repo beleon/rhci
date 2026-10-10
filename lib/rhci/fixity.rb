@@ -20,11 +20,12 @@ module Rhci
     [
       [:right, 9, %w[.]], [:left, 9, %w[!!]],
       [:right, 8, %w[^ ^^ **]],
-      [:left, 7, %w[* / quot rem div mod]],
+      [:left, 8, %w[shift rotate shiftL shiftR rotateL rotateR unsafeShiftL unsafeShiftR .<<. .>>. !<<. !>>.]],
+      [:left, 7, %w[* / quot rem div mod .&. %]], [:left, 6, %w[xor .^.]], [:left, 5, %w[.|.]],
       [:left, 6, %w[+ -]], [:right, 6, %w[<>]],
       [:right, 5, %w[: ++]], [:none, 5, %w[\\\\]],
       [:none, 4, %w[== /= < <= >= > elem notElem]],
-      [:left, 4, %w[<$> <$ $> <*> *> <*]],
+      [:left, 4, %w[<$> <$ $> <*> *> <* <$!> <**>]], # lint:ok (the Haskell operator <$!>)
       [:left, 3, %w[<|>]], [:right, 3, %w[&&]], [:right, 2, %w[||]],
       [:left, 1, %w[>> >>= & <&>]], [:right, 1, %w[=<< >=> <=<]],
       [:right, 0, %w[$ $! seq]], [:left, 0, %w[on]] # lint:ok (the Haskell operator $!)
@@ -32,6 +33,19 @@ module Rhci
       ops.each { |o| BASE[o] = [assoc, prec].freeze }
     end
     BASE.freeze
+
+    # Operators of the known modules outside the default scope (reached
+    # qualified, or imported).
+    MODULE_FIXITIES = {
+      'Data.Map' => { '!' => [:left, 9].freeze, '!?' => [:left, 9].freeze, '\\\\' => [:left, 9].freeze },
+      'Data.Map.Strict' => { '!' => [:left, 9].freeze, '!?' => [:left, 9].freeze, '\\\\' => [:left, 9].freeze },
+      'Data.Set' => { '\\\\' => [:left, 9].freeze } # lint:ok (the module name)
+    }.freeze
+
+    # Their fixities under the full module name: Data.Map.! and so on.
+    QUALIFIED = {}
+    MODULE_FIXITIES.each { |mod, ops| ops.each { |op, f| QUALIFIED["#{mod}.#{op}"] = f } }
+    QUALIFIED.freeze
 
     # `outer` is the session's table for names defined at earlier prompts.
     def initialize(outer = nil, source = '<interactive>')
@@ -171,7 +185,11 @@ module Rhci
 
     def fixity(item)
       name = item.name
-      return BASE[name] || DEFAULT if item.ref.qual
+      if item.ref.qual
+        key = "#{item.ref.qual}.#{name}"
+        @scopes.reverse_each { |sc| return sc[key] if sc[key] }
+        return QUALIFIED[key] || BASE[name] || DEFAULT
+      end
 
       i = @scopes.length - 1
       while i >= 0

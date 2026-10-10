@@ -1,0 +1,84 @@
+## 1. readFile, writeFile, appendFile
+-- Run in a fresh directory holding oracle/files_io (see oracle/README.md).
+readFile "nofile"
+readFile ""
+readFile "/"
+readFile "dir"
+readFile "bad.txt/x"
+readFile "text.txt"
+lines <$> readFile "text.txt"
+length <$> readFile "text.txt"
+writeFile "a.txt" "hello\nworld\n"
+readFile "a.txt"
+appendFile "a.txt" "more\n"
+readFile "a.txt" >>= putStr
+appendFile "new.txt" "created"
+readFile "new.txt"
+writeFile "e" ""
+readFile "e"
+writeFile "n" "a\nb\r\nc"
+lines <$> readFile "n"
+writeFile "u.txt" "λ→\955"
+readFile "u.txt"
+length <$> readFile "u.txt"
+writeFile "nodir/x" "a"
+appendFile "nodir/x" "a"
+writeFile "dir" "x"
+appendFile "dir" "x"
+writeFile "bad.txt/x" "a"
+writeFile "" "a"
+writeFile "/proc/version" "x"
+:t readFile
+:t writeFile
+:t appendFile
+## 2. Lazy reading and locks
+writeFile "a.txt" "0123456789"
+s <- readFile "a.txt"
+take 3 s
+writeFile "a.txt" "x"
+appendFile "./a.txt" "x"
+length s
+writeFile "a.txt" "x"
+readFile "a.txt"
+x <- readFile "a.txt"
+y <- readFile "a.txt"
+x
+writeFile "a.txt" "q"
+y
+writeFile "a.txt" "q"
+readFile "a.txt" >>= \s -> writeFile "a.txt" (map succ s)
+readFile "a.txt" >>= \s -> length s `seq` writeFile "a.txt" (s ++ "!")
+readFile "a.txt"
+r <- readFile "bad2.txt"
+length r
+writeFile "bad2.txt" "ok"
+readFile "bad2.txt"
+## 3. Decoding errors
+readFile "bad.txt"
+readFile "trunc.txt"
+readFile "sur8.txt"
+readFile "over.txt"
+readFile "big.txt"
+## 4. Writing a String that fails part way
+writeFile "w1" (replicate 3000 'a' ++ undefined)
+length <$> readFile "w1"
+writeFile "w2" (replicate 10000 'a' ++ undefined)
+length <$> readFile "w2"
+writeFile "w4" (replicate 5000 'λ' ++ undefined)
+length <$> readFile "w4"
+writeFile "w5" (replicate 2048 'a' ++ undefined)
+length <$> readFile "w5"
+writeFile "l" (replicate 2047 'a' ++ undefined)
+length <$> readFile "l"
+writeFile "l2" (replicate 2047 'a' ++ [undefined])
+length <$> readFile "l2"
+appendFile "l2" (replicate 2047 'b' ++ [undefined])
+length <$> readFile "l2"
+writeFile "nl" (concat (replicate 1000 "ab\n") ++ undefined)
+length <$> readFile "nl"
+writeFile "v.txt" ('a' : undefined)
+readFile "v.txt"
+writeFile "sur" "ab\55296cd"
+readFile "sur"
+writeFile "sur2" (replicate 3000 'a' ++ "\55296")
+length <$> readFile "sur2"

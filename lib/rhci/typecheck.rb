@@ -74,10 +74,25 @@ module Rhci
           check_pat(rtop.bind_pat, a)
         end
         @level -= 1
-        rtop.values.each_value { |n| @pending[n] = generalize(@pending[n].type, []) } if rtop.bind_pat
+        if rtop.bind_pat
+          # `pat <- io` binds monomorphically: default first (GHCi gives
+          # `x <- return 1` the type Integer), then close the types.
+          solve_top
+          rtop.values.each_value { |n| @pending[n] = T::Scheme.new(0, close_with_any(@pending[n].type), []) }
+        end
       end
       solve_top
       t
+    end
+
+    # t with every open type variable replaced by Any.
+    def close_with_any(t)
+      t = T.prune(t)
+      case t
+      when T::TMeta then T::ANY
+      when T::TAp then T::TAp.new(close_with_any(t.fn), close_with_any(t.arg))
+      else t
+      end
     end
 
     # The generalised type of an expression (what :type shows). Constraints
@@ -117,6 +132,9 @@ module Rhci
       elsif h.is_a?(T::TMeta) && args.length == 1 && @wanted.any? { |ev| T.prune(ev.type).equal?(h) && ev.klass.name.str == 'Monad' }
         unify(h, io_tcon, node) # GHCi runs an ambiguous monadic statement in IO
         io = true
+      elsif h.is_a?(T::TMeta) && args.empty? && io_instances?(h)
+        unify(h, T.app(io_tcon, [fresh]), node) # printf "..."
+        io = true
       end
       value_type = io ? T.spine(t)[1][0] : t
       show = nil
@@ -137,6 +155,19 @@ module Rhci
         solve_top
       end
       { node: node, io: io, show: show }
+    end
+
+    # GHCi tries an input as an IO statement first: a value of a bare type
+    # variable is run when every constraint on it has an instance for IO
+    # with no class context (Text.Printf's `(a ~ ()) => PrintfType (IO a)`).
+    def io_instances?(meta)
+      evs = @wanted.select { |ev| T.prune(ev.type).equal?(meta) }
+      return false if evs.empty?
+
+      evs.all? do |ev|
+        inst = find_instance(ev.klass, io_tcon)
+        inst && inst.context.empty?
+      end
     end
 
     def scheme_of(name)
@@ -341,6 +372,7 @@ module Rhci
         when T::TCon
           inst = find_instance(ev.klass, h)
           no_instance(ev) unless inst && inst.tyvars.length == args.length
+          inst.equalities&.each { |i, et| unify(args[i], et, ev.tok) }
           subs = inst.context.map { |c, i| Ev.new(c, args[i], ev.tok) }
           ev.solution = [:inst, inst, subs]
           queue.concat(subs)
@@ -678,10 +710,15 @@ module Rhci
       end
       inst.head = head
       inst.tyvars = vars
-      inst.context = inst.context_ast.map do |klass, v|
+      inst.context = []
+      inst.context_ast.each do |klass, v, rhs|
         i = vars.index(v)
         err(:compile, t, "Not in scope: type variable ‘#{v}’") unless i
-        [klass, i]
+        if klass == :eq
+          (inst.equalities ||= {})[i] = convert(rhs, {}, false)
+        else
+          inst.context << [klass, i]
+        end
       end
       key = [ci, head.key]
       if @new_instances.key?(key)
@@ -714,7 +751,8 @@ module Rhci
     def instance_method_scheme(inst, m)
       ms = inst.klass.method_schemes[m]
       k = inst.tyvars.length
-      inst_type = T.app(inst.head, (0...k).map { |i| T::TGen.new(i) })
+      eqs = inst.equalities || {}
+      inst_type = T.app(inst.head, (0...k).map { |i| eqs[i] || T::TGen.new(i) })
       remap = lambda do |t|
         t = T.prune(t)
         case t
@@ -744,7 +782,8 @@ module Rhci
         g
       end
       @givens.push(givens)
-      inst_type = T.app(inst.head, skols)
+      eqs = inst.equalities || {}
+      inst_type = T.app(inst.head, (0...skols.length).map { |i| eqs[i] || skols[i] })
       supers = ci.supers.map { |sc| Ev.new(sc, inst_type, inst.tok) }
       q, d = simplify(supers)
       @givens.pop

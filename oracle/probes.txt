@@ -866,3 +866,488 @@ read "BlockBuffering (Just 4)" :: BufferMode
 getProgName
 :t getContents
 :t interact
+
+## 33. Qualified names and imports
+Data.Char.toUpper 'a'
+Prelude.map (+1) [1,2,3]
+Data.List.sortOn negate [3,1,2]
+import qualified Data.Char as C
+C.ord 'a'
+C.isDigit '7'
+C.nope
+X.y
+import Data.Foo
+let map = 3
+map
+Prelude.map (*2) [1]
+import qualified Data.Map as M
+M.fromList [(1,'a')]
+:t M.empty
+import Data.Map (Map, fromList)
+:t (fromList [(1,True)])
+import Data.List (nub)
+nub [1,1,2]
+import Data.Maybe (frobnicate)
+:t (undefined :: M.Map Int Bool)
+import qualified Data.Set as S
+S.fromList "set"
+Data.Map.size (Data.Map.fromList [(1,1),(2,2)])
+import Data.Map
+filter even [1,2,3,4]
+lookup 1 [(1,2)]
+
+## 34. Data.Map
+import qualified Data.Map as M
+import qualified Data.Map.Strict as MS
+M.fromList [(3,"c"),(1,"a"),(2,"b")]
+M.fromList [(1,'a'),(1,'b')]
+M.empty :: M.Map Int Int
+M.singleton 'k' True
+M.lookup 2 (M.fromList [(1,'a'),(2,'b')])
+M.lookup 3 (M.fromList [(1,'a'),(2,'b')])
+M.fromList [(1,'a')] M.! 1
+M.fromList [(1,'a')] M.! 2
+M.fromList [(1,'a')] M.!? 2
+M.member 1 (M.fromList [(1,())])
+M.notMember 1 (M.fromList [(1,())])
+M.findWithDefault 0 5 (M.fromList [(1,1)])
+M.size (M.fromList (zip [1..100] [1..]))
+M.null M.empty
+M.insert 2 "two" (M.fromList [(1,"one")])
+M.insert 1 "uno" (M.fromList [(1,"one")])
+M.insertWith (++) 1 "x" (M.fromList [(1,"y")])
+M.insertWith (++) 2 "x" (M.fromList [(1,"y")])
+M.insertWithKey (\k a b -> show k ++ a ++ b) 1 "x" (M.fromList [(1,"y")])
+M.delete 1 (M.fromList [(1,'a'),(2,'b')])
+M.adjust (*10) 2 (M.fromList [(1,1),(2,2)])
+M.alter (fmap (+1)) 1 (M.fromList [(1,1)])
+M.alter (const (Just 0)) 5 (M.fromList [(1,1)])
+M.alter (const Nothing) 1 (M.fromList [(1,1)])
+M.update (\v -> if v > 1 then Just (v * 2) else Nothing) 1 (M.fromList [(1,1),(2,2)])
+M.fromListWith (++) [(1,"a"),(1,"b"),(2,"c")]
+M.fromListWith (+) [(c, 1) | c <- "mississippi"]
+M.toList (M.map (*2) (M.fromList (zip [1..5] [1..5])))
+M.mapWithKey (\k v -> k + v) (M.fromList [(1,10),(2,20)])
+M.keys (M.fromList [(c, ()) | c <- "hello"])
+M.elems (M.fromList [(2,'b'),(1,'a')])
+M.assocs (M.fromList [(2,'b'),(1,'a')])
+M.toDescList (M.fromList (zip [1..4] "abcd"))
+M.foldr (:) [] (M.fromList [(2,'b'),(1,'a')])
+M.foldrWithKey (\k v acc -> k + v + acc) 0 (M.fromList [(1,2),(3,4)])
+M.foldlWithKey (\acc k v -> acc ++ [(k,v)]) [] (M.fromList [(2,'b'),(1,'a')])
+M.foldr' (+) 0 (M.fromList [(1,1),(2,2)])
+sum (M.fromList [(1,10),(2,20)])
+length (M.fromList [(1,10),(2,20)])
+maximum (M.fromList [(1,10),(2,20)])
+elem 20 (M.fromList [(1,10),(2,20)])
+fmap length (M.fromList [(1,"ab")])
+traverse (\v -> if v > 0 then Just v else Nothing) (M.fromList [(1,1),(2,2)])
+M.union (M.fromList [(1,'a'),(2,'b')]) (M.fromList [(2,'X'),(3,'c')])
+M.unionWith (+) (M.fromList [(1,1),(2,2)]) (M.fromList [(2,10),(3,30)])
+M.unions [M.fromList [(1,'a')], M.fromList [(1,'b'),(2,'c')]]
+M.unionsWith (+) [M.fromList [(1,1)], M.fromList [(1,2)], M.fromList [(2,5)]]
+M.difference (M.fromList [(1,'a'),(2,'b')]) (M.fromList [(2,())])
+M.fromList [(1,'a'),(2,'b')] M.\\ M.fromList [(1,())]
+M.intersection (M.fromList [(1,'a'),(2,'b')]) (M.fromList [(2,'x'),(3,'y')])
+M.intersectionWith (,) (M.fromList [(1,'a'),(2,'b')]) (M.fromList [(2,'x'),(3,'y')])
+M.differenceWith (\a b -> if b then Nothing else Just a) (M.fromList [(1,'a'),(2,'b')]) (M.fromList [(1,True),(2,False)])
+M.filter even (M.fromList (zip [1..6] [1..6]))
+M.filterWithKey (\k _ -> k > 3) (M.fromList (zip [1..6] [1..6]))
+M.partition even (M.fromList (zip [1..6] [1..6]))
+M.mapMaybe (\v -> if even v then Just (v * 10) else Nothing) (M.fromList (zip [1..4] [1..4]))
+M.mapKeys (* 2) (M.fromList [(1,'a'),(2,'b')])
+M.mapKeysWith (++) (`div` 2) (M.fromList [(1,"a"),(2,"b"),(3,"c")])
+M.lookupMin (M.fromList [(2,'b'),(1,'a')])
+M.lookupMax (M.fromList [(2,'b'),(1,'a')])
+M.lookupMin (M.empty :: M.Map Int Int)
+M.findMin (M.fromList [(2,'b'),(1,'a')])
+M.findMax (M.empty :: M.Map Int Int)
+M.deleteMin (M.fromList [(2,'b'),(1,'a')])
+M.minViewWithKey (M.fromList [(2,'b'),(1,'a')])
+M.maxView (M.fromList [(2,'b'),(1,'a')])
+M.lookupLT 3 (M.fromList (zip [1,3,5] "abc"))
+M.lookupGE 4 (M.fromList (zip [1,3,5] "abc"))
+M.elemAt 1 (M.fromList (zip "abc" [1..]))
+M.elemAt 5 (M.fromList (zip "abc" [1..]))
+M.findIndex 'b' (M.fromList (zip "abc" [1..]))
+M.lookupIndex 'z' (M.fromList (zip "abc" [1..]))
+M.take 2 (M.fromList (zip [1..5] "abcde"))
+M.drop 2 (M.fromList (zip [1..5] "abcde"))
+M.splitAt 2 (M.fromList (zip [1..5] "abcde"))
+M.split 3 (M.fromList (zip [1..5] "abcde"))
+M.splitLookup 3 (M.fromList (zip [1..5] "abcde"))
+M.keysSet (M.fromList [(1,'a'),(2,'b')])
+M.fromSet show (M.keysSet (M.fromList [(1,'a'),(2,'b')]))
+M.restrictKeys (M.fromList (zip [1..5] "abcde")) (M.keysSet (M.fromList [(2,()),(4,())]))
+M.isSubmapOf (M.fromList [(1,'a')]) (M.fromList [(1,'a'),(2,'b')])
+M.mapAccum (\acc v -> (acc + v, acc)) 0 (M.fromList (zip "abc" [1..]))
+M.mapAccumWithKey (\acc k v -> (acc ++ [k], v * 2)) "" (M.fromList (zip "abc" [1..]))
+M.fromAscList [(1,'a'),(1,'b'),(2,'c')]
+M.fromDistinctAscList [(1,'a'),(2,'c')]
+M.fromList [(1,2)] == M.fromList [(1,2)]
+compare (M.fromList [(1,2)]) (M.fromList [(1,3)])
+M.fromList [(1,"a")] <> M.fromList [(1,"b"),(2,"c")]
+mconcat [M.fromList [(1,'x')], M.fromList [(2,'y')]]
+show (Just (M.fromList [(1,1)]))
+read "fromList [(1,\"a\")]" :: M.Map Int String
+M.size (M.insert 1 undefined M.empty)
+MS.size (MS.insert 1 undefined MS.empty)
+M.size (M.fromList [(1, undefined)])
+MS.size (MS.fromList [(1, undefined)])
+M.size (M.map (const undefined) (M.fromList [(1,1)]))
+MS.size (MS.map (const undefined) (MS.fromList [(1,1)]))
+M.size (M.insertWith (\_ _ -> undefined) 1 1 (M.fromList [(1,1)]))
+MS.size (MS.insertWith (\_ _ -> undefined) 1 1 (MS.fromList [(1,1)]))
+M.size (M.fromList [(undefined, 1)])
+M.member undefined (M.empty :: M.Map Int Int)
+take 3 (M.keys (M.fromList [(i, i * i) | i <- [1..10000]]))
+M.foldlWithKey (\a k v -> a + k * v) 0 (M.fromList (zip [1..1000] [1..1000]))
+MS.insertWith (+) 'a' 1 (MS.fromList [('a',1)])
+MS.adjust (+1) 'a' (MS.fromList [('a',1)])
+:t M.insertWith
+:t M.foldrWithKey
+:t M.alter
+:t M.unionWith
+:t MS.fromListWith
+
+## 35. Data.Set
+import qualified Data.Set as S
+S.fromList [3,1,2,3]
+S.empty :: S.Set Int
+S.singleton 'x'
+S.member 2 (S.fromList [1,2,3])
+S.notMember 2 (S.fromList [1,2,3])
+S.size (S.fromList "mississippi")
+S.toList (S.fromList "mississippi")
+S.toDescList (S.fromList "abc")
+S.elems (S.fromList [2,1])
+S.insert 0 (S.fromList [1,2])
+S.delete 1 (S.fromList [1,2])
+S.union (S.fromList "hello") (S.fromList "world")
+S.unions [S.fromList [1], S.fromList [2,3], S.fromList [1]]
+S.difference (S.fromList [1..10]) (S.fromList [2,4..10])
+S.fromList [1..5] S.\\ S.fromList [2,3]
+S.intersection (S.fromList [1..5]) (S.fromList [3..8])
+S.filter even (S.fromList [1..10])
+S.partition even (S.fromList [1..10])
+S.map (`div` 2) (S.fromList [1..10])
+S.findMin (S.fromList "hello")
+S.findMax (S.fromList "hello")
+S.findMin (S.empty :: S.Set Int)
+S.lookupMin (S.empty :: S.Set Int)
+S.deleteMin (S.fromList [1,2,3])
+S.minView (S.fromList [1,2,3])
+S.maxView (S.fromList [1,2,3])
+S.isSubsetOf (S.fromList [1,2]) (S.fromList [1,2,3])
+S.isProperSubsetOf (S.fromList [1,2,3]) (S.fromList [1,2,3])
+S.disjoint (S.fromList [1,2]) (S.fromList [3,4])
+S.split 5 (S.fromList [1..9])
+S.splitMember 5 (S.fromList [1..9])
+S.elemAt 3 (S.fromList "abcdef")
+S.elemAt 9 (S.fromList "abcdef")
+S.findIndex 'c' (S.fromList "abcdef")
+S.lookupIndex 'z' (S.fromList "abcdef")
+S.take 2 (S.fromList [5,4..1])
+S.drop 2 (S.fromList [5,4..1])
+S.lookupLT 3 (S.fromList [1,3,5])
+S.lookupGE 4 (S.fromList [1,3,5])
+S.powerSet (S.fromList [1,2,3])
+S.cartesianProduct (S.fromList [1,2]) (S.fromList "ab")
+S.foldr (:) [] (S.fromList "cab")
+S.foldl (flip (:)) [] (S.fromList "cab")
+sum (S.fromList [1..100])
+length (S.fromList "hello")
+elem 'e' (S.fromList "hello")
+maximum (S.fromList [3,1,2])
+S.fromList [1,2] == S.fromList [2,1]
+compare (S.fromList [1,2]) (S.fromList [1,3])
+S.fromList [1] <> S.fromList [2]
+read "fromList [3,2,1]" :: S.Set Int
+show (Just (S.fromList "ab"))
+S.member undefined (S.empty :: S.Set Int)
+S.size (S.fromList [1, undefined])
+S.toList (S.fromList [(i * 7) `mod` 10 | i <- [1..100]])
+:t S.fromList
+:t S.foldr
+:t S.map
+
+## 36. More of Control.Monad and Data.List
+import Control.Monad
+import Control.Applicative
+import Data.List
+guard True :: [()]
+guard False :: Maybe ()
+[x | x <- [1..10], _ <- guard (even x)]
+msum [Nothing, Just 2, Just 3]
+mzero :: [Int]
+mplus [1] [2]
+Just 1 <|> Nothing
+Nothing <|> Just 2
+empty :: Maybe Int
+mfilter even (Just 4)
+mfilter even (Just 3)
+foldM_ (\a x -> print (a + x) >> return (a + x)) 0 [1,2,3]
+liftM3 (,,) (Just 1) (Just 'a') (Just True)
+liftA3 (,,) [1] "a" [True]
+(+1) <$!> Just 1
+optional (Just 3)
+optional (Nothing :: Maybe Int)
+mapAndUnzipM (\x -> Just (x, x * 2)) [1,2,3]
+:t guard
+:t msum
+:t forever
+:t mapAccumL
+mapAccumL (\a x -> (a+x, a*x)) 0 [1..5]
+mapAccumR (\a x -> (a+x, a*x)) 0 [1..5]
+take 3 (snd (mapAccumL (\a x -> (a+x, a)) 0 [1..]))
+mapAccumL (\a x -> (a + x, show a)) 0 (Just 5)
+genericTake (2 :: Integer) "abc"
+genericDrop (2 :: Integer) "abc"
+genericSplitAt (1 :: Integer) "abc"
+genericIndex "abc" (1 :: Integer)
+genericIndex "abc" (5 :: Integer)
+genericReplicate (3 :: Integer) 'x'
+zip5 [1] "a" [True] [()] [2.5]
+zipWith4 (\a b c d -> a + b + c + d) [1] [2] [3] [4]
+unzip4 [(1,'a',True,"x")]
+foldl1' max [3,1,2]
+foldl1' max ([] :: [Int])
+singleton 'a'
+deleteFirstsBy (==) [1,2,3,2] [2]
+
+## 37. Data.Bits
+import Data.Bits
+5 .&. 3 :: Int
+5 .|. 3 :: Int
+xor 5 3 :: Int
+complement 0 :: Int
+complement 0 :: Integer
+shiftL 1 10 :: Int
+shiftL 1 64 :: Int
+shiftL 1 100 :: Integer
+shiftR (-16) 2 :: Int
+shiftR (-16) 2 :: Integer
+shift 1 (-1) :: Int
+1 `shiftL` 63 :: Int
+rotateL (1 :: Int) 64
+rotateR (1 :: Int) 1
+rotate (minBound :: Int) 1
+popCount (255 :: Int)
+popCount (-1 :: Int)
+popCount (-1 :: Integer)
+testBit (5 :: Int) 2
+testBit (5 :: Integer) 1
+bit 4 :: Int
+setBit (0 :: Integer) 70
+clearBit (15 :: Int) 0
+complementBit (5 :: Int) 1
+finiteBitSize (0 :: Int)
+bitSizeMaybe (0 :: Integer)
+bitSizeMaybe (0 :: Int)
+isSigned (0 :: Int)
+countLeadingZeros (1 :: Int)
+countTrailingZeros (8 :: Int)
+countLeadingZeros (0 :: Int)
+zeroBits :: Int
+(5 :: Int) .<<. 2
+(-8 :: Int) .>>. 1
+(.^.) 6 (3 :: Int)
+True .&. False
+xor True True
+popCount True
+unsafeShiftL (1 :: Int) 3
+shiftL (1 :: Int) (-1)
+toIntegralSized (300 :: Int) :: Maybe Integer
+oneBits :: Int
+:t (.&.)
+:t popCount
+:t finiteBitSize
+## 38. Data.Ratio
+import Data.Ratio
+3 % 4
+6 % 8 :: Rational
+(-3) % 6 :: Rational
+3 % (-6) :: Rational
+1 % 0 :: Rational
+numerator (6 % 8)
+denominator (6 % 8)
+1 % 3 + 1 % 6 :: Rational
+(1 % 3) * (3 % 4) :: Rational
+recip (3 % 4 :: Rational)
+recip (0 :: Rational)
+negate (3 % 4) :: Rational
+abs ((-3) % 4) :: Rational
+signum ((-3) % 4) :: Rational
+toRational (0.75 :: Double)
+toRational (0.1 :: Double)
+fromRational (3 % 4) :: Double
+truncate (7 % 2 :: Rational) :: Integer
+round (5 % 2 :: Rational) :: Integer
+round (7 % 2 :: Rational) :: Integer
+floor ((-7) % 2 :: Rational) :: Integer
+ceiling ((-7) % 2 :: Rational) :: Integer
+properFraction ((-7) % 2 :: Rational) :: (Integer, Rational)
+compare (1 % 3) (1 % 2 :: Rational)
+show (Just (3 % 4 :: Rational))
+showsPrec 8 (3 % 4 :: Rational) ""
+read "3 % 4" :: Rational
+read "(-3) % 4" :: Rational
+[1 % 2, 1 .. 3] :: [Rational]
+approxRational (pi :: Double) 0.001
+3 % 4 :: Ratio Int
+maxBound % 1 + 1 % 1 :: Ratio Int
+realToFrac (1.5 :: Double) :: Rational
+:t (%)
+:t numerator
+## 39. Data.IORef and binding at the prompt
+import Data.IORef
+r <- newIORef (0 :: Int)
+readIORef r
+writeIORef r 5
+readIORef r
+modifyIORef r (+ 1)
+readIORef r
+modifyIORef' r (* 2)
+readIORef r
+atomicModifyIORef r (\x -> (x + 1, x * 10))
+readIORef r
+atomicModifyIORef' r (\x -> (x - 1, "done"))
+readIORef r
+atomicWriteIORef r 42
+readIORef r
+q <- newIORef [1, 2, 3]
+modifyIORef q (map (* 2))
+readIORef q
+r == r
+s <- newIORef 'a'
+:t r
+:t q
+lazy <- newIORef (undefined :: Int)
+writeIORef lazy 1
+readIORef lazy
+modifyIORef lazy (\_ -> undefined)
+modifyIORef lazy (const 3)
+readIORef lazy
+modifyIORef' lazy (\_ -> undefined)
+(a, b) <- return (1, 'x')
+a
+b
+(c, Nothing) <- return (1, Just 2)
+c
+Just d <- return (Just 3)
+d
+:t d
+[e, f] <- return "ab"
+f
+(g, ~(Just h)) <- return (1, Nothing)
+g
+h
+n <- return 5
+n + 1
+:t n
+## 40. Text.Printf
+import Text.Printf
+printf "hi %d\n" (5 :: Int)
+printf "hi %d\n" 5
+printf "%s %d %.2f\n" "a" (1 :: Int) (3.14159 :: Double)
+x <- printf "q\n"
+x
+:t x
+let s = printf "%d" (3 :: Int) :: String
+s
+printf "%5.1f|%-6s|%03d|%x|%X|%o|%e|%g|%c|%%\n" (3.14159 :: Double) "ab" (7 :: Int) (255 :: Int) (255 :: Int) (8 :: Int) (1234.5 :: Double) (0.0001 :: Double) 'z'
+printf "%d\n"
+printf "%d\n" (1 :: Int) (2 :: Int)
+printf "%#-x|\n" (-1 :: Integer)
+printf "%y\n" (1 :: Int)
+printf "%s\n" (5 :: Int)
+:t printf "%d" (1 :: Int)
+printf "%v %v\n" (1 :: Int) "s"
+printf "%10.3e|%-10.2g|%+d|% d\n" (123.456 :: Double) (0.5 :: Double) (5 :: Int) (5 :: Int)
+printf "%.0f %.0f %.0f %.1f\n" (0.5 :: Double) (1.5 :: Double) (2.5 :: Double) (0.05 :: Double)
+printf "%*d|%-*d|\n" (5 :: Int) (42 :: Int) (4 :: Int) (7 :: Int)
+printf "%hhd %hd %ld\n" (300 :: Int) (70000 :: Int) (5 :: Int)
+printf "%hhx %hx\n" (-1 :: Int) (-1 :: Int)
+printf "%u\n" (-1 :: Int)
+printf "%5c|%-3c|\n" 'a' 'b'
+printf "%.3s|%10s|%-10s|\n" "abcdef" "right" "left"
+printf "%f %e %g\n" (1/0 :: Double) (0/0 :: Double) (-0.0 :: Double)
+printf "%g %g %g\n" (1e7 :: Double) (1e-2 :: Double) (123456.789 :: Double)
+printf "%#o %#x %#b\n" (8 :: Int) (0 :: Int) (5 :: Int)
+printf "%.3d|%8.3d|%-8.3d|%08.3d|\n" (5 :: Int) (5 :: Int) (5 :: Int) (5 :: Int)
+printf "%08.3f|%-8.3f|%+.2e\n" (3.14159 :: Double) (-2.5 :: Double) (12345.678 :: Double)
+printf "%#.0f %#g %G %E %F\n" (3 :: Double) (2 :: Double) (1e-10 :: Double) (1234.5 :: Double) (0.25 :: Double)
+printf "%d %d\n" (2 ^ 70 :: Integer) (minBound :: Int)
+printf "%x\n" (2 ^ 70 :: Integer)
+printf "%c%c%c\n" 'a' 'b' 'c'
+printf "%s\n" (show [1, 2, 3])
+printf "100%%\n"
+printf "%-5d|%5s|\n" (-3 :: Int) "λx"
+printf "%.1f\n" (0.25 :: Double)
+printf "%.2f %.2f\n" (1.005 :: Double) (2.675 :: Double)
+printf "%5.2s|\n" "abc"
+printf "%d" (3 :: Int) ++ "!"
+length (printf "%d" (12345 :: Int) :: String)
+printf "%d %s\n" (1 :: Int)
+printf "%c\n" (65 :: Int)
+printf "%d\n" 'A'
+printf "%.3x\n" (5 :: Int)
+## 41. Numeric
+import Numeric
+showHex (255 :: Int) ""
+showOct (8 :: Int) ""
+showBin (5 :: Int) ""
+showHex (2 ^ 70 :: Integer) ""
+showHex (-1 :: Int) ""
+showIntAtBase 36 (\d -> toEnum (d + 48)) (100 :: Int) ""
+showIntAtBase 1 (const 'x') (5 :: Int) ""
+showInt (123 :: Int) ""
+showInt (-1 :: Int) ""
+showSigned showInt 7 (-5 :: Int) ""
+showSigned showInt 0 (-5 :: Int) ""
+showFFloat (Just 2) (3.14159 :: Double) ""
+showFFloat Nothing (3.14159 :: Double) ""
+showFFloat (Just 0) (2.5 :: Double) ""
+showFFloat (Just 3) (1e-4 :: Double) ""
+showFFloat (Just 2) (1e22 :: Double) ""
+showFFloat Nothing (1e22 :: Double) ""
+showFFloat Nothing (1.0e-2 :: Double) ""
+showEFloat (Just 2) (1234.5 :: Double) ""
+showEFloat Nothing (0.001 :: Double) ""
+showEFloat (Just 0) (1234.5 :: Double) ""
+showEFloat (Just 2) (0 :: Double) ""
+showGFloat (Just 2) (0.5 :: Double) ""
+showGFloat (Just 2) (1e8 :: Double) ""
+showGFloat Nothing (123.0 :: Double) ""
+showFFloatAlt (Just 0) (3 :: Double) ""
+showGFloatAlt (Just 0) (3 :: Double) ""
+showFFloat (Just 2) (-0.0 :: Double) ""
+showFFloat (Just 2) (0/0 :: Double) ""
+showEFloat (Just 2) (-1/0 :: Double) ""
+showFloat (1.5 :: Double) ""
+showFloat (1e-3 :: Double) ""
+showHFloat (212.21 :: Double) ""
+showHFloat (-0 :: Double) ""
+showHFloat (1 :: Double) ""
+showHFloat (5.0e-324 :: Double) ""
+floatToDigits 10 (0.3 :: Double)
+floatToDigits 10 (1234.5 :: Double)
+floatToDigits 2 (0.75 :: Double)
+floatToDigits 16 (255.5 :: Double)
+floatToDigits 10 (5.0e-324 :: Double)
+floatToDigits 10 (1.7976931348623157e308 :: Double)
+readHex "ff rest" :: [(Int, String)]
+readHex "FFz" :: [(Integer, String)]
+readOct "777" :: [(Int, String)]
+readDec "123abc" :: [(Int, String)]
+readBin "1012" :: [(Int, String)]
+readHex "xyz" :: [(Int, String)]
+readSigned readDec "-42 rest" :: [(Int, String)]
+readSigned readDec "(-42)" :: [(Int, String)]
+readInt 2 (`elem` "01") (\c -> fromEnum c - 48) "1101" :: [(Int, String)]
+lexDigits "123abc"
+fst . head $ readHex "deadbeef" :: Int
+:t showHex
+:t showFFloat
+:t floatToDigits
+:t readHex

@@ -74,6 +74,9 @@ module Rhci
     ARROW = TCon.new('->', 2)
     LIST = TCon.new('[]', 1)
     UNIT = TCon.new('()', 0)
+    # GHC.Types.Any: what GHCi gives a type variable left open by a prompt
+    # binding (`xs <- return []` makes xs :: [Any]). It has no instances.
+    ANY = TCon.new('Any', 0)
     CHAR = TCon.new('Char', 0)
     INT = TCon.new('Int', 0)
     INTEGER = TCon.new('Integer', 0)
@@ -179,6 +182,13 @@ module Rhci
         end
       end
 
+      # Print the scheme variable `index` as `name` (:info prints a data
+      # type's constructors with the type's own parameter names).
+      def name_gen(index, name)
+        @names["g#{index}"] = name
+        @used[name] = true
+      end
+
       private
 
       def var_name(key)
@@ -186,15 +196,21 @@ module Rhci
       end
 
       def fresh_name
-        i = @used.length
-        n = ''.dup
+        @next ||= 0
         loop do
-          n = (97 + i % 26).chr + n
-          i = i / 26 - 1
-          break if i < 0
+          i = @next
+          @next += 1
+          n = ''.dup
+          loop do
+            n = (97 + i % 26).chr + n
+            i = i / 26 - 1
+            break if i < 0
+          end
+          next if @used.key?(n)
+
+          @used[n] = true
+          return n
         end
-        @used[n] = true
-        n
       end
     end
   end

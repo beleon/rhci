@@ -31,6 +31,13 @@ prelude = File.read(File.join(ROOT, 'prelude', 'Prelude.hs'))
 # An escaped literal, not a quoted heredoc: mruby still processes \\ and \'
 # inside <<'X' heredocs, which would alter the Haskell source.
 lib += "# ---- prelude/Prelude.hs\nRhci::PRELUDE_SOURCE = #{pieces(prelude)}.join.freeze\n"
+require_relative '../lib/rhci/base_names'
+lib += "# ---- prelude/Data/...\nRhci::LIBRARY_SOURCES = {\n"
+Rhci::LIBRARY_MODULES.each do |m|
+  src = File.read(File.join(ROOT, 'prelude', *m.split('.')) + '.hs')
+  lib += "  #{m.inspect} => #{pieces(src)}.join.freeze,\n"
+end
+lib += "}.freeze\n"
 
 # The compiled Prelude (tools/snapshot.rb), regenerated on every bundle so it
 # cannot go stale; only the mruby binary embeds it.
