@@ -44,6 +44,7 @@ lib += "}.freeze\n"
 # corpus; the test bundle with every entry pending, so the tests also check
 # that whatever is looked up gets loaded. Each part (header, chunk of
 # records) is one element, a String or an Array of pieces.
+Dir.mkdir(File.join(ROOT, 'build')) unless Dir.exist?(File.join(ROOT, 'build'))
 snap_path = File.join(ROOT, 'build', 'prelude.snapshot')
 on_demand_path = File.join(ROOT, 'build', 'prelude-ondemand.snapshot')
 system(RbConfig.ruby, File.join(ROOT, 'tools', 'snapshot.rb'), snap_path, on_demand_path, exception: true)
@@ -57,7 +58,6 @@ snapshot = snapshot_parts(on_demand_path)
 tests = [File.join(ROOT, 'test', 'harness.rb'), File.join(ROOT, 'test', 'oracle.rb'),
          File.join(ROOT, 'test', 'core_sexp.rb')] +
         Dir[File.join(ROOT, 'test', 'unit', '*_test.rb')].sort
-Dir.mkdir(File.join(ROOT, 'build')) unless Dir.exist?(File.join(ROOT, 'build'))
 File.write(File.join(ROOT, 'build', 'test_bundle.rb'),
            header + "RHCI_ROOT = #{ROOT.inspect}\n" + lib + snapshot + tests.map { |t| section(t) }.join +
            "exit(RT.run ? 0 : 1)\n")
