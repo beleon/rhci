@@ -5,4 +5,6 @@ MRuby::Gem::Specification.new('rhci') do |spec|
   spec.author  = 'Leon Becker'
   spec.summary = 'rhci: a GHCi-like Haskell REPL'
   spec.bins = %w(rhci)
+  # Rhci::Term must exist before the bundle's Shim is loaded.
+  spec.add_dependency 'rhci-native'
 end

@@ -507,10 +507,29 @@ module Rhci
 
       private
 
+      # The mruby builds have this loop in C (mrbgems/rhci-native/src/
+      # machine.c, a port of run_ruby); CRuby runs the Ruby one.
+      NATIVE = method_defined?(:run_native)
+
+      def run(expr, locals, env, base = @stack.length)
+        return run_native(expr, locals, env, base) if NATIVE && Machine.native
+
+        run_ruby(expr, locals, env, base)
+      end
+
+      # Tests switch the C loop off to compare it with the Ruby one.
+      def self.native
+        @native.nil? ? true : @native
+      end
+
+      def self.native=(on)
+        @native = on
+      end
+
       # The eval/apply loop. Returns the WHNF value once the stack is back
       # at `base` (entry depth), which makes the machine re-entrant for
       # host-side helpers such as `string`.
-      def run(expr, locals, env, base = @stack.length)
+      def run_ruby(expr, locals, env, base)
         stack = @stack
         value = nil
         evaluating = true

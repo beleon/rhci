@@ -38,6 +38,8 @@ def rhci_common(conf)
   conf.gem core: 'mruby-error'
   conf.gem core: 'mruby-exit'
   conf.gem core: 'mruby-metaprog'    # instance_variable_set: the Prelude snapshot decoder only
+  # Rhci::Term and the C evaluation loop (both builds, so tests use them).
+  conf.gem File.expand_path('mrbgems/rhci-native', __dir__)
 end
 
 MRuby::Build.new do |conf|

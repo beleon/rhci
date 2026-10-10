@@ -154,7 +154,7 @@ term_entries(mrb_state *mrb, mrb_value self)
 }
 
 void
-mrb_rhci_gem_init(mrb_state *mrb)
+rhci_term_init(mrb_state *mrb)
 {
   struct RClass *rhci = mrb_define_module(mrb, "Rhci");
   struct RClass *term = mrb_define_module_under(mrb, rhci, "Term");
@@ -170,7 +170,7 @@ mrb_rhci_gem_init(mrb_state *mrb)
 }
 
 void
-mrb_rhci_gem_final(mrb_state *mrb)
+rhci_term_final(mrb_state *mrb)
 {
   (void)mrb;
   if (saved_fd >= 0) tcsetattr(saved_fd, TCSADRAIN, &saved_mode);

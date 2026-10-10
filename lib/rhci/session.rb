@@ -66,6 +66,11 @@ module Rhci
       @machine.interrupt!
     end
 
+    # Machine steps taken so far (what the :steps limit counts).
+    def steps
+      @machine.steps
+    end
+
     # The next line of stdin for the REPL's own reader, which shares stdin
     # with Haskell code (getLine, isEOF) as GHCi's does. nil at its end,
     # :interrupt if Ctrl-C ended the read.
