@@ -387,6 +387,9 @@ module Rhci
       NAN = 0.0 / 0.0
 
       attr_reader :steps
+      # Called every CHECK_EVERY steps, after the limits are checked (the
+      # session loads snapshot entries in the background there), or nil.
+      attr_accessor :background
       attr_writer :args
 
       # out: an IO-like object (write/flush). limits: Hash with optional
@@ -866,6 +869,8 @@ module Rhci
 
         deadline = @limits[:deadline]
         raise LimitExceeded, 'time limit exceeded' if deadline && Shim.now > deadline
+
+        @background&.call
       end
 
       # A primitive's String result, in WHNF like every primitive result.

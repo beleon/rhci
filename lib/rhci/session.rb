@@ -54,6 +54,60 @@ module Rhci
       @fixities = {}
       @machine = VM::Machine.new(stdout, limits, input: stdin, err: stderr, cwd: cwd, files: files)
       @prelude_loaded = false
+      @background_loading = false
+      @trace_snapshot = false
+    end
+
+    # Snapshot entries not decoded at startup are loaded on demand, and, with
+    # background loading on (the CLI's REPL), while inputs run: once an
+    # input has run for as long as decoding the snapshot's core took, the
+    # machine loads entries for that long, then runs that long again, and
+    # so on until everything is loaded. See also load_while_idle.
+    attr_writer :background_loading
+    # Build time (tools/snapshot.rb): record which entries inputs look up.
+    attr_writer :trace_snapshot
+
+    def snapshot_trace
+      (@decoder && @decoder.trace_log) || []
+    end
+
+    def snapshot_decoded
+      (@decoder && @decoder.decoded) || []
+    end
+
+    # Snapshot table entries not yet loaded (see Decoder#pending_count),
+    # and loaded since startup.
+    def pending_entries
+      @decoder ? @decoder.pending_count : 0
+    end
+
+    def loaded_entries
+      @decoder ? @decoder.loaded_count : 0
+    end
+
+    # Are snapshot entries still to be loaded?
+    def loading?
+      !@prelude_loaded || (!@decoder.nil? && @decoder.pending?)
+    end
+
+    # The REPL's idle time, before input arrives: loads the Prelude, then
+    # pending snapshot entries in steps of a few milliseconds, until
+    # ready.call says input is waiting or everything is loaded.
+    def load_while_idle(ready)
+      return if ready.call
+
+      load_prelude
+      while @decoder
+        now = Shim.now
+        if @decoder.load_step(now && now + IDLE_STEP)
+          @decoder = nil
+          @machine.background = nil
+          return
+        end
+        return if ready.call
+      end
+    rescue StandardError
+      nil # a broken Prelude is reported by the input that needs it
     end
 
     # The full command name an abbreviation stands for, or nil.
@@ -65,6 +119,27 @@ module Rhci
 
     def interrupt!
       @machine.interrupt!
+    end
+
+    IDLE_STEP = 0.002
+
+    def start_background
+      return unless @background_loading && @decoder && @preload_time && @decoder.pending?
+
+      @window = Shim.now
+      @machine.background = -> { background_tick }
+    end
+
+    # Called by the machine every few thousand steps.
+    def background_tick
+      now = Shim.now
+      return if now - @window < @preload_time
+
+      if @decoder.load_step(now + @preload_time)
+        @decoder = nil
+        @machine.background = nil
+      end
+      @window = Shim.now
     end
 
     # Machine steps taken so far (what the :steps limit counts).
@@ -95,6 +170,7 @@ module Rhci
     # Evaluate one GHCi input (expression, declarations, `let`, command).
     def eval(input)
       @machine.begin_evaluation
+      start_background
       return command(input) if Rhci::Text.lstrip(input).start_with?(':')
 
       node, layer = Frontend.parse_repl(input, @fixities)
@@ -193,7 +269,7 @@ module Rhci
 
     def value_cell(value)
       cell = VM::Cell.new("it%value%#{@globals.length}", value)
-      @globals = @globals.merge(cell.name => cell)
+      @globals[cell.name] = cell
       Core::Var.new(cell.name)
     end
 
@@ -202,7 +278,7 @@ module Rhci
       name = @names.fresh('it', :var)
       name.global = true
       cell = VM::Cell.new(name.core, value)
-      @globals = @globals.merge(cell.name => cell)
+      @globals[cell.name] = cell
       @names.values['it'] = name
       @tenv[name] = Types.mono(type)
     end
@@ -349,20 +425,29 @@ module Rhci
 
     # ---- modules -------------------------------------------------------------------
 
-    # What the session looks like with only the Prelude: restored by :load.
+    # What :load returns to: the Prelude's names, and its instances (the
+    # session's own are logged as they are added, and undone).
     def capture_baseline
-      classes = []
-      @names.types.each_value { |n| classes << n.klass if n.kind == :class }
-      @baseline = {
-        values: @names.values.dup, types: @names.types.dup,
-        instances: classes.map { |ci| [ci, ci.instances.dup] }
-      }
+      @baseline = { values: @names.values.dup, types: @names.types.dup }
+      @instance_log = []
+    end
+
+    def add_instance(klass, key, inst)
+      @instance_log&.push([klass, key, klass.instances.key?(key), klass.instances[key]])
+      klass.instances[key] = inst
     end
 
     def reset_to_baseline
       @names.values.replace(@baseline[:values].dup)
       @names.types.replace(@baseline[:types].dup)
-      @baseline[:instances].each { |ci, inst| ci.instances.replace(inst.dup) }
+      @instance_log.reverse_each do |klass, key, had, old|
+        if had
+          klass.instances[key] = old
+        else
+          klass.instances.delete(key)
+        end
+      end
+      @instance_log.clear
       @names.refused.clear
       @names.clear_definitions
       @names.local_modules = nil
@@ -442,7 +527,7 @@ module Rhci
       defs, = Desugar.new(@names, path).top(rtop)
       install(defs)
       tc.pending.each { |n, sc| @tenv[n] = sc if n.global || n.kind != :var }
-      tc.new_instances.each { |(klass, key), inst| klass.instances[key] = inst }
+      tc.new_instances.each { |(klass, key), inst| add_instance(klass, key, inst) }
       layer = FixityResolver.new(fixities, path).group_layer(m.decls)
       mod = { name: name, rtop: rtop, imported: imported, fixities: fixities.merge(layer) }
       mod[:exports] = module_exports(m, rtop, imported, path)
@@ -662,12 +747,12 @@ module Rhci
       @embedded_snapshot = text
     end
 
+    # The text, or its parts (see Snapshot::Decoder).
     def self.embedded_snapshot
       return @embedded_snapshot if @embedded_snapshot
-      return PRELUDE_SNAPSHOT if Rhci.const_defined?(:PRELUDE_SNAPSHOT)
       return nil unless Rhci.const_defined?(:PRELUDE_SNAPSHOT_PARTS)
 
-      @embedded_snapshot ||= PRELUDE_SNAPSHOT_PARTS.join
+      PRELUDE_SNAPSHOT_PARTS
     end
 
     # What the snapshot captures after the Prelude has loaded.
@@ -690,8 +775,12 @@ module Rhci
       if @prelude_mode == :snapshot || (@prelude_mode == :auto && snapshot)
         raise 'no Prelude snapshot is available' unless snapshot
 
-        @names, @tenv, @globals, @unfoldings, @full_cores, @specs = Snapshot.decode(snapshot)
+        start = Shim.now
+        @decoder = Snapshot.decoder(snapshot)
+        @decoder.start_trace if @trace_snapshot
+        @names, @tenv, @globals, @unfoldings, @full_cores, @specs = @decoder.root
         capture_baseline
+        @preload_time = start && Shim.now - start
         return
       end
       m = Frontend.parse_module(PRELUDE_SOURCE, '<Prelude>', prelude: true)
@@ -727,7 +816,7 @@ module Rhci
       defs, = Desugar.new(@names, label).top(rtop)
       install(defs)
       tc.pending.each { |n, sc| @tenv[n] = sc if n.global || n.kind != :var }
-      tc.new_instances.each { |(klass, key), inst| klass.instances[key] = inst }
+      tc.new_instances.each { |(klass, key), inst| add_instance(klass, key, inst) }
       @names.register_library(mod, rtop.values, rtop.types)
     end
 
@@ -737,7 +826,7 @@ module Rhci
       install(defs)
       @names.commit(rtop, prelude: prelude)
       tc.pending.each { |n, s| @tenv[n] = s if n.global || n.kind != :var }
-      tc.new_instances.each { |(klass, key), inst| klass.instances[key] = inst }
+      tc.new_instances.each { |(klass, key), inst| add_instance(klass, key, inst) }
       layer&.each { |k, v| @fixities[k] = v }
     end
 

@@ -294,10 +294,34 @@ list?". Printing goes through the `Show` dictionary like any other code.
 - **Never compiled at startup.** A build step runs the Prelude through the
   whole pipeline and writes a **snapshot**: the type environment, class and
   instance tables, and the elaborated machine Core.
-  - The snapshot is stored **per binding**, so it *can* be decoded lazily
-    on first reference (`:t map` would decode one type). Start with eager
-    decoding, and switch to lazy only if the startup benchmark says the
-    eager version doesn't fit the budget.
+  - **Loaded in stages** (format in `lib/rhci/snapshot.rb`). The name
+    tables, the type environment, the globals, unfoldings and class
+    instance tables are `LazyTable`s: their entries are decoded one at a
+    time. The records come in three runs, split into chunks of 256 that
+    are only split into records when first needed:
+    1. **The core**, decoded at startup: the entries a corpus of typical
+       inputs (`tools/snapshot_corpus.txt`) looks up, found at build time
+       by running it against a snapshot with every entry pending.
+    2. **The rest of the structure**, decoded entry by entry: on a lookup
+       that misses the loaded entries (a missing name can't be reported
+       before the rest is checked), by an operation over a whole table
+       (`:info`'s instance lists, Tab completion), or in the background.
+    3. **Compiled code**, decoded per global on first use, ordered so
+       that the corpus's code comes first and an input's code sits in few
+       chunks.
+  - **Background loading, paced by the machine itself** (the REPL; not
+    `-c`/`-x`, which exit when done). The session measures, with the
+    runtime clock, how long decoding the core took (P). While an input
+    runs, the machine checks every 4096 steps: after P of running it loads
+    entries for about P, runs for P again, and so on until everything is
+    loaded; no fixed durations, so it adapts to the hardware. While the
+    REPL waits for a key, it loads in 2 ms steps between non-blocking
+    input checks, so the snapshot is usually complete before the first
+    Enter.
+  - `LazyTable` is deliberately not a Hash: a method it doesn't define
+    fails loudly instead of seeing only the loaded part. The mruby test
+    bundle embeds a snapshot whose entries are all pending, so every
+    mruby test also checks that lookups find what isn't loaded yet.
   - Compiled code and types are shared and read-only. **CAFs (top-level
     thunks) are instantiated per session**, because evaluating one mutates
     it, and two embedded sessions must never share mutable heap.
@@ -374,6 +398,10 @@ list?". Printing goes through the `Show` dictionary like any other code.
     is where `:load` and `readFile`/`writeFile` resolve relative paths;
     `files: false` makes file access fail (`permission denied (file
     access is disabled)`), for hosts that must not touch the disk.
+  - `session.background_loading = true` lets inputs load the rest of the
+    snapshot as they run (off by default: a host's step and time limits
+    then measure only its own inputs); `session.load_while_idle(ready)`
+    loads while `ready.call` is false.
   - `session.eval(input)` returns a result object: the output text and a
     status of ok, parse error, scope error, type error, runtime exception
     or limit hit.
@@ -628,3 +656,8 @@ Each step ends green on **both** runtimes before the next one starts.
   the missing Control.Monad/Data.List functions, `:info`/`:kind`, then
   Text.Printf, Data.Bits, Data.Ratio, file IO and Data.IORef. Faithful
   ports of containers and base, not reimplementations.
+- (2026-10-10) The snapshot loads in stages instead of all at once: a
+  predefined core first, then the rest on demand and in the background,
+  paced by how long the core took on this machine (measured at runtime,
+  never a fixed duration): run the input for that long, load for that
+  long, repeat.

@@ -6,11 +6,25 @@ module Rhci
   # tools/snapshot.rb and decoded here into fresh objects for each session
   # (so top-level thunks, which evaluation overwrites, are never shared).
   #
-  # Format: records separated by "\n", fields by "\t". Record 0 holds the
-  # roots. Kinds: "O\tClass\t@ivar\tvalue..." (an object), "A\tvalue...",
-  # "B\tClass\tvalue..." (an Array subclass: thunks, closures, constructor
-  # values), "H\tkey\tvalue...". Values: i<integer> f<IEEE bits, hex> s<string>
-  # y<symbol> r<record index> n T F, and K<name> for shared singletons.
+  # Format: parts separated by "\f". Part 0 is a header, "rhci-snapshot\t2\t
+  # <records per chunk>\t<records>\t<core records>\t<structure records>";
+  # the other parts are chunks of records, each split only when one of its
+  # records is first needed. Records are separated by "\n", fields by "\t".
+  # Record 0 holds the roots. Kinds: "O\tClass\t@ivar\tvalue..." (an
+  # object), "A\tvalue...", "B\tClass\tvalue..." (an Array subclass: thunks,
+  # closures, constructor values), "H\tkey\tvalue...", and
+  # "L\tlabel\tkey_core\tn\tm\tkey\tvalue...(n pairs)\tpending ref" (a
+  # LazyTable: n loaded entries, and a "P" record of m pending ones, as
+  # "key\tvalue ref" or, when keyed by Names, "Name#core\tkey ref\tvalue
+  # ref"). Values:
+  # i<integer> f<IEEE bits, hex> s<string> y<symbol> r<record index> n T F,
+  # and K<name> for shared singletons.
+  #
+  # The records come in three runs. The core (what typical inputs need,
+  # found by running a corpus at build time) is decoded at startup; the rest
+  # of the tables' structure is decoded entry by entry: on a lookup, by an
+  # operation over a whole table, or in the background (load_step); last
+  # comes compiled code, decoded per global on first use (LazyCell).
   module Snapshot
     CLASSES = {}
 
@@ -56,12 +70,11 @@ module Rhci
       @singletons = s
     end
 
-    # Session state from encoded text: [NameEnv, tenv, globals, unfoldings]. Only what
-    # renaming and type checking need is decoded now; each global's value
-    # (its compiled code) is decoded when the machine first reads it.
-    def self.decode(text)
+    # The decoder of a snapshot: its root (session state, see
+    # Session#prelude_state) is decoded on request, and with it the core.
+    def self.decoder(source)
       register_classes if CLASSES.empty?
-      Decoder.new(text).root
+      Decoder.new(source)
     end
 
     # A global whose value is decoded on first use.
@@ -82,27 +95,93 @@ module Rhci
     end
 
     class Decoder
-      def initialize(text)
-        @records = text.split("\n")
-        @objs = Array.new(@records.length)
+      # tracing: LazyTables report the entries looked up (trace_log), which
+      # tools/snapshot.rb uses to choose the core.
+      attr_reader :tracing, :trace_log, :core_records
+
+      # source: the snapshot text, or its parts as an Array (each a String
+      # or an Array of pieces, joined when needed).
+      def initialize(source)
+        @parts = source.is_a?(String) ? source.split("\f") : source
+        head = part(0).split("\t")
+        raise 'snapshot: unknown version' unless head[0] == 'rhci-snapshot' && head[1] == '2'
+
+        @chunk = head[2].to_i
+        @core_records = head[4].to_i
+        @split = Array.new(@parts.length)
+        @objs = Array.new(head[3].to_i)
         @syms = {}
+        @tables = []
+        @tracing = false
+        @loaded_count = 0
       end
 
       def root
         obj(0)
       end
 
+      def start_trace
+        @tracing = true
+        @trace_log = []
+        @decoded = []
+      end
+
+      # With tracing: the records decoded so far, in order.
+      attr_reader :decoded
+
+      def trace(label, key)
+        @trace_log << [label, key]
+      end
+
+      # A LazyTable with pending entries, for load_step.
+      def register(table)
+        @tables << table
+      end
+
+      # Table entries decoded so far, after startup.
+      attr_reader :loaded_count
+
+      def entry_loaded
+        @loaded_count += 1
+      end
+
+      # Table entries still pending (registered tables; tables inside
+      # objects not yet decoded are not counted).
+      def pending_count
+        n = 0
+        @tables.each { |t| n += t.pending_count }
+        n
+      end
+
+      # Are table entries still pending?
+      def pending?
+        @tables.pop until @tables.empty? || @tables.last.pending?
+        !@tables.empty?
+      end
+
+      # Decodes pending table entries until Shim.now passes deadline (nil:
+      # until none are left). True once everything is loaded.
+      def load_step(deadline)
+        while pending?
+          @tables.last.load_some(16)
+          return false if deadline && Shim.now >= deadline
+        end
+        true
+      end
+
       # The object of record i, decoded (with everything it refers to,
-      # except cell values) on first request.
+      # except cell values and pending table entries) on first request.
       def obj(i)
         o = @objs[i]
         return o if o
 
-        f = @records[i].split("\t", -1)
+        @decoded << i if @tracing
+        f = record(i).split("\t", -1)
         kind = f[0]
         if kind == 'O' && f[1] == 'Rhci::VM::Cell'
           return @objs[i] = lazy_cell(f)
         end
+        return lazy_table(i, f) if kind == 'L'
 
         o = case kind
             when 'O', 'B'
@@ -135,6 +214,26 @@ module Rhci
         o
       end
 
+      def value(v)
+        case v[0]
+        when 'r' then obj(v[1..-1].to_i)
+        else Snapshot.value(v, nil)
+        end
+      end
+
+      private
+
+      def part(c)
+        p = @parts[c]
+        p.is_a?(Array) ? p.join : p
+      end
+
+      def record(i)
+        c = i / @chunk + 1
+        recs = @split[c] ||= part(c).split("\n")
+        recs[i % @chunk]
+      end
+
       def lazy_cell(f)
         name = nil
         ref = nil
@@ -149,15 +248,48 @@ module Rhci
         LazyCell.new(name, self, ref)
       end
 
-      def sym(s)
-        @syms[s] ||= s.to_sym
+      # The table exists (in @objs) before its entries are decoded, which
+      # may refer back to it. Its pending entries stay in their own record
+      # until the table first needs them (pending_entries).
+      def lazy_table(i, f)
+        t = LazyTable.new({}, self, f[2] == 'T', Snapshot.unescape(f[1]))
+        @objs[i] = t
+        n = f[3].to_i
+        j = 5
+        n.times do
+          t[value(f[j])] = value(f[j + 1])
+          j += 2
+        end
+        t.add_pending(f[j], f[4].to_i)
+        t
       end
 
-      def value(v)
-        case v[0]
-        when 'r' then obj(v[1..-1].to_i)
-        else Snapshot.value(v, nil)
+      public
+
+      # The pending entries of a table: record ref ("P\tkey\tvalue
+      # ref..." or "P\tName#core\tkey ref\tvalue ref..."), as a Hash.
+      def pending_entries(ref, key_core)
+        f = record(ref[1..-1].to_i).split("\t", -1)
+        out = {}
+        j = 1
+        if key_core
+          while j < f.length
+            out[Snapshot.unescape(f[j])] = [f[j + 1], f[j + 2]]
+            j += 3
+          end
+        else
+          while j < f.length
+            out[Snapshot.value(f[j], nil)] = f[j + 1]
+            j += 2
+          end
         end
+        out
+      end
+
+      private
+
+      def sym(s)
+        @syms[s] ||= s.to_sym
       end
     end
 
@@ -185,7 +317,7 @@ module Rhci
         if c == '\\'
           i += 1
           d = s[i]
-          out << (d == 'n' ? "\n" : d == 't' ? "\t" : d)
+          out << (d == 'n' ? "\n" : d == 't' ? "\t" : d == 'f' ? "\f" : d)
         else
           out << c
         end

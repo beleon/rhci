@@ -23,6 +23,8 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <termios.h>
+#include <poll.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <mruby.h>
@@ -153,6 +155,27 @@ term_entries(mrb_state *mrb, mrb_value self)
   return out;
 }
 
+/* Can fd be read without blocking? */
+static mrb_value
+term_ready_p(mrb_state *mrb, mrb_value self)
+{
+  (void)self;
+  mrb_int fd;
+  mrb_get_args(mrb, "i", &fd);
+  struct pollfd p = { (int)fd, POLLIN, 0 };
+  return mrb_bool_value(poll(&p, 1, 0) > 0);
+}
+
+/* Monotonic seconds, for measuring durations (Shim.now). */
+static mrb_value
+term_clock(mrb_state *mrb, mrb_value self)
+{
+  (void)self;
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return mrb_float_value(mrb, (mrb_float)ts.tv_sec + (mrb_float)ts.tv_nsec / 1e9);
+}
+
 void
 rhci_term_init(mrb_state *mrb)
 {
@@ -167,6 +190,8 @@ rhci_term_init(mrb_state *mrb)
   mrb_define_module_function(mrb, term, "take_sigint", term_take_sigint, MRB_ARGS_NONE());
   mrb_define_module_function(mrb, term, "getenv", term_getenv, MRB_ARGS_REQ(1));
   mrb_define_module_function(mrb, term, "entries", term_entries, MRB_ARGS_REQ(1));
+  mrb_define_module_function(mrb, term, "clock", term_clock, MRB_ARGS_NONE());
+  mrb_define_module_function(mrb, term, "ready?", term_ready_p, MRB_ARGS_REQ(1));
 }
 
 void

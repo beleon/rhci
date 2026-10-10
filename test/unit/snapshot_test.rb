@@ -31,6 +31,10 @@ RT.suite 'prelude snapshot' do
     text = snap_text
     RT.ok text, 'no snapshot available (run rake bundle)'
     Rhci::Session.snapshot_text = text
-    RT.eq snap_run(:source), snap_run(:snapshot)
+    begin
+      RT.eq snap_run(:source), snap_run(:snapshot)
+    ensure
+      Rhci::Session.snapshot_text = nil
+    end
   end
 end

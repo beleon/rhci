@@ -21,6 +21,7 @@ rename
 typecheck
 desugar
 derive
+lazy_table
 snapshot
 session
 info

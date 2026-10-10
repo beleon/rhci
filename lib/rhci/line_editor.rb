@@ -29,6 +29,11 @@ module Rhci
         Shim.read_byte(@input)
       end
 
+      # Is a byte waiting to be read?
+      def ready?
+        Shim.input_ready?(@input)
+      end
+
       def write(str)
         Shim.write(@output, str)
         Shim.flush(@output)
@@ -46,10 +51,13 @@ module Rhci
     # completer: called with the text before the cursor; returns
     # [start, candidates], where start is where the word being completed
     # begins (a character index) and candidates are its completions.
-    def initialize(term, history: [], completer: nil)
+    # idle: called before waiting for each key (the REPL loads the Prelude
+    # meanwhile).
+    def initialize(term, history: [], completer: nil, idle: nil)
       @term = term
       @history = history
       @completer = completer
+      @idle = idle
     end
 
     # The next line (without newline), nil at end of input (Ctrl-D on an
@@ -66,6 +74,7 @@ module Rhci
       insert_text(pending) if pending
       refresh
       loop do
+        @idle&.call
         b = @term.read_byte
         return eof if b.nil?
 

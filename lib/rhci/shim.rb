@@ -8,9 +8,10 @@ module Rhci
   module Shim
     MRUBY = RUBY_ENGINE == 'mruby'
 
-    # Monotonic seconds, or nil where there is no clock (lean mruby).
+    # Monotonic seconds, or nil where there is no clock (a lean mruby
+    # without rhci-native).
     def self.now
-      return nil if MRUBY
+      return TERM&.clock if MRUBY
 
       Process.clock_gettime(Process::CLOCK_MONOTONIC)
     end
@@ -22,8 +23,8 @@ module Rhci
       File.read(path)
     end
 
-    # The rhci binary's C helpers (mrbgems/rhci/src/term.c); absent in the
-    # plain mruby that runs the test bundle.
+    # The C helpers of the rhci-native gem (mrbgems/rhci-native/src/term.c),
+    # in both mruby builds.
     TERM = MRUBY && Rhci.const_defined?(:Term) ? Rhci::Term : nil
 
     # Raised by the CRuby SIGINT trap into a blocked stdin read.
@@ -148,6 +149,13 @@ module Rhci
 
       b = TERM.read_byte(0)
       b == -1 ? 3 : b
+    end
+
+    # Can a byte be read from the terminal without waiting?
+    def self.input_ready?(io)
+      return TERM.ready?(0) if MRUBY
+
+      !IO.select([io], nil, nil, 0).nil?
     end
 
     def self.term_width(io)

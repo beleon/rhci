@@ -1,0 +1,70 @@
+# Typical inputs: what they look up in the Prelude snapshot is decoded at
+# startup (the core); everything else when first needed. One session per
+# line; " ;; " separates inputs within a line.
+1 + 2
+2 ^ 64
+10 / 3
+7 `div` 2
+sqrt 2
+pi * 2
+fromIntegral (3 :: Int) / 2
+truncate 3.7
+round 2.5
+"hello"
+'x'
+True && False
+not True
+[1, 2, 3]
+[1 .. 10]
+[x * x | x <- [1 .. 10], even x]
+length [1, 2, 3]
+sum [1 .. 100]
+product [1 .. 10]
+map (* 2) [1, 2, 3]
+filter odd [1 .. 10]
+foldr (+) 0 [1, 2, 3]
+foldl (+) 0 [1, 2, 3]
+take 5 (repeat 'a')
+zip [1, 2] "ab"
+reverse "hello"
+head [1, 2]
+concat [[1], [2]]
+concatMap show [1, 2]
+elem 3 [1, 2, 3]
+maximum [3, 1, 2]
+replicate 3 'x'
+lines "a\nb"
+words "a b c"
+unwords ["a", "b"]
+show 42
+read "42" :: Int
+Just 3
+fmap (+ 1) (Just 2)
+maybe 0 (+ 1) (Just 2)
+fromMaybe 0 Nothing
+Left 1 :: Either Int String
+(1, 'a')
+fst (1, 2)
+sort [3, 1, 2]
+nub [1, 1, 2]
+group "aabbc"
+sortBy (comparing snd) [(1, 'b'), (2, 'a')]
+isPrefixOf "ab" "abc"
+splitAt 2 [1, 2, 3]
+toUpper 'a'
+ord 'a'
+isDigit '1'
+let f x = x * 2 ;; f 21
+let xs = [1, 2, 3] ;; sum xs
+data Color = Red | Green deriving (Show, Eq, Ord) ;; [Red, Green]
+:t map
+:t foldr
+:t (+)
+print 1
+putStrLn "hi"
+mapM_ print [1, 2]
+words <$> return "a b"
+import qualified Data.Map as M ;; M.toList (M.fromList [(1, "a"), (2, "b")])
+import qualified Data.Map as M ;; M.lookup 1 (M.insert 1 'x' M.empty)
+import qualified Data.Set as S ;; S.toList (S.fromList [3, 1, 2])
+printf "%d %s\n" (1 :: Int) "x"

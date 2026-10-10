@@ -108,6 +108,7 @@ module Rhci
 
     def self.repl(opts, stdin, stdout, stderr)
       session = Session.new(stdout: stdout, stdin: stdin, stderr: stderr)
+      session.background_loading = true
       editor = line_editor(session, stdin, stdout)
       report(session.load(opts.files), stderr) unless opts.files.empty?
       loop do
@@ -166,7 +167,10 @@ module Rhci
       Shim.trap_interrupt { session.interrupt! }
       @history_path = history_path
       completer = ->(text) { session.completions(text) }
-      LineEditor.new(LineEditor::Tty.new(stdin, stdout), history: load_history, completer: completer)
+      tty = LineEditor::Tty.new(stdin, stdout)
+      ready = -> { tty.ready? }
+      idle = -> { session.load_while_idle(ready) }
+      LineEditor.new(tty, history: load_history, completer: completer, idle: idle)
     end
 
     def self.edit_line(session, prompt, editor)

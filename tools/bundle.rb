@@ -40,11 +40,19 @@ end
 lib += "}.freeze\n"
 
 # The compiled Prelude (tools/snapshot.rb), regenerated on every bundle so it
-# cannot go stale; only the mruby binary embeds it.
+# cannot go stale. The binary embeds it with the core chosen from the
+# corpus; the test bundle with every entry pending, so the tests also check
+# that whatever is looked up gets loaded. Each part (header, chunk of
+# records) is one element, a String or an Array of pieces.
 snap_path = File.join(ROOT, 'build', 'prelude.snapshot')
-system(RbConfig.ruby, File.join(ROOT, 'tools', 'snapshot.rb'), snap_path, exception: true)
-snapshot = "# ---- build/prelude.snapshot\nRhci::PRELUDE_SNAPSHOT_PARTS = #{pieces(File.read(snap_path))}.freeze\n"
-File.write(File.join(ROOT, 'mrbgems', 'rhci', 'mrblib', 'rhci.rb'), header + lib + snapshot)
+on_demand_path = File.join(ROOT, 'build', 'prelude-ondemand.snapshot')
+system(RbConfig.ruby, File.join(ROOT, 'tools', 'snapshot.rb'), snap_path, on_demand_path, exception: true)
+def snapshot_parts(path)
+  parts = File.read(path).split("\f").map { |p| p.length <= 30_000 ? p.inspect : pieces(p) }
+  "# ---- #{path.sub("#{ROOT}/", '')}\nRhci::PRELUDE_SNAPSHOT_PARTS = [\n#{parts.join(",\n")}\n].freeze\n"
+end
+File.write(File.join(ROOT, 'mrbgems', 'rhci', 'mrblib', 'rhci.rb'), header + lib + snapshot_parts(snap_path))
+snapshot = snapshot_parts(on_demand_path)
 
 tests = [File.join(ROOT, 'test', 'harness.rb'), File.join(ROOT, 'test', 'oracle.rb'),
          File.join(ROOT, 'test', 'core_sexp.rb')] +
