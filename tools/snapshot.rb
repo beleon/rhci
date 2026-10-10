@@ -8,9 +8,13 @@
 #
 # The core -- the table entries decoded at startup -- is what the inputs in
 # tools/snapshot_corpus.txt look up: they run against a snapshot with every
-# entry pending, and the entries they load are traced. ON_DEMAND_OUT gets
-# that all-pending snapshot (the mruby test bundle uses it, so every test
-# also checks that a lookup finds what is not yet loaded).
+# entry pending, and the entries they load are traced. The specialisations
+# they make (of Prelude functions to Prelude dictionaries) are made here
+# too, so typical inputs find them ready instead of compiling them on
+# every `rhci -c`; making them runs only the compiler, so no top-level
+# value is evaluated into the snapshot. ON_DEMAND_OUT gets the all-pending
+# snapshot (the mruby test bundle uses it, so every test also checks that
+# a lookup finds what is not yet loaded).
 require_relative '../lib/rhci'
 
 module SnapshotEncoder
@@ -47,6 +51,8 @@ module SnapshotEncoder
     @lazy = lazy_tables(roots)
     @core = core
     @pending = {}.compare_by_identity
+    @inline = {}.compare_by_identity
+    @refs = count_refs(roots)
     order = arrange(roots, hot)
     ids = {}.compare_by_identity
     order.each_with_index { |o, i| ids[o] = i }
@@ -76,6 +82,49 @@ module SnapshotEncoder
       t[tables[:types]] = ["library:#{m}:types", false]
     end
     t
+  end
+
+  # How often each object is referred to, over the whole graph.
+  def self.count_refs(roots)
+    refs = Hash.new(0).compare_by_identity
+    stack = [roots]
+    seen = {}.compare_by_identity
+    until stack.empty?
+      o = stack.pop
+      next if seen.key?(o)
+
+      seen[o] = true
+      each_ref(o) do |c|
+        next if scalar?(c)
+
+        refs[c] += 1
+        stack << c
+      end
+    end
+    refs
+  end
+
+  def self.each_ref(o, &block)
+    case o
+    when Hash then o.each { |k, v| block.call(k); block.call(v) }
+    when Array then o.each(&block)
+    else ivars(o).each { |iv| block.call(o.instance_variable_get(iv)) }
+    end
+  end
+
+  def self.scalar?(o)
+    o.nil? || o == true || o == false || o.is_a?(Integer) || o.is_a?(Float) || o.is_a?(Symbol) ||
+      o.is_a?(String) || @singles.key?(o)
+  end
+
+  # A plain Array of integers, nil and booleans that only one place refers
+  # to is written inline, "[i0,i5,n]": it needs no record of its own, and
+  # nothing can tell the copy from the original.
+  def self.inline?(o)
+    return @inline[o] if @inline.key?(o)
+
+    @inline[o] = o.instance_of?(Array) && @refs[o] == 1 &&
+                 o.all? { |x| x.nil? || x == true || x == false || x.is_a?(Integer) }
   end
 
   # Every object, in record order: the core run (phase 1), the rest of the
@@ -168,6 +217,7 @@ module SnapshotEncoder
     when Float then "f#{Rhci::Num.double_to_bits(o).to_s(16)}"
     when Symbol then "y#{o}"
     when String then "s#{escape(o)}"
+    when Array then inline?(o) ? "[#{o.map { |x| literal(x) }.join(',')}]" : nil
     else @singles.key?(o) ? "K#{@singles[o]}" : nil
     end
   end
@@ -221,11 +271,12 @@ module SnapshotEncoder
 
   # What the corpus uses, each line in a fresh session (a line may hold
   # several inputs, separated by " ;; "): the table entries looked up (the
-  # core), and the objects decoded, in first-use order. order: the objects
-  # of text in record order.
+  # core), the objects decoded, in first-use order, and the
+  # specialisations made. order: the objects of text in record order.
   def self.train(text, order, corpus)
     core = {}
     hot = []
+    specs = []
     seen = {}
     sink = Object.new
     def sink.write(s) = s.length
@@ -236,6 +287,7 @@ module SnapshotEncoder
       session.trace_snapshot = true
       line.split(' ;; ').each { |input| session.eval(input) }
       session.snapshot_trace.each { |label, key| (core[label] ||= {})[key] = true }
+      specs.concat(session.snapshot_specs)
       session.snapshot_decoded.each do |i|
         next if seen.key?(i)
 
@@ -244,7 +296,7 @@ module SnapshotEncoder
       end
     end
     Rhci::Session.snapshot_text = nil
-    [core, hot]
+    [core, hot, specs]
   end
 end
 
@@ -252,10 +304,13 @@ if __FILE__ == $PROGRAM_NAME
   session = Rhci::Session.new
   session.send(:load_prelude)
   state = session.send(:prelude_state)
-  on_demand, order = SnapshotEncoder.encode(state, {})
   corpus_path = File.join(__dir__, 'snapshot_corpus.txt')
   corpus = File.read(corpus_path).split("\n").reject { |l| l.strip.empty? || l.start_with?('#') }
-  core, hot = SnapshotEncoder.train(on_demand, order, corpus)
+  on_demand, order = SnapshotEncoder.encode(state, {})
+  _, _, specs = SnapshotEncoder.train(on_demand, order, corpus)
+  specs.each { |name, dicts| session.prepare_specialization(name, dicts) }
+  on_demand, order = SnapshotEncoder.encode(state, {})
+  core, hot, = SnapshotEncoder.train(on_demand, order, corpus)
   text, = SnapshotEncoder.encode(state, core, hot)
   File.write(ARGV.fetch(0), text)
   File.write(ARGV[1], on_demand) if ARGV[1]

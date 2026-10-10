@@ -56,6 +56,7 @@ module Rhci
       @prelude_loaded = false
       @background_loading = false
       @trace_snapshot = false
+      @spec_trace = []
     end
 
     # Snapshot entries not decoded at startup are loaded on demand, and, with
@@ -73,6 +74,23 @@ module Rhci
 
     def snapshot_decoded
       (@decoder && @decoder.decoded) || []
+    end
+
+    # Specialisations made, as [global name, dictionaries (portable_dict)].
+    def snapshot_specs
+      @spec_trace
+    end
+
+    # Build time: make the specialisation of global name to dictionaries
+    # (portable_dict form) now, if every name involved is a global here.
+    def prepare_specialization(name, dicts)
+      return nil unless @globals.key?(name) && dicts.all? { |d| known_dict?(d) }
+
+      specialize(name, dicts.map { |d| Session.dict_core(d) })
+    end
+
+    def known_dict?(d)
+      d.is_a?(String) ? @globals.key?(d) : known_dict?(d[0]) && d[1].all? { |a| known_dict?(a) }
     end
 
     # Snapshot table entries not yet loaded (see Decoder#pending_count),
@@ -884,6 +902,7 @@ module Rhci
       full = @full_cores[name]&.value
       return nil unless full.is_a?(Core::Lam) && @specs.length < SPEC_LIMIT
 
+      @spec_trace << [name, dicts.map { |d| portable_dict(d) }] if @trace_snapshot
       n = dicts.length
       n = full.params.length if n > full.params.length
       binds = []
@@ -894,6 +913,15 @@ module Rhci
       @globals[key] = cell
       cell.value = compile_global(key, Core::Let.new(binds, body))
       key
+    end
+
+    # A dictionary expression as global names: "name", or [f, [args...]].
+    def portable_dict(d)
+      d.is_a?(Core::Var) ? d.name : [portable_dict(d.fn), d.args.map { |a| portable_dict(a) }]
+    end
+
+    def self.dict_core(p)
+      p.is_a?(String) ? Core::Var.new(p) : Core::App.new(dict_core(p[0]), p[1].map { |a| dict_core(a) })
     end
 
     def eval_core(core)

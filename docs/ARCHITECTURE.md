@@ -308,7 +308,13 @@ list?". Printing goes through the `Show` dictionary like any other code.
        (`:info`'s instance lists, Tab completion), or in the background.
     3. **Compiled code**, decoded per global on first use, ordered so
        that the corpus's code comes first and an input's code sits in few
-       chunks.
+       chunks. Arrays of integers that only one place refers to (most
+       code operands) are written inline in their parent's record.
+  - **Specialisations made ahead.** The specialisations the corpus makes
+    (Prelude functions at Prelude dictionaries, e.g. `toList` at `Ord
+    Integer`) are made at build time and shipped, so `rhci -c` does not
+    redo that compiler work on every run. Making them runs only the
+    compiler: no top-level value is evaluated into the snapshot.
   - **Background loading, paced by the machine itself** (the REPL; not
     `-c`/`-x`, which exit when done). The session measures, with the
     runtime clock, how long decoding the core took (P). While an input

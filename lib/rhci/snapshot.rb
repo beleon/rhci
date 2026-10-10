@@ -18,7 +18,8 @@ module Rhci
   # "key\tvalue ref" or, when keyed by Names, "Name#core\tkey ref\tvalue
   # ref"). Values:
   # i<integer> f<IEEE bits, hex> s<string> y<symbol> r<record index> n T F,
-  # and K<name> for shared singletons.
+  # K<name> for shared singletons, and [v,v...] for an Array of integers,
+  # nil and booleans that only one place refers to (written inline).
   #
   # The records come in three runs. The core (what typical inputs need,
   # found by running a corpus at build time) is decoded at startup; the rest
@@ -214,11 +215,24 @@ module Rhci
         o
       end
 
+      # References and integers, most fields by far, dispatch on the first
+      # byte without allocating it.
       def value(v)
-        case v[0]
-        when 'r' then obj(v[1..-1].to_i)
-        else Snapshot.value(v, nil)
-        end
+        b = v.getbyte(0)
+        return obj(v[1, v.length].to_i) if b == 114 # r
+        return v[1, v.length].to_i if b == 105 # i
+        return inline_array(v) if b == 91 # [
+
+        Snapshot.value(v, nil)
+      end
+
+      # "[i0,i5,n]": an Array of integers, nil and booleans, written inline.
+      def inline_array(v)
+        out = []
+        return out if v.length == 2
+
+        v[1, v.length - 2].split(',').each { |x| out << Snapshot.value(x, nil) }
+        out
       end
 
       private
