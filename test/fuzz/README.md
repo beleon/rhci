@@ -32,3 +32,25 @@ forced more than GHC's; Int `quotRem`/`divMod` built their pair before
 forcing the dividend, Int `rem`/`mod` checked the divisor first; Data.Map
 and Data.Set forced the map before the key (containers' bang patterns,
 now written as such).
+
+## Whole programs
+
+`ruby test/fuzz/progs.rb --seed N [--count N] [--bottoms P] [--mruby]` (or
+`rake fuzz_progs`) generates random modules (`prog_gen.rb`): a data type
+with records and recursive constructors, a class with a default method and
+instances (one with a context), and 6-10 functions in the shapes programs
+take -- equations over literal, cons, as- and constructor patterns, guards
+with `where` (local values and signed local functions), `case` with guarded
+alternatives, `let`, structural and counter recursion, mutual recursion,
+local helpers used at two types (let polymorphism), point-free lambdas,
+some without signatures (file-mode defaulting and the monomorphism
+restriction). `main` reads stdin (`getContents`, `getLine` past the end,
+`readLn`, `isEOF`, `interact`), keeps an IORef, uses Data.Bits and
+Data.Ratio, and prints.
+
+GHC runs each as `runghc Main.hs < input` (cached in `build/fuzz-progs`);
+rhci as `:load Main` then `main` with the same stdin -- in process, or with
+`--mruby` through the binary, whose stdin the REPL and the program share.
+They must print the same, raise the same exception after it, and reject
+the same programs. 1 650 programs agree (including the mruby binary on
+300 and a run with tagged bottoms); none has disagreed.

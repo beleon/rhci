@@ -69,3 +69,8 @@ task :fuzz, %i[seed count bottoms] do |_, a|
   ruby 'test/fuzz/run.rb', '--seed', (a[:seed] || '1').to_s, '--count', (a[:count] || '1000').to_s,
        '--bottoms', (a[:bottoms] || '0.05').to_s
 end
+
+desc 'Differential fuzzing with whole programs vs runghc: rake fuzz_progs[seed,count] (needs podman)'
+task :fuzz_progs, %i[seed count] do |_, a|
+  ruby 'test/fuzz/progs.rb', '--seed', (a[:seed] || '1').to_s, '--count', (a[:count] || '150').to_s
+end

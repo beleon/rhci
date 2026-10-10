@@ -71,6 +71,7 @@ module Fuzz
       @r = Random.new(seed)
       @bottoms = bottoms
       @tag = 0
+      @empty_rate = 0.3 # how often a list or Maybe leaf is [] or Nothing
     end
 
     def pick(a)
@@ -221,8 +222,8 @@ module Fuzz
         case t[0]
         when :map then "(M.fromList [#{Array.new(@r.rand(0..3)) { "(#{leaf(t[1])}, #{leaf(t[2])})" }.join(', ')}] :: #{hs_type(t)})"
         when :set then "(S.fromList [#{Array.new(@r.rand(0..3)) { leaf(t[1]) }.join(', ')}] :: #{hs_type(t)})"
-        when :list then chance(0.3) ? "([] :: #{hs_type(t)})" : "[#{Array.new(@r.rand(1..4)) { leaf(t[1]) }.join(', ')}]"
-        when :maybe then chance(0.3) ? "(Nothing :: #{hs_type(t)})" : "(Just #{leaf(t[1])})"
+        when :list then chance(@empty_rate) ? "([] :: #{hs_type(t)})" : "[#{Array.new(@r.rand(1..4)) { leaf(t[1]) }.join(', ')}]"
+        when :maybe then chance(@empty_rate) ? "(Nothing :: #{hs_type(t)})" : "(Just #{leaf(t[1])})"
         when :pair then "(#{leaf(t[1])}, #{leaf(t[2])})"
         end
       end
