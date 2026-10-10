@@ -4,11 +4,13 @@ require 'open3'
 require 'fileutils'
 require 'tmpdir'
 
-# The same command-line cases against both executables: the CRuby launcher
-# and the mruby binary. Their behaviour must be identical.
+# The same command-line cases against every executable: the CRuby launcher,
+# the compact CRuby build (one file, snapshot embedded) and the mruby
+# binary. Their behaviour must be identical.
 ROOT = File.expand_path('../..', __dir__)
 EXECUTABLES = {
   'CRuby bin/rhci' => [RbConfig.ruby, File.join(ROOT, 'bin', 'rhci')],
+  'CRuby compact build/rhci.rb' => [RbConfig.ruby, File.join(ROOT, 'build', 'rhci.rb')],
   'mruby binary' => [File.join(ROOT, 'build', 'rhci', 'bin', 'rhci')]
 }.freeze
 

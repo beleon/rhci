@@ -406,6 +406,12 @@ list?". Printing goes through the `Show` dictionary like any other code.
 ## 6. Deliverables
 
 ### CRuby library (embedding)
+- Two forms: `lib/` (require `lib/rhci.rb`; each session compiles the
+  Prelude from source, about 2.5 s) and the **compact build**,
+  `build/rhci.rb` from `tools/bundle.rb`: the same code, Prelude sources
+  and trained snapshot as the mruby binary, in one file of about 7 MB.
+  `require_relative 'rhci'` embeds it (sessions decode the snapshot, about
+  20 ms); run directly, it is the CLI.
 - Everything lives under `module Rhci`. There are **no globals, no
   core-class monkey patches, no signal traps, no `exit`**, and no writes to
   `$stdout`/`$stdin` except through the IO objects the host passes in.

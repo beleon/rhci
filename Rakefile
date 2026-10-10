@@ -15,6 +15,9 @@ task :bundle do
   ruby 'tools/bundle.rb'
 end
 
+desc 'Build build/rhci.rb: the compact CRuby build (library + snapshot in one file)'
+task compact: :bundle
+
 desc 'Build build/mruby/bin/mruby and build/rhci/bin/rhci'
 task mruby: [MRUBY_DIR, :bundle] do
   log = File.join(ROOT, 'build', 'mruby-build.log')
