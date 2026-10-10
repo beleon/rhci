@@ -62,6 +62,11 @@ RT.suite 'runtime assumptions' do
     RT.ok ![big].include?(0), 'Array#include? goes through =='
     min = -9_223_372_036_854_775_807 - 1
     RT.ok((-9_223_372_036_854_775_808 == min) && (min == -9_223_372_036_854_775_808), 'INT64_MIN as a bignum')
+    big_min = -(2**63) # a bignum holding INT64_MIN on mruby
+    RT.eq [0, 0, false, true, true, false], [big_min <=> min, min <=> big_min, big_min < min, big_min <= min,
+                                             big_min >= min, min > big_min], 'ordering INT64_MIN as a bignum'
+    RT.ok big_min < min + 1 && (min + 1) > big_min && (2**70 <=> 3) == 1 && (3 <=> 2**70) == -1, 'ordering'
+    RT.ok 3 < 3.5 && (2**70) > 1.5 && !(3 < 0.0 / 0.0) && (3 <=> 0.0 / 0.0).nil?, 'with Floats and NaN'
   end
 
   RT.test 'String#rstrip on non-ASCII is broken on mruby; Rhci::Text is not' do

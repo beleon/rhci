@@ -1468,3 +1468,6 @@ instance Describe a => Describe (Maybe a) where tag = maybe (-1) tag
 :t describe
 :t \x -> describe [x]
 :t describe concat
+compare (negate (2 ^ 63) :: Integer) (-9223372036854775807 - 1)
+(negate (2 ^ 63) :: Integer) < (-9223372036854775807 - 1)
+max (negate (2 ^ 63)) (-9223372036854775807 - 1 :: Integer)

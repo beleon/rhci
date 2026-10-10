@@ -3199,4 +3199,10 @@ ghci> :t describe concat
         arising from a use of ‘describe’
         (maybe you haven't applied a function to enough arguments?)
     • In the expression: describe concat
+ghci> compare (negate (2 ^ 63) :: Integer) (-9223372036854775807 - 1)
+EQ
+ghci> (negate (2 ^ 63) :: Integer) < (-9223372036854775807 - 1)
+False
+ghci> max (negate (2 ^ 63)) (-9223372036854775807 - 1 :: Integer)
+-9223372036854775808
 
