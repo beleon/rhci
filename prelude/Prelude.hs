@@ -571,8 +571,9 @@ instance Integral Int where
     | rhci_intEq b 0 = divZeroError
     | rhci_intEq b (rhci_intNegate 1) && rhci_intEq a minBound = overflowError
     | otherwise = rhci_intQuot a b
+  -- base's `!a \`rem\` b`: the dividend first, even when b is 0 or -1.
   a `rem` b
-    | rhci_intEq b 0 = divZeroError
+    | a `seq` rhci_intEq b 0 = divZeroError
     | rhci_intEq b (rhci_intNegate 1) = 0
     | otherwise = rhci_intRem a b
   a `div` b
@@ -580,29 +581,30 @@ instance Integral Int where
     | rhci_intEq b (rhci_intNegate 1) && rhci_intEq a minBound = overflowError
     | otherwise = rhci_intDiv a b
   a `mod` b
-    | rhci_intEq b 0 = divZeroError
+    | a `seq` rhci_intEq b 0 = divZeroError
     | rhci_intEq b (rhci_intNegate 1) = 0
     | otherwise = rhci_intMod a b
   a `quotRem` b
     | rhci_intEq b 0 = divZeroError
     | rhci_intEq b (rhci_intNegate 1) && rhci_intEq a minBound = (overflowError, 0)
-    | otherwise = (rhci_intQuot a b, rhci_intRem a b)
+    | otherwise = a `seq` (rhci_intQuot a b, rhci_intRem a b) -- GHC's quotRemInt is strict
   a `divMod` b
     | rhci_intEq b 0 = divZeroError
     | rhci_intEq b (rhci_intNegate 1) && rhci_intEq a minBound = (overflowError, 0)
-    | otherwise = (rhci_intDiv a b, rhci_intMod a b)
+    | otherwise = a `seq` (rhci_intDiv a b, rhci_intMod a b)
 
 instance Real Integer where
   toRational x = x :% 1
 
 instance Integral Integer where
   toInteger n = n
+  -- GHC checks the divisor first, then forces the dividend (oracle §43).
   a `quot` b = if rhci_integerEq b 0 then divZeroError else rhci_integerQuot a b
   a `rem` b = if rhci_integerEq b 0 then divZeroError else rhci_integerRem a b
   a `div` b = if rhci_integerEq b 0 then divZeroError else rhci_integerDiv a b
   a `mod` b = if rhci_integerEq b 0 then divZeroError else rhci_integerMod a b
-  a `quotRem` b = if rhci_integerEq b 0 then divZeroError else (rhci_integerQuot a b, rhci_integerRem a b)
-  a `divMod` b = if rhci_integerEq b 0 then divZeroError else (rhci_integerDiv a b, rhci_integerMod a b)
+  a `quotRem` b = if rhci_integerEq b 0 then divZeroError else a `seq` (rhci_integerQuot a b, rhci_integerRem a b)
+  a `divMod` b = if rhci_integerEq b 0 then divZeroError else a `seq` (rhci_integerDiv a b, rhci_integerMod a b)
 
 class Num a => Fractional a where
   (/) :: a -> a -> a
@@ -689,8 +691,9 @@ instance Floating Double where
   atanh = rhci_doubleAtanh
 
 instance RealFrac Double where
+  -- GHC's goes through decodeFloat: Infinity is (2^1024, 0.0).
   properFraction x = case rhci_doubleTruncate x of
-    n -> (fromInteger n, rhci_doubleSub x (rhci_integerToDouble n))
+    n -> (fromInteger n, if isInfinite x then 0 else rhci_doubleSub x (rhci_integerToDouble n))
   truncate x = fromInteger (rhci_doubleTruncate x)
   round x = fromInteger (rhci_doubleRound x)
   ceiling x = fromInteger (rhci_doubleCeiling x)
@@ -1914,8 +1917,16 @@ isPrefixOf [] _ = True
 isPrefixOf _ [] = False
 isPrefixOf (x:xs) (y:ys) = x == y && isPrefixOf xs ys
 
+-- Data.OldList's: compares from the front once the lengths line up.
 isSuffixOf :: Eq a => [a] -> [a] -> Bool
-ns `isSuffixOf` hs = reverse ns `isPrefixOf` reverse hs
+ns `isSuffixOf` hs = maybe False id (dropLengthMaybe ns hs >>= \delta -> return (ns == dropLength delta hs))
+  where
+    dropLength [] y = y
+    dropLength _ [] = []
+    dropLength (_:x') (_:y') = dropLength x' y'
+    dropLengthMaybe [] y = Just y
+    dropLengthMaybe _ [] = Nothing
+    dropLengthMaybe (_:x') (_:y') = dropLengthMaybe x' y'
 
 isInfixOf :: Eq a => [a] -> [a] -> Bool
 isInfixOf needle haystack = any (isPrefixOf needle) (tails haystack)
@@ -2107,9 +2118,13 @@ words s = case dropWhile isSpace s of
   s' -> w : words s''
     where (w, s'') = break isSpace s'
 
+-- Data.OldList's: the first word comes out before the rest is looked at.
 unwords :: [String] -> String
 unwords [] = ""
-unwords ws = rhci_foldr1 (\w s -> w ++ ' ' : s) ws
+unwords (w:ws) = w ++ go ws
+  where
+    go [] = ""
+    go (v:vs) = ' ' : (v ++ go vs)
 
 -- ---- Data.Char (GHC's Unicode tables) --------------------------------------------
 

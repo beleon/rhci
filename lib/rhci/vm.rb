@@ -1265,26 +1265,20 @@ module Rhci
       end
 
       def p_doubleFloor(a0)
-        Num.floor_double(finite!(a0))
+        Num.floor_double(a0)
       end
 
       def p_doubleCeiling(a0)
-        Num.ceiling_double(finite!(a0))
+        Num.ceiling_double(a0)
       end
 
       def p_doubleRound(a0)
-        Num.round_double(finite!(a0))
+        Num.round_double(a0)
       end
 
       # encodeFloat m e: m * 2^e, correctly rounded.
       def p_doubleEncode(a0, a1)
         a1 >= 0 ? Num.integer_to_double(a0 << a1) : Num.rational_to_double(a0, 1 << -a1)
-      end
-
-      def finite!(x)
-        return x unless Num.nan?(x) || Num.infinite?(x)
-
-        Num.truncate_double(x) # raises the unsupported error for NaN/Infinity
       end
 
       # The constructor index of an evaluated constructor value.

@@ -64,6 +64,43 @@ module Oracle
   # ---- semantic comparison ------------------------------------------------
 
   # GHCi output -> :ok, :parse, :scope, :compile, :runtime, :command.
+  # The first line of a runtime exception's message, without source
+  # locations (GHCi numbers its inputs; rhci says <interactive>:1).
+  def self.exception_message(text)
+    m = text.to_s.index('*** Exception: ')
+    line = m ? text[(m + 15)..-1].to_s.lines.first.to_s : text.to_s.lines.first.to_s
+    strip_locations(Rhci::Text.strip(line))
+  end
+
+  def self.strip_locations(s)
+    out = s.dup
+    loop do
+      i = out.index('<interactive>:')
+      break unless i
+
+      j = i + 14
+      j += 1 while j < out.length && ((out[j] >= '0' && out[j] <= '9') || ':-(),'.include?(out[j]))
+      j += 1 if out[j] == ' '
+      out = out[0, i] + out[j..-1].to_s
+    end
+    out
+  end
+
+  # Is it the same exception (the oracle's rule: the same message; pattern
+  # match failures and handle errors may be worded differently)?
+  def self.same_exception?(ghc, ours)
+    return true if ghc == ours
+    return true if ghc.start_with?('Non-exhaustive patterns in') && ours.start_with?('Non-exhaustive patterns in')
+
+    ghc.sub('hPutStr:', 'hPutChar:') == ours
+  end
+
+  # What was printed before the exception (GHCi merges it into the text).
+  def self.before_exception(text)
+    i = text.index('*** Exception')
+    i ? text[0, i] : ''
+  end
+
   def self.outcome(text)
     t = Rhci::Text.strip(text)
     return :parse if t.include?('parse error') || t.include?('lexical error') || t.include?('Precedence parsing error')

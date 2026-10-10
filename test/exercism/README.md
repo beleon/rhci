@@ -21,6 +21,6 @@ explicitly: an extension, `Float`, a module it does not implement),
 ...), `slow` (over two minutes), and `BUG` -- a wrong result, valid code
 rejected, or an internal error.
 
-As of 2026-10-10: 55 pass, 34 unsupported, 23 ghc_failed, 1 slow
+As of 2026-10-10: 56 pass, 33 unsupported, 23 ghc_failed, 1 slow
 (perfect-numbers: trial division up to 33550336), 0 bugs. The bugs it
 found are fixed and pinned by oracle probes (section 42, L10).

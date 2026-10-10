@@ -69,6 +69,16 @@ def sem_section(probes, title, gaps, cwd)
       problems << "#{p.input.inspect}: GHCi #{want}, rhci #{ours} (#{r.message})"
     elsif want == :ok && Rhci::Text.strip(got_out) != Rhci::Text.strip(p.text)
       problems << "#{p.input.inspect}: GHCi printed #{p.text.inspect}, rhci #{got_out.inspect}"
+    elsif want == :runtime
+      # The same exception, after the same partial output: which one is
+      # raised first, and how far printing got, are evaluation order.
+      g = Oracle.exception_message(p.text)
+      o = Oracle.strip_locations(Rhci::Text.strip(r.message.to_s.lines.first.to_s))
+      problems << "#{p.input.inspect}: GHCi raised #{g.inspect}, rhci #{o.inspect}" unless Oracle.same_exception?(g, o)
+      before = Oracle.before_exception(p.text)
+      if before != got_out && !got_out.start_with?(before.chomp)
+        problems << "#{p.input.inspect}: before the exception GHCi printed #{before.inspect}, rhci #{got_out.inspect}"
+      end
     end
   end
   problems

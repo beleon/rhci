@@ -13,7 +13,7 @@ import Data.Map.Internal (Map(..), balance, balanceL, balanceR, link, link2, glu
                           empty, foldrWithKey)
 
 findWithDefault :: Ord k => a -> k -> Map k a -> a
-findWithDefault def k = k `seq` go
+findWithDefault def !k = go
   where
     go Tip = def
     go (Bin _ kx x l r) = case compare k kx of
@@ -22,12 +22,12 @@ findWithDefault def k = k `seq` go
       EQ -> x
 
 singleton :: k -> a -> Map k a
-singleton k x = x `seq` Bin 1 k x Tip Tip
+singleton k !x = Bin 1 k x Tip Tip
 
 insert :: Ord k => k -> a -> Map k a -> Map k a
 insert = go
   where
-    go kx x Tip = kx `seq` x `seq` singleton kx x
+    go !kx !x Tip = singleton kx x
     go kx x (Bin sz ky y l r) = case compare kx ky of
       LT -> balanceL ky y (go kx x l) r
       GT -> balanceR ky y l (go kx x r)
@@ -36,8 +36,8 @@ insert = go
 insertWith :: Ord k => (a -> a -> a) -> k -> a -> Map k a -> Map k a
 insertWith = go
   where
-    go _ kx x Tip = kx `seq` singleton kx x
-    go f kx x (Bin sy ky y l r) = kx `seq` case compare kx ky of
+    go _ !kx x Tip = singleton kx x
+    go f !kx x (Bin sy ky y l r) = case compare kx ky of
       LT -> balanceL ky y (go f kx x l) r
       GT -> balanceR ky y l (go f kx x r)
       EQ -> let y' = f x y in y' `seq` Bin sy kx y' l r
@@ -45,8 +45,8 @@ insertWith = go
 insertWithR :: Ord k => (a -> a -> a) -> k -> a -> Map k a -> Map k a
 insertWithR = go
   where
-    go _ kx x Tip = kx `seq` singleton kx x
-    go f kx x (Bin sy ky y l r) = kx `seq` case compare kx ky of
+    go _ !kx x Tip = singleton kx x
+    go f !kx x (Bin sy ky y l r) = case compare kx ky of
       LT -> balanceL ky y (go f kx x l) r
       GT -> balanceR ky y l (go f kx x r)
       EQ -> let y' = f y x in y' `seq` Bin sy ky y' l r
@@ -54,7 +54,7 @@ insertWithR = go
 insertWithKey :: Ord k => (k -> a -> a -> a) -> k -> a -> Map k a -> Map k a
 insertWithKey = go
   where
-    go _ kx x Tip = kx `seq` singleton kx x
+    go _ !kx x Tip = singleton kx x
     go f kx x (Bin sy ky y l r) = case compare kx ky of
       LT -> balanceL ky y (go f kx x l) r
       GT -> balanceR ky y l (go f kx x r)
@@ -63,7 +63,7 @@ insertWithKey = go
 insertWithKeyR :: Ord k => (k -> a -> a -> a) -> k -> a -> Map k a -> Map k a
 insertWithKeyR = go
   where
-    go _ kx x Tip = kx `seq` singleton kx x
+    go _ !kx x Tip = singleton kx x
     go f kx x (Bin sy ky y l r) = case compare kx ky of
       LT -> balanceL ky y (go f kx x l) r
       GT -> balanceR ky y l (go f kx x r)
@@ -72,7 +72,7 @@ insertWithKeyR = go
 insertLookupWithKey :: Ord k => (k -> a -> a -> a) -> k -> a -> Map k a -> (Maybe a, Map k a)
 insertLookupWithKey f0 kx0 x0 t0 = go f0 kx0 x0 t0
   where
-    go _ kx x Tip = kx `seq` (Nothing, singleton kx x)
+    go _ !kx x Tip = (Nothing, singleton kx x)
     go f kx x (Bin sy ky y l r) = case compare kx ky of
       LT -> case go f kx x l of
         (found, l') -> let t' = balanceL ky y l' r in t' `seq` (found, t')
@@ -86,7 +86,7 @@ adjust f = adjustWithKey (\_ x -> f x)
 adjustWithKey :: Ord k => (k -> a -> a) -> k -> Map k a -> Map k a
 adjustWithKey = go
   where
-    go _ k Tip = k `seq` Tip
+    go _ !k Tip = Tip
     go f k (Bin sx kx x l r) = case compare k kx of
       LT -> Bin sx kx x (go f k l) r
       GT -> Bin sx kx x l (go f k r)
@@ -98,7 +98,7 @@ update f = updateWithKey (\_ x -> f x)
 updateWithKey :: Ord k => (k -> a -> Maybe a) -> k -> Map k a -> Map k a
 updateWithKey = go
   where
-    go _ k Tip = k `seq` Tip
+    go _ !k Tip = Tip
     go f k (Bin sx kx x l r) = case compare k kx of
       LT -> balanceR kx x (go f k l) r
       GT -> balanceL kx x l (go f k r)
@@ -109,7 +109,7 @@ updateWithKey = go
 updateLookupWithKey :: Ord k => (k -> a -> Maybe a) -> k -> Map k a -> (Maybe a, Map k a)
 updateLookupWithKey f0 k0 t0 = go f0 k0 t0
   where
-    go _ k Tip = k `seq` (Nothing, Tip)
+    go _ !k Tip = (Nothing, Tip)
     go f k (Bin sx kx x l r) = case compare k kx of
       LT -> case go f k l of
         (found, l') -> let t' = balanceR kx x l' r in t' `seq` (found, t')
@@ -122,7 +122,7 @@ updateLookupWithKey f0 k0 t0 = go f0 k0 t0
 alter :: Ord k => (Maybe a -> Maybe a) -> k -> Map k a -> Map k a
 alter = go
   where
-    go f k Tip = k `seq` case f Nothing of
+    go f !k Tip = case f Nothing of
       Nothing -> Tip
       Just x -> singleton k x
     go f k (Bin sx kx x l r) = case compare k kx of
@@ -133,7 +133,7 @@ alter = go
         Nothing -> glue l r
 
 alterF :: (Functor f, Ord k) => (Maybe a -> f (Maybe a)) -> k -> Map k a -> f (Map k a)
-alterF f k m = k `seq` fmap choose (f mv)
+alterF f !k m = fmap choose (f mv)
   where
     mv = lookupL k m
     choose Nothing = case mv of
@@ -144,14 +144,14 @@ alterF f k m = k `seq` fmap choose (f mv)
       Just _ -> replaceL k new m
 
 lookupL :: Ord k => k -> Map k a -> Maybe a
-lookupL k Tip = k `seq` Nothing
+lookupL !k Tip = Nothing
 lookupL k (Bin _ kx x l r) = case compare k kx of
   LT -> lookupL k l
   GT -> lookupL k r
   EQ -> Just x
 
 deleteL :: Ord k => k -> Map k a -> Map k a
-deleteL k Tip = k `seq` Tip
+deleteL !k Tip = Tip
 deleteL k (Bin _ kx x l r) = case compare k kx of
   LT -> balanceR kx x (deleteL k l) r
   GT -> balanceL kx x l (deleteL k r)
@@ -165,7 +165,7 @@ replaceL k x (Bin sz ky y l r) = case compare k ky of
   EQ -> Bin sz ky x l r
 
 updateAt :: (k -> a -> Maybe a) -> Int -> Map k a -> Map k a
-updateAt f i t = i `seq` case t of
+updateAt f !i t = case t of
   Tip -> error "Map.updateAt: index out of range"
   Bin sx kx x l r -> let sizeL = size l in case compare i sizeL of
     LT -> balanceR kx x (updateAt f i l) r
@@ -348,14 +348,14 @@ fromList ((kx0, x0) : xs0)
     not_ordered kx ((ky, _) : _) = kx >= ky
     fromList' t0 xs = Foldable.foldl' ins t0 xs
       where ins t (k, x) = insert k x t
-    go s t [] = s `seq` t
+    go !s t [] = t
     go _ t [(kx, x)] = x `seq` insertMax kx x t
     go s l xs@((kx, x) : xss)
       | not_ordered kx xss = fromList' l xs
       | otherwise = case create s xss of
           (r, ys, []) -> x `seq` go (s * 2) (link kx x l r) ys
           (r, _, ys) -> x `seq` fromList' (link kx x l r) ys
-    create s [] = s `seq` (Tip, [], [])
+    create !s [] = (Tip, [], [])
     create s xs@(xp : xss)
       | s == 1 = case xp of
           (kx, x) | not_ordered kx xss -> x `seq` (Bin 1 kx x Tip Tip, [], xss)
@@ -397,10 +397,10 @@ fromDistinctAscList :: [(k, a)] -> Map k a
 fromDistinctAscList [] = Tip
 fromDistinctAscList ((kx0, x0) : xs0) = x0 `seq` go (1 :: Int) (Bin 1 kx0 x0 Tip Tip) xs0
   where
-    go s t [] = s `seq` t
+    go !s t [] = t
     go s l ((kx, x) : xs) = case create s xs of
       (r, ys) -> x `seq` (let t' = link kx x l r in t' `seq` go (s * 2) t' ys)
-    create s [] = s `seq` (Tip, [])
+    create !s [] = (Tip, [])
     create s xs@(x' : xs')
       | s == 1 = case x' of (kx, x) -> x `seq` (Bin 1 kx x Tip Tip, xs')
       | otherwise = case create (s `div` 2) xs of

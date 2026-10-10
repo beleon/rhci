@@ -40,7 +40,7 @@ instance Foldable Set where
   length = size
   elem = go
     where
-      go x Tip = x `seq` False
+      go !x Tip = False
       go x (Bin _ y l r) = x == y || go x l || go x r
   minimum = findMin
   maximum = findMax
@@ -76,7 +76,7 @@ size (Bin sz _ _ _) = sz
 member :: Ord a => a -> Set a -> Bool
 member = go
   where
-    go x Tip = x `seq` False
+    go !x Tip = False
     go x (Bin _ y l r) = case compare x y of
       LT -> go x l
       GT -> go x r
@@ -88,32 +88,32 @@ notMember a t = not $ member a t
 lookupLT :: Ord a => a -> Set a -> Maybe a
 lookupLT = goNothing
   where
-    goNothing x Tip = x `seq` Nothing
+    goNothing !x Tip = Nothing
     goNothing x (Bin _ y l r) | x <= y = goNothing x l
                               | otherwise = goJust x y r
-    goJust x best Tip = x `seq` Just best
+    goJust !x best Tip = Just best
     goJust x best (Bin _ y l r) | x <= y = goJust x best l
                                 | otherwise = goJust x y r
 
 lookupGT :: Ord a => a -> Set a -> Maybe a
 lookupGT = goNothing
   where
-    goNothing x Tip = x `seq` Nothing
+    goNothing !x Tip = Nothing
     goNothing x (Bin _ y l r) | x < y = goJust x y l
                               | otherwise = goNothing x r
-    goJust x best Tip = x `seq` Just best
+    goJust !x best Tip = Just best
     goJust x best (Bin _ y l r) | x < y = goJust x y l
                                 | otherwise = goJust x best r
 
 lookupLE :: Ord a => a -> Set a -> Maybe a
 lookupLE = goNothing
   where
-    goNothing x Tip = x `seq` Nothing
+    goNothing !x Tip = Nothing
     goNothing x (Bin _ y l r) = case compare x y of
       LT -> goNothing x l
       EQ -> Just y
       GT -> goJust x y r
-    goJust x best Tip = x `seq` Just best
+    goJust !x best Tip = Just best
     goJust x best (Bin _ y l r) = case compare x y of
       LT -> goJust x best l
       EQ -> Just y
@@ -122,12 +122,12 @@ lookupLE = goNothing
 lookupGE :: Ord a => a -> Set a -> Maybe a
 lookupGE = goNothing
   where
-    goNothing x Tip = x `seq` Nothing
+    goNothing !x Tip = Nothing
     goNothing x (Bin _ y l r) = case compare x y of
       LT -> goJust x y l
       EQ -> Just y
       GT -> goNothing x r
-    goJust x best Tip = x `seq` Just best
+    goJust !x best Tip = Just best
     goJust x best (Bin _ y l r) = case compare x y of
       LT -> goJust x y l
       EQ -> Just y
@@ -144,8 +144,8 @@ singleton x = Bin 1 x Tip Tip
 insert :: Ord a => a -> Set a -> Set a
 insert x0 = go x0 x0
   where
-    go orig x Tip = x `seq` singleton orig
-    go orig x (Bin sz y l r) = x `seq` case compare x y of
+    go orig !x Tip = singleton orig
+    go orig !x (Bin sz y l r) = case compare x y of
       LT -> balanceL y (go orig x l) r
       GT -> balanceR y l (go orig x r)
       EQ -> Bin sz orig l r
@@ -154,8 +154,8 @@ insert x0 = go x0 x0
 insertR :: Ord a => a -> Set a -> Set a
 insertR x0 = go x0 x0
   where
-    go orig x Tip = x `seq` singleton orig
-    go orig x t@(Bin _ y l r) = x `seq` case compare x y of
+    go orig !x Tip = singleton orig
+    go orig !x t@(Bin _ y l r) = case compare x y of
       LT -> balanceL y (go orig x l) r
       GT -> balanceR y l (go orig x r)
       EQ -> t
@@ -163,7 +163,7 @@ insertR x0 = go x0 x0
 delete :: Ord a => a -> Set a -> Set a
 delete = go
   where
-    go x Tip = x `seq` Tip
+    go !x Tip = Tip
     go x (Bin _ y l r) = case compare x y of
       LT -> balanceR y (go x l) r
       GT -> balanceL y l (go x r)
@@ -329,8 +329,8 @@ foldr f z = go z
 foldr' :: (a -> b -> b) -> b -> Set a -> b
 foldr' f z = go z
   where
-    go z' Tip = z' `seq` z'
-    go z' (Bin _ x l r) = z' `seq` go (f x $! go z' r) l
+    go !z' Tip = z'
+    go !z' (Bin _ x l r) = go (f x $! go z' r) l
 
 foldl :: (a -> b -> a) -> a -> Set b -> a
 foldl f z = go z
@@ -341,8 +341,8 @@ foldl f z = go z
 foldl' :: (a -> b -> a) -> a -> Set b -> a
 foldl' f z = go z
   where
-    go z' Tip = z' `seq` z'
-    go z' (Bin _ x l r) = z' `seq` (let z'' = go z' l in z'' `seq` go (f z'' x) r)
+    go !z' Tip = z'
+    go !z' (Bin _ x l r) = (let z'' = go z' l in z'' `seq` go (f z'' x) r)
 
 -- ---- lists -------------------------------------------------------------------------
 
@@ -369,14 +369,14 @@ fromList (x0 : xs0)
     not_ordered x (y : _) = x >= y
     fromList' t0 xs = Foldable.foldl' ins t0 xs
       where ins t x = insert x t
-    go s t [] = s `seq` t
+    go !s t [] = t
     go _ t [x] = insertMax x t
     go s l xs@(x : xss)
       | not_ordered x xss = fromList' l xs
       | otherwise = case create s xss of
           (r, ys, []) -> go (s * 2) (link x l r) ys
           (r, _, ys) -> fromList' (link x l r) ys
-    create s [] = s `seq` (Tip, [], [])
+    create !s [] = (Tip, [], [])
     create s xs@(x : xss)
       | s == 1 = if not_ordered x xss then (Bin 1 x Tip Tip, [], xss) else (Bin 1 x Tip Tip, xss, [])
       | otherwise = case create (s `div` 2) xs of
@@ -406,10 +406,10 @@ fromDistinctAscList :: [a] -> Set a
 fromDistinctAscList [] = Tip
 fromDistinctAscList (x0 : xs0) = go (1 :: Int) (Bin 1 x0 Tip Tip) xs0
   where
-    go s t [] = s `seq` t
+    go !s t [] = t
     go s l (x : xs) = case create s xs of
       (r, ys) -> let t' = link x l r in t' `seq` go (s * 2) t' ys
-    create s [] = s `seq` (Tip, [])
+    create !s [] = (Tip, [])
     create s xs@(x : xs')
       | s == 1 = (Bin 1 x Tip Tip, xs')
       | otherwise = case create (s `div` 2) xs of
@@ -421,10 +421,10 @@ fromDistinctDescList :: [a] -> Set a
 fromDistinctDescList [] = Tip
 fromDistinctDescList (x0 : xs0) = go (1 :: Int) (Bin 1 x0 Tip Tip) xs0
   where
-    go s t [] = s `seq` t
+    go !s t [] = t
     go s r (x : xs) = case create s xs of
       (l, ys) -> let t' = link x l r in t' `seq` go (s * 2) t' ys
-    create s [] = s `seq` (Tip, [])
+    create !s [] = (Tip, [])
     create s xs@(x : xs')
       | s == 1 = (Bin 1 x Tip Tip, xs')
       | otherwise = case create (s `div` 2) xs of
@@ -460,7 +460,7 @@ splitMember x (Bin _ y l r) = case compare x y of
 findIndex :: Ord a => a -> Set a -> Int
 findIndex = go 0
   where
-    go idx x Tip = idx `seq` x `seq` error "Set.findIndex: element is not in the set"
+    go !idx !x Tip = error "Set.findIndex: element is not in the set"
     go idx x (Bin _ kx l r) = case compare x kx of
       LT -> go idx x l
       GT -> go (idx + size l + 1) x r
@@ -469,14 +469,14 @@ findIndex = go 0
 lookupIndex :: Ord a => a -> Set a -> Maybe Int
 lookupIndex = go 0
   where
-    go idx x Tip = idx `seq` x `seq` Nothing
+    go !idx !x Tip = Nothing
     go idx x (Bin _ kx l r) = case compare x kx of
       LT -> go idx x l
       GT -> go (idx + size l + 1) x r
       EQ -> Just $! idx + size l
 
 elemAt :: Int -> Set a -> a
-elemAt i Tip = i `seq` error "Set.elemAt: index out of range"
+elemAt !i Tip = error "Set.elemAt: index out of range"
 elemAt i (Bin _ x l r) = case compare i sizeL of
   LT -> elemAt i l
   GT -> elemAt (i - sizeL - 1) r
@@ -484,7 +484,7 @@ elemAt i (Bin _ x l r) = case compare i sizeL of
   where sizeL = size l
 
 deleteAt :: Int -> Set a -> Set a
-deleteAt i t = i `seq` case t of
+deleteAt !i t = case t of
   Tip -> error "Set.deleteAt: index out of range"
   Bin _ x l r -> let sizeL = size l in case compare i sizeL of
     LT -> balanceR x (deleteAt i l) r
@@ -496,7 +496,7 @@ take i m | i >= size m = m
 take i0 m0 = go i0 m0
   where
     go i m | i <= 0 = m `seq` Tip
-    go i Tip = i `seq` Tip
+    go !i Tip = Tip
     go i (Bin _ x l r) = case compare i sizeL of
       LT -> go i l
       GT -> link x l (go (i - sizeL - 1) r)
@@ -508,7 +508,7 @@ drop i m | i >= size m = Tip
 drop i0 m0 = go i0 m0
   where
     go i m | i <= 0 = m
-    go i Tip = i `seq` Tip
+    go !i Tip = Tip
     go i (Bin _ x l r) = case compare i sizeL of
       LT -> link x (go i l) r
       GT -> go (i - sizeL - 1) r
@@ -521,7 +521,7 @@ splitAt i0 m0
   | otherwise = go i0 m0
   where
     go i m | i <= 0 = (Tip, m)
-    go i Tip = i `seq` (Tip, Tip)
+    go !i Tip = (Tip, Tip)
     go i (Bin _ x l r) = case compare i sizeL of
       LT -> case go i l of
         (ll, lr) -> let b = link x lr r in b `seq` (ll, b)

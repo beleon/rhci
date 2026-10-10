@@ -227,15 +227,25 @@ module Rhci
       check_pragma(text(start + 3, @i - 2), line, col) if pragma
     end
 
+    # Extensions a LANGUAGE pragma may name: rhci implements them (they are
+    # in GHC2021, GHC's default since 9.2, too).
+    IMPLEMENTED_EXTENSIONS = %w[BangPatterns].freeze
+
     # Pragmas are comments to us, except those that change the language:
     # those would silently change semantics, so they are refused.
     def check_pragma(body, line, col)
-      words = Rhci::Text.strip(body).split(' ')
+      body = Rhci::Text.strip(body)
+      body = Rhci::Text.strip(body[0..-2]) if body.end_with?('#')
+      words = body.split(' ')
       return if words.empty?
 
       kind = words[0].upcase
       if kind == 'LANGUAGE'
-        raise UnsupportedError.new("LANGUAGE pragmas are not supported: #{Rhci::Text.strip(body)}", line, col, @source)
+        exts = words[1..-1].join(' ').split(',').map { |e| Rhci::Text.strip(e) }.reject(&:empty?)
+        bad = exts.reject { |e| IMPLEMENTED_EXTENSIONS.include?(e) }
+        return if bad.empty?
+
+        raise UnsupportedError.new("LANGUAGE pragmas are not supported: #{bad.join(', ')}", line, col, @source)
       end
       return unless kind == 'OPTIONS_GHC' || kind == 'OPTIONS'
 

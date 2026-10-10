@@ -63,3 +63,9 @@ desc 'Run the exercism Haskell track on rhci and GHC (needs network and podman)'
 task :exercism do
   ruby 'test/exercism/run.rb'
 end
+
+desc 'Differential fuzzing against GHCi: rake fuzz[seed,count,bottoms] (needs podman)'
+task :fuzz, %i[seed count bottoms] do |_, a|
+  ruby 'test/fuzz/run.rb', '--seed', (a[:seed] || '1').to_s, '--count', (a[:count] || '1000').to_s,
+       '--bottoms', (a[:bottoms] || '0.05').to_s
+end

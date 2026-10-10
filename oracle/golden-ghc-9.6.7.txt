@@ -3002,3 +3002,81 @@ ghci> f 2 1.5
 ghci> :t f
 f :: (Integral a, Floating b) => a -> b -> b
 
+
+## 43. Found by differential fuzzing
+
+ghci> import Data.List
+ghci> let inf = 1 / 0 :: Double
+ghci> (round inf :: Integer) == 2 ^ 1024
+True
+ghci> (floor (negate inf) :: Integer) == negate (2 ^ 1024)
+True
+ghci> (ceiling inf :: Integer, truncate inf :: Integer) == (2 ^ 1024, 2 ^ 1024)
+True
+ghci> (round inf :: Int, floor inf :: Int, ceiling (negate inf) :: Int, truncate inf :: Int)
+(0,0,0,0)
+ghci> properFraction inf :: (Integer, Double)
+(179769313486231590772930519078902473361797697894230657273430081157732675805500963132708477322407536021120113879871393357658789768814416622492847430639474124377767893424865485276302219601246094119453082952085005768838150682342462881473913110540827237163350510684586298239947245938479716304835356329624224137216,0.0)
+ghci> round (1e20 :: Double) :: Int
+7766279631452241920
+ghci> floor (-1e20 :: Double) :: Int
+-7766279631452241920
+ghci> ceiling (9.3e18 :: Double) :: Int
+-9146744073709551616
+ghci> isSuffixOf ['C', "-7" !! 2] "ab"
+False
+ghci> isSuffixOf "bc" "abc"
+True
+ghci> isSuffixOf "" "abc"
+True
+ghci> isSuffixOf "abcd" "abc"
+False
+ghci> ((1, 2), quotRem (error "dividend" :: Int) 3)
+((1,2),*** Exception: dividend
+CallStack (from HasCallStack):
+  error, called at <interactive>:29:19 in interactive:Ghci15
+ghci> ((1, 2), divMod (error "dividend" :: Int) 3)
+((1,2),*** Exception: dividend
+CallStack (from HasCallStack):
+  error, called at <interactive>:31:18 in interactive:Ghci15
+ghci> ((1, 2), quotRem (error "dividend" :: Integer) 3)
+((1,2),*** Exception: dividend
+CallStack (from HasCallStack):
+  error, called at <interactive>:33:19 in interactive:Ghci15
+ghci> ((1, 2), divMod (error "dividend" :: Integer) 3)
+((1,2),*** Exception: dividend
+CallStack (from HasCallStack):
+  error, called at <interactive>:35:18 in interactive:Ghci15
+ghci> ((1, 2), quotRem (5 :: Int) 0)
+((1,2),*** Exception: divide by zero
+ghci> ((1, 2), quotRem (error "dividend" :: Int) 0)
+((1,2),*** Exception: divide by zero
+ghci> rem (error "x" :: Int) 0
+*** Exception: x
+CallStack (from HasCallStack):
+  error, called at <interactive>:41:6 in interactive:Ghci15
+ghci> rem (error "x" :: Int) (-1)
+*** Exception: x
+CallStack (from HasCallStack):
+  error, called at <interactive>:43:6 in interactive:Ghci15
+ghci> mod (error "x" :: Int) (-1)
+*** Exception: x
+CallStack (from HasCallStack):
+  error, called at <interactive>:45:6 in interactive:Ghci15
+ghci> div (error "x" :: Int) 0
+*** Exception: divide by zero
+ghci> quot (error "x" :: Int) 0
+*** Exception: divide by zero
+ghci> quotRem (error "x" :: Integer) 0
+*** Exception: divide by zero
+ghci> div (error "x" :: Integer) 0
+*** Exception: divide by zero
+ghci> mod (error "x" :: Integer) (error "y")
+*** Exception: y
+CallStack (from HasCallStack):
+  error, called at <interactive>:55:29 in interactive:Ghci15
+ghci> unwords ["hello", error "e1"]
+"hello *** Exception: e1
+CallStack (from HasCallStack):
+  error, called at <interactive>:57:19 in interactive:Ghci15
+
