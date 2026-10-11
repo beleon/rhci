@@ -12,6 +12,11 @@
   <img src="https://img.shields.io/badge/tested%20against-GHC%209.6-5e5086" alt="Tested against GHC 9.6">
 </p>
 
+<p align="center">
+  Source and releases: <a href="https://github.com/beleon/rhci">GitHub</a> /
+  <a href="https://codefloe.com/beleon/rhci">CodeFloe</a>
+</p>
+
 ---
 
 ```
@@ -107,8 +112,10 @@ The design is described in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Install
 
-Each release has three files, all self-contained (the Prelude is
-embedded); copy one anywhere on your `PATH`:
+Each release, on [GitHub](https://github.com/beleon/rhci/releases) or
+[CodeFloe](https://codefloe.com/beleon/rhci/releases), has these files,
+all self-contained (the Prelude is embedded); copy one anywhere on your
+`PATH`:
 
 | File | Runs on |
 |---|---|
