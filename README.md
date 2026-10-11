@@ -47,10 +47,11 @@ rhci> [1, 2, undefined]
   line editor with history and Tab completion, Ctrl-C to interrupt
 - **One-shot mode for the shell:** `rhci -c EXPR` evaluates and exits;
   `-i` applies the result to standard input, like `interact`
-- **Small and self-contained:** an 8 MB binary that needs only libc, or a
-  single Ruby file that runs on any CRuby from 2.7 to 3.4, or a library to
-  embed in Ruby programs, with limits on evaluation steps, stack depth,
-  time and Integer size
+- **Small and self-contained:** one portable executable with no
+  dependencies at all (15 MB, built for Linux, macOS, Windows and the
+  BSDs), a 7 MB static Linux binary, or a single Ruby file for any CRuby
+  from 2.7 to 3.4; as a library it embeds in Ruby programs with limits on
+  evaluation steps, stack depth, time and Integer size
 
 ## Why rhci
 
@@ -102,24 +103,18 @@ rake            # lint, build, the tests on CRuby and mruby, startup benchmarks
 
 ### Install
 
-The binary is self-contained (the Prelude is embedded); copy it anywhere
-on your `PATH`:
+Each release has three files, all self-contained (the Prelude is
+embedded); copy one anywhere on your `PATH`:
 
-```bash
-cp build/rhci/bin/rhci ~/.local/bin/
-```
+| File | Runs on |
+|---|---|
+| `rhci` | Linux, macOS, Windows, FreeBSD, OpenBSD, NetBSD; x86-64 and ARM64. One [Cosmopolitan](https://github.com/jart/cosmopolitan) executable, no libc needed. Verified on Linux x86-64 so far; reports from the other systems are welcome |
+| `rhci-linux-x86_64-musl` | Any x86-64 Linux, however old: a static binary |
+| `rhci.rb` | Anything with a Ruby from 2.7 to 3.4 (`chmod +x` it, or `ruby rhci.rb`) |
 
-Or use the compact CRuby build, also one file with everything embedded:
-
-```bash
-cp build/rhci.rb ~/.local/bin/rhci && chmod +x ~/.local/bin/rhci
-```
-
-Both run on x86-64 Linux as built. The binary links only against libc
-and libm, but against the glibc of the machine that built it (2.38 here,
-so Ubuntu 24.04 and Debian 13 or newer); build it on the oldest system
-you want to run it on, or use the compact build, which needs only a Ruby.
-The only file rhci writes is its history, `~/.rhci_history`.
+`rake release` builds all three (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md));
+`rake mruby` alone gives a binary for the building machine's glibc. The
+only file rhci writes is its history, `~/.rhci_history`.
 
 ## Usage
 
@@ -248,4 +243,6 @@ parts (details in [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES)):
 | GHC's base library | `prelude/Prelude.hs` (ported) | BSD-style |
 | containers | `prelude/Data/Map`, `prelude/Data/Set` (ported) | BSD-3-Clause |
 | Unicode Character Database | `lib/rhci/unicode_data.rb` (generated) | Unicode License v3 |
-| mruby | the standalone binary (not in this repository) | MIT |
+| mruby | the standalone binaries (not in this repository) | MIT |
+| Cosmopolitan Libc | the portable `rhci` binary | ISC |
+| musl | the `rhci-linux-x86_64-musl` binary | MIT |

@@ -6,6 +6,13 @@ MRUBY_TAG = '4.0.0'
 MRUBY = File.join(ROOT, 'build', 'mruby', 'bin', 'mruby')
 RHCI = File.join(ROOT, 'build', 'rhci', 'bin', 'rhci')
 
+# Release builds (docs/DEVELOPMENT.md, "Release builds").
+COSMOCC_VERSION = '4.0.2'
+COSMOCC_DIR = File.join(ROOT, 'build', 'cosmocc')
+RHCI_COSMO = File.join(ROOT, 'build', 'rhci-cosmo', 'bin', 'rhci')
+RHCI_MUSL = File.join(ROOT, 'build', 'rhci-musl', 'bin', 'rhci')
+ALPINE_IMAGE = 'docker.io/library/alpine:3.20'
+
 directory MRUBY_DIR do
   sh "git clone -q --depth 1 --branch #{MRUBY_TAG} https://github.com/mruby/mruby.git #{MRUBY_DIR}"
 end
@@ -65,6 +72,51 @@ task torture: %i[lint bundle] do
 end
 
 task default: %i[test bench]
+
+# The Cosmopolitan toolchain, pinned: a zip from cosmo.zip (about 1.4 GB
+# unpacked), fetched once into build/.
+directory COSMOCC_DIR do
+  zip = File.join(ROOT, 'build', "cosmocc-#{COSMOCC_VERSION}.zip")
+  sh "curl -sSL -o #{zip} https://cosmo.zip/pub/cosmocc/cosmocc-#{COSMOCC_VERSION}.zip"
+  mkdir_p COSMOCC_DIR
+  sh "unzip -q #{zip} -d #{COSMOCC_DIR}"
+  rm zip
+end
+
+desc 'Release build: build/rhci-cosmo/bin/rhci, one portable executable (needs curl, unzip)'
+task cosmo: [MRUBY_DIR, :bundle, COSMOCC_DIR] do
+  log = File.join(ROOT, 'build', 'cosmo-build.log')
+  env = { 'MRUBY_CONFIG' => File.join(ROOT, 'tools', 'cosmo_build_config.rb'), 'COSMO_ROOT' => COSMOCC_DIR }
+  ok = system(env, 'rake', '-f', File.join(MRUBY_DIR, 'Rakefile'), '-j8', 'all', out: log, err: log)
+  abort "cosmopolitan build failed:\n#{File.readlines(log).last(30).join}" unless ok
+end
+
+desc 'Release build: build/rhci-musl/bin/rhci, a static x86-64 Linux binary (needs podman)'
+task musl: [MRUBY_DIR, :bundle] do
+  # Alpine's gcc is musl's; the repo is copied in (without build/) so the
+  # builds here are untouched, and the binary copied back out.
+  script = <<~SH
+    set -e
+    apk add -q build-base ruby ruby-rake >/dev/null
+    mkdir /work && tar --exclude=./build -C /src -cf - . | tar -C /work -xf -
+    cd /work
+    LDFLAGS=-static MRUBY_CONFIG=/work/mruby_build_config.rb rake -f vendor/mruby/Rakefile -j8 > build.log 2>&1 \
+      || { tail -30 build.log; exit 1; }
+    strip build/rhci/bin/rhci
+    mkdir -p /src/build/rhci-musl/bin && cp build/rhci/bin/rhci /src/build/rhci-musl/bin/rhci
+  SH
+  sh 'podman', 'run', '--rm', '--memory', '8g', '-v', "#{ROOT}:/src:Z", ALPINE_IMAGE, 'sh', '-c', script
+end
+
+desc 'All release assets into dist/: rhci (portable), rhci-linux-x86_64-musl, rhci.rb'
+task release: %i[cosmo musl compact] do
+  dist = File.join(ROOT, 'dist')
+  mkdir_p dist
+  cp RHCI_COSMO, File.join(dist, 'rhci')
+  cp RHCI_MUSL, File.join(dist, 'rhci-linux-x86_64-musl')
+  cp File.join(ROOT, 'build', 'rhci.rb'), File.join(dist, 'rhci.rb')
+  puts "dist/: #{Dir.children(dist).sort.join(', ')}"
+end
 
 desc 'Run the exercism Haskell track on rhci and GHC (needs network and podman)'
 task :exercism do

@@ -15,10 +15,38 @@ rake compact    # build/rhci.rb: the compact CRuby build (one file, snapshot emb
 rake bench_runtime  # runtime benchmarks, CRuby and the mruby binary
 rake torture    # mruby tests with GC torture in the C loop (after machine.c changes)
 rake exercism   # the exercism Haskell track vs GHC (podman, network)
+rake cosmo      # release: build/rhci-cosmo/bin/rhci, one portable executable (curl, unzip)
+rake musl       # release: build/rhci-musl/bin/rhci, static x86-64 Linux (podman)
+rake release    # both plus the compact build, as dist/rhci, dist/rhci-linux-x86_64-musl, dist/rhci.rb
 rake fuzz[1,1000,0.05]  # differential fuzzing vs GHCi (podman)
 rake fuzz_progs[1,150]  # random whole programs vs runghc (podman)
 bin/rhci        # CRuby launcher
 ```
+
+## Release builds
+
+`rake mruby` is the development build: dynamically linked against this
+machine's glibc, so the binary needs a glibc at least as new where it
+runs. Releases use two other builds of the same sources (`rake release`
+makes all assets into `dist/`):
+
+- **`rake cosmo`** (`tools/cosmo_build_config.rb`): Cosmopolitan Libc,
+  with the pinned `cosmocc` toolchain fetched once into `build/cosmocc`.
+  One "actually portable executable" (15 MB) for Linux, macOS, Windows,
+  FreeBSD, OpenBSD and NetBSD, x86-64 and ARM64, needing no libc. Verified
+  on Linux x86-64 (the e2e suite passes against it, and it evaluates 5-10%
+  faster than the glibc build); the other platforms are untested so far,
+  and the Windows terminal emulation is where trouble would show first. A
+  known quirk: a Linux host that registers Wine for MZ-headed files runs
+  it under Wine; Cosmopolitan's `--assimilate` or its `ape` loader fixes
+  that.
+- **`rake musl`**: a static x86-64 Linux ELF (7 MB) built in an Alpine
+  container, for distros of any age; within a few percent of glibc's
+  speed.
+
+Both binaries contain a libc; `THIRD_PARTY_NOTICES` carries its licence.
+Measured on 2026-10-11: prompt 3-4 ms on all three, `sum [1..1000000]`
+2.07 s glibc, 2.04 s musl, 1.86 s Cosmopolitan.
 
 ## Layout
 
