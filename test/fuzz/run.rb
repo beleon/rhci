@@ -46,6 +46,8 @@ require_relative 'class_gen'
 require_relative 'fail_gen'
 require_relative 'kind_gen'
 require_relative 'inst_gen'
+require_relative 'equal_gen'
+require_relative 'lib_gen'
 
 module Fuzz
   ROOT = File.expand_path('../..', __dir__)
@@ -67,7 +69,8 @@ module Fuzz
                     '--reads' => ['e', 'ReadGen'], '--typeerrors' => ['y', 'TypeErrGen'],
                     '--tokens' => ['k', 'LexGen'], '--laziness' => ['z', 'LazyGen'],
                     '--classes' => ['c', 'ClassGen'], '--fail' => ['f', 'FailGen'],
-                    '--kinds' => ['j', 'KindGen'], '--instances' => ['i', 'InstGen'] }.freeze
+                    '--kinds' => ['j', 'KindGen'], '--instances' => ['i', 'InstGen'],
+                    '--equal' => ['q', 'EqualGen'], '--library' => ['l', 'LibGen'] }.freeze
 
   def section_mode(argv)
     argv.find { |a| SECTION_MODES.key?(a) }
@@ -110,7 +113,8 @@ module Fuzz
       out << "## #{name} file" << '' << ":load #{name}"
       out.concat(uses) << ''
       out << "## #{name} prompt" << ''
-      if r.rand < 0.6
+      # A `where` group (indented) only fits a block.
+      if r.rand < 0.6 || defs[0].start_with?('wrapped')
         out << ':{'
         out.concat(defs) << ':}'
       else

@@ -67,7 +67,7 @@ module Fuzz
         defs << "#{n} = #{rhs}"
         nums << n
       end
-      [defs, uses(nums, funs)]
+      [defs, uses(nums, funs), nums]
     end
 
     def uses(nums, funs)
@@ -91,8 +91,15 @@ module Fuzz
     # Module name => [source, definitions, uses].
     def cases(count)
       (1..count).to_h do |i|
-        defs, uses = case_body
+        defs, uses, nums = case_body
         name = "D#{i}"
+        if chance(0.35)
+          # The group local to one binding: a `where` has the monomorphism
+          # restriction in a file too (and none at the prompt), and its
+          # defaulting happens with the binding's.
+          defs = ["wrapped = (#{nums.join(', ')})", '  where'] + defs.map { |d| "    #{d}" }
+          uses = [':t wrapped', 'wrapped', 'fst (wrapped, ())']
+        end
         [name, ["module #{name} where\n\n#{defs.join("\n")}\n", defs, uses]]
       end
     end

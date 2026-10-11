@@ -1701,3 +1701,12 @@ class Box f where
   bsize :: f a -> Int
 :}
 instance Box Int
+
+## 55. Set.cartesianProduct as containers defines it (found by fuzzing the library)
+import qualified Data.Set as S
+S.cartesianProduct (S.take 2 (S.fromList [] :: S.Set Int)) (S.take 2 (S.fromList [error "e"] :: S.Set Int))
+S.cartesianProduct (S.fromList [] :: S.Set Int) (S.fromList "ab")
+S.cartesianProduct (S.fromList [1, 2, 3]) (S.fromList "ab")
+S.cartesianProduct (S.fromList [1, 2]) (S.fromList "a")
+S.size (S.cartesianProduct (S.fromList [1 .. 20]) (S.fromList [1 .. 7]))
+S.toList (S.cartesianProduct (S.fromList [3, 1, 2]) (S.fromList [False, True]))

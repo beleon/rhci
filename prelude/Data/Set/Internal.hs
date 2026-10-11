@@ -586,10 +586,22 @@ maxView :: Set a -> Maybe (a, Set a)
 maxView Tip = Nothing
 maxView (Bin _ x l r) = Just $! maxViewSure x l r
 
+-- containers' definition: both sets are forced (an element is a strict
+-- field), and the result is built by merging.
 cartesianProduct :: Set a -> Set b -> Set (a, b)
-cartesianProduct as bs
-  | null as || null bs = Tip
-  | otherwise = fromDistinctAscList [(a, b) | a <- toAscList as, b <- toAscList bs]
+cartesianProduct !_as Tip = Tip
+cartesianProduct as (Bin 1 b _ _) = mapMonotonic (flip (,) b) as
+cartesianProduct as bs =
+  getMergeSet $ foldMap (\a -> MergeSet $ mapMonotonic ((,) a) bs) as
+
+-- Only a valid set when the greatest element of xs is below ys's least.
+newtype MergeSet a = MergeSet { getMergeSet :: Set a }
+
+instance Semigroup (MergeSet a) where
+  MergeSet xs <> MergeSet ys = MergeSet (merge xs ys)
+
+instance Monoid (MergeSet a) where
+  mempty = MergeSet empty
 
 powerSet :: Set a -> Set (Set a)
 powerSet xs0 = insertMin empty (foldr' step Tip xs0)

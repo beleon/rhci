@@ -263,3 +263,14 @@ An audit of what nothing tested found, and this round fixed:
 - `--instances` (`inst_gen.rb`): hand-written instances of Show, Eq, Ord,
   Num, Enum, Bounded, Semigroup, Monoid, Functor, Foldable, Traversable
   and Applicative with varying minimal definitions; 5 000 probes agree.
+- `--equal` (`equal_gen.rb`): a key type whose Eq/Ord ignore a visible
+  tag, through every Map/Set/list operation that chooses between equal
+  elements (insert, union, fromList, fromAscList, max, maximumBy, sort
+  stability, nub, group, ...); 2 000 probes agree.
+- `--library` (`lib_gen.rb`): about 250 Data.List, Data.Map, Data.Set,
+  Control.Monad, Data.Either, Data.Maybe, Data.Char and Data.Function
+  uses with small random arguments, lists sometimes holding a tagged
+  `error`. Found: `Set.cartesianProduct` was a simplification that forced
+  less than containers' (oracle section 55); 6 000 probes agree.
+- The defaulting generator also puts a group in a `where` (the local
+  monomorphism restriction); seed 3 agrees.

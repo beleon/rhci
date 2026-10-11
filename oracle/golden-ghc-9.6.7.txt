@@ -3770,3 +3770,21 @@ ghci> instance Box Int
     • In the first argument of ‘Box’, namely ‘Int’
       In the instance declaration for ‘Box Int’
 
+## 55. Set.cartesianProduct as containers defines it (found by fuzzing the library)
+
+ghci> import qualified Data.Set as S
+ghci> S.cartesianProduct (S.take 2 (S.fromList [] :: S.Set Int)) (S.take 2 (S.fromList [error "e"] :: S.Set Int))
+fromList *** Exception: e
+CallStack (from HasCallStack):
+  error, called at <interactive>:3:83 in interactive:Ghci2
+ghci> S.cartesianProduct (S.fromList [] :: S.Set Int) (S.fromList "ab")
+fromList []
+ghci> S.cartesianProduct (S.fromList [1, 2, 3]) (S.fromList "ab")
+fromList [(1,'a'),(1,'b'),(2,'a'),(2,'b'),(3,'a'),(3,'b')]
+ghci> S.cartesianProduct (S.fromList [1, 2]) (S.fromList "a")
+fromList [(1,'a'),(2,'a')]
+ghci> S.size (S.cartesianProduct (S.fromList [1 .. 20]) (S.fromList [1 .. 7]))
+140
+ghci> S.toList (S.cartesianProduct (S.fromList [3, 1, 2]) (S.fromList [False, True]))
+[(1,False),(1,True),(2,False),(2,True),(3,False),(3,True)]
+
