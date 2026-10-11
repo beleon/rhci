@@ -11,8 +11,12 @@ require 'fileutils'
 
 # A runaway evaluation must fail here (NoMemoryError), not take the machine
 # down: 4 ^ (2 ^ 127) once grew a run to 85 GB. Subprocesses (the mruby
-# runner, the binary) inherit the limit.
-Process.setrlimit(:AS, 8 * 2**30)
+# runner, the binary) inherit the limit. (Not every platform has it.)
+begin
+  Process.setrlimit(:AS, 8 * 2**30)
+rescue NotImplementedError, Errno::EINVAL, Errno::EPERM
+  nil
+end
 require 'open3'
 require_relative '../../lib/rhci'
 

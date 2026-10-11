@@ -24,6 +24,10 @@ task mruby: [MRUBY_DIR, :bundle] do
   env = { 'MRUBY_CONFIG' => File.join(ROOT, 'mruby_build_config.rb') }
   ok = system(env, 'rake', '-f', File.join(MRUBY_DIR, 'Rakefile'), '-j8', 'all', out: log, err: log)
   abort "mruby build failed:\n#{File.readlines(log).last(30).join}" unless ok
+  # The binary is what gets copied around: without its symbols it is 40%
+  # smaller and carries no build paths. (The mruby interpreter next to it
+  # keeps them for debugging the C loop.)
+  system('strip', RHCI) if system('strip', '--version', out: File::NULL, err: File::NULL)
 end
 
 desc 'Check lib/ and tests for constructs mruby lacks'

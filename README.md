@@ -2,7 +2,7 @@
 
 <p align="center">
   <strong>A small GHCi in Ruby: a Haskell REPL with GHCi's semantics.</strong><br>
-  One static-ish binary, or one Ruby file. Prompt in 3 ms, a one-liner in 25 ms.
+  One binary, or one Ruby file. Prompt in 3 ms, a one-liner in 25 ms.
 </p>
 
 <p align="center">
@@ -47,9 +47,10 @@ rhci> [1, 2, undefined]
   line editor with history and Tab completion, Ctrl-C to interrupt
 - **One-shot mode for the shell:** `rhci -c EXPR` evaluates and exits;
   `-i` applies the result to standard input, like `interact`
-- **Small and self-contained:** a 12 MB binary that needs only libc, or a
+- **Small and self-contained:** an 8 MB binary that needs only libc, or a
   single Ruby file that runs on any CRuby from 2.7 to 3.4, or a library to
-  embed in Ruby programs with limits on steps, memory and time
+  embed in Ruby programs, with limits on evaluation steps, stack depth,
+  time and Integer size
 
 ## Why rhci
 
@@ -114,8 +115,11 @@ Or use the compact CRuby build, also one file with everything embedded:
 cp build/rhci.rb ~/.local/bin/rhci && chmod +x ~/.local/bin/rhci
 ```
 
-Both run on x86-64 Linux as built; the binary links only against libc
-and libm. The only file rhci writes is its history, `~/.rhci_history`.
+Both run on x86-64 Linux as built. The binary links only against libc
+and libm, but against the glibc of the machine that built it (2.38 here,
+so Ubuntu 24.04 and Debian 13 or newer); build it on the oldest system
+you want to run it on, or use the compact build, which needs only a Ruby.
+The only file rhci writes is its history, `~/.rhci_history`.
 
 ## Usage
 
@@ -186,9 +190,9 @@ comprehensions, `do` notation (with MonadFail), bang patterns, kind
 inference with GHC2021's polymorphic kinds, and the GHCi prompt's rules:
 extended defaulting, no monomorphism restriction, `it`, redefinition.
 
-Deliberately not supported, with an explicit error: language extensions
-beyond these (GADTs, type families, rank-n types, multi-parameter
-classes, existential types, …), 32-bit `Float`, tuple sections,
+Deliberately not supported, with an explicit error: GHC extensions other
+than bang patterns and polymorphic kinds (GADTs, type families, rank-n
+types, multi-parameter classes, existential types, …), 32-bit `Float`, tuple sections,
 non-ASCII identifiers, `default` declarations, foreign imports, and
 packages other than the base and containers modules listed above.
 
@@ -204,8 +208,8 @@ the real GHC 9.6:
   evaluation order, whole multi-module programs, GHCi sessions,
   defaulting, numbers at the 64-bit edges, user data types and classes,
   damaged `read` input, deliberate type errors, lexical traps, laziness,
-  kinds and the breadth of the libraries. Around 200 000 generated
-  inputs agree, on CRuby and on mruby.
+  kinds and the breadth of the libraries. Over 140 000 generated inputs
+  and 2 800 programs agree, on CRuby and on mruby.
 - **The exercism Haskell track:** its reference solutions and test suites
   run on rhci and on GHC.
 
