@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 # Flags Ruby constructs that are missing from our lean mruby build (see
-# CLAUDE.md "mruby facts") in every file that runs on mruby. Crude by design:
+# docs/DEVELOPMENT.md "mruby facts") in every file that runs on mruby. Crude by design:
 # a false positive is silenced with a trailing `# lint:ok` and a reason.
 ROOT = File.expand_path('..', __dir__)
 

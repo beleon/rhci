@@ -1064,6 +1064,21 @@ module Rhci
 
     # ---- commands --------------------------------------------------------------------
 
+    HELP = <<~TEXT
+      Commands (any unambiguous prefix works, :t for :type):
+        <expression>          evaluate and print it (IO actions are run); `it` is the result
+        <declaration>         define at the prompt (x = 1, f x = ..., data, class, instance)
+        :{ ... :}             a multi-line input
+        :type <expr>          the expression's type
+        :kind <type>          the type's kind
+        :info <name>          what a name is: type, class, instances, fixity
+        :load <file>...       load modules (prompt definitions are discarded)
+        :reload               load the same files again
+        :quit                 leave (or Ctrl-D)
+        :?, :help             this text
+      Ctrl-C interrupts an evaluation. History is kept in ~/.rhci_history.
+    TEXT
+
     def command(input)
       text = Rhci::Text.lstrip(input)[1..-1]
       word, arg = split_word(text)
@@ -1079,6 +1094,9 @@ module Rhci
       when 'kind' then kind_of(arg)
       when 'load' then load(Rhci::Text.strip(arg).split(' '))
       when 'reload' then reload
+      when '?', 'help'
+        write_text(HELP)
+        Result.new(:ok)
       when nil
         Result.new(:command_error, "unknown command ':#{word}'\nuse :? for help.")
       else

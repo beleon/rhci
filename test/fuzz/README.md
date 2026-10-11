@@ -170,7 +170,7 @@ Found (oracle sections 49 and L13): derived Show and Read used precedence
 module (`-3 :| "x"` came out `(-3) :| "x"`); a record update on the wrong
 constructor raises GHC 9.6's "Non-exhaustive patterns in case". `:t`
 comparisons now ignore GHC2021's kind-polymorphic `forall {k} (a :: k).`
-prefix (rhci has no PolyKinds). Seeds 1-3 (7 400 probes) agree.
+prefix (rhci's `:t` does not print kind variables). Seeds 1-3 (7 400 probes) agree.
 
 ## Read on damaged input
 

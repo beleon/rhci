@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 # Facts about the host Ruby that the design relies on (docs/ARCHITECTURE.md
-# §4, CLAUDE.md "mruby facts"). If one of these starts failing, the runtime
+# §4, docs/DEVELOPMENT.md "mruby facts"). If one of these starts failing, the runtime
 # changed underneath us.
 RT.suite 'runtime assumptions' do
   RT.test 'Integer is unbounded' do

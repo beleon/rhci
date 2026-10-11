@@ -3,7 +3,7 @@
 module Rhci
   # Exact numeric primitives shared by both runtimes. Never relies on Ruby's
   # own Float printing/parsing or Float#to_i beyond 2^53 (wrong on mruby,
-  # see CLAUDE.md); everything goes through Math.frexp/ldexp and Integers.
+  # see docs/DEVELOPMENT.md); everything goes through Math.frexp/ldexp and Integers.
   module Num
     INT_MIN = -(2**63)
     INT_MAX = 2**63 - 1

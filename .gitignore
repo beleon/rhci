@@ -5,3 +5,8 @@ build.log
 mrbgems/rhci/mrblib/rhci.rb
 oracle/unicode/*.hi
 oracle/unicode/*.o
+# Local only: AI working notes and repo setup cheatsheets
+CLAUDE.md
+GITHUB_SETUP.md
+CODEFLOE_SETUP.md
+oom

@@ -1,72 +1,77 @@
-# rhci architecture (draft for review)
+# rhci architecture
 
-Status: **proposal, nothing implemented.** The scope it serves is in
-`CLAUDE.md`: GHCi *semantics* (values, `show` output, what type-checks,
-laziness, the syntax users write), not GHCi's text.
+This document describes rhci as it is implemented. The goal is GHCi
+*semantics* (values, `show` output, what type-checks, laziness, the syntax
+users write), not GHCi's text. Contributor rules (scope decisions, the
+dual-runtime rules and the measured mruby facts the design relies on) are
+in `docs/DEVELOPMENT.md`.
 
 There are two deliverables from one source tree:
 - **CRuby library:** embedded in long-running Ruby programs. Startup time
-  doesn't matter. Isolation, no global side effects, and host control over
-  runaway evaluation do.
+  matters little. Isolation, no global side effects, and host control over
+  runaway evaluation matter a lot.
 - **mruby standalone command `rhci`:** built only with our own
-  `mruby_build_config.rb`. Startup must be similar to bash's
-  (see §6). It targets laptops and desktops.
+  `mruby_build_config.rb`. On the development machine the prompt is usable
+  in under 10 ms and `rhci -c EXPR` finishes in under 200 ms (§6).
 
 **Fail, don't approximate.** If something can't be done with GHCi's exact
 semantics, rhci rejects it with an explicit "unsupported: …" error. It
 never substitutes something close. This covers unsupported syntax and
-extensions, types we don't provide (`Float`), and numeric edge cases we
-can't reproduce exactly. A wrong answer that looks right is the worst
-outcome. Runtime performance is best effort, with no target.
+extensions, types rhci does not provide (`Float`), and numeric edge cases
+it can't reproduce exactly. A wrong answer that looks right is the worst
+outcome. Runtime performance is best effort.
 
 ## 1. Pipeline
 
 ```
  input line(s)
-    │  REPL: :{ :} grouping, :t / :q dispatch
+    │  REPL: :{ :} grouping, command dispatch
     ▼
  Lexer + layout ──► tokens with explicit { ; } (Haskell 2010 §10.3)
     ▼
  Parser ──► surface AST; operator chains kept flat (unresolved)
     ▼
- Renamer ──► unique names, GHCi shadowing, fixity resolution,
+ Renamer ──► unique names, GHCi shadowing, imports, fixity resolution,
     │        dependency analysis (SCCs) of binding groups,
     │        `deriving` expanded into ordinary instance declarations
     ▼
+ Kind inference ──► kinds of declarations; signatures and heads checked
+    ▼
  Type checker ──► HM + type classes over the renamed source; records
-    │             types and (step 5) dictionary evidence; defaulting;
-    │             answers :t
+    │             types and dictionary evidence; defaulting; answers :t
     ▼
  Desugarer ──► Core: λ, app, var, lit, con, letrec groups, flat case
     │          (match compiler; guards, where, if, comprehensions,
     │           sections, ranges), with explicit dictionaries, and
     │           primitive operations where the types are known
     ▼
- Lowering ──► machine Core: A-normal form, env slots resolved
+ Simplifier ──► Core to Core: inlining, case-of-known, specialisation
+    ▼
+ Lowering ──► machine code: A-normal form, env slots resolved
     ▼
  Machine ──► lazy graph reduction on an explicit stack
     ▼
  REPL runs `print it` (or the IO action) and streams the characters out
 ```
 
-Every input is checked in full before anything runs or any binding is added.
-
-**Decided in build step 4: type-check before desugaring** (as GHC does),
-not after. The desugarer then knows the types, which lets it insert
-dictionaries and turn arithmetic at known types into single primitive
-operations, the main remaining performance lever (§6).
-A type error leaves the session unchanged, as in GHCi.
+The files, in load order, are listed in `lib/rhci/manifest.txt`. Every
+input runs the whole pipeline, and the session's names, types and globals
+are updated only once the input has checked completely. A type error leaves
+the session unchanged, as in GHCi. Type checking comes before desugaring
+(as in GHC), so the desugarer knows the types: it inserts dictionaries and
+turns arithmetic at known types into single primitive operations.
 
 ## 2. Front end
 
 ### Lexer and layout
-- Unicode-aware, working on code points (`String#codepoints`, which both runtimes have).
+- Unicode-aware, working on code points (`String#codepoints`, which both
+  runtimes have).
 - Implements the full Haskell 2010 escape set for chars and strings
-  (`\SOH`, `\^A`, `\&`, string gaps). The goldens rely on it.
-- **Numeric literals are parsed by us** into an exact `Integer` or an exact
-  rational. A Fractional literal is converted to Double with correct
-  rounding by our own code: mruby's parser flushes `5e-324` to `0.0`, and
-  only its parser is broken (`Math.ldexp`/`frexp` handle subnormals fine on both runtimes).
+  (`\SOH`, `\^A`, `\&`, string gaps).
+- **Numeric literals are parsed by rhci** into an exact `Integer` or an
+  exact rational. A Fractional literal is converted to Double with correct
+  rounding by rhci's own code, because mruby's float parser flushes
+  subnormals to zero.
 - Layout is the Report's algorithm *L*, implemented as a token-stream
   transformer. It includes the parse-error(t) rule (`let x = 1 in …`
   closes the implicit block on `in`), handled by having the parser ask the
@@ -74,9 +79,10 @@ A type error leaves the session unchanged, as in GHCi.
 
 ### Parser
 - Hand-written recursive descent. Recursion follows **syntactic nesting
-  only**. Anything that grows with input length is a loop: list
-  literals, application spines `f a b c`, operator chains, declarations,
-  case alternatives.
+  only**, capped at 400 levels ("expression nested too deeply"), which
+  also bounds the recursion of the later passes. Anything that grows with
+  input length is a loop: list literals, application spines `f a b c`,
+  operator chains, declarations, case alternatives.
 - An operator chain `a + b * - c` is parsed as a flat sequence and
   resolved later, because fixities can come from user `infixl` declarations.
 
@@ -95,52 +101,70 @@ A type error leaves the session unchanged, as in GHCi.
   Data.Maybe, Data.Char, Data.Tuple, Data.Function, Data.Ord,
   Data.Either, Control.Monad, System.IO, System.Environment, Text.Read,
   Data.Bits, Data.Ratio, Data.IORef and Text.Printf (`DEFAULT_MODULES`).
+  This is a deliberate difference from GHCi: `sort` or `fromMaybe` work
+  without an import.
 - **Modules.** `lib/rhci/base_names.rb` is generated by
   `tools/gen_base_names.rb` from GHCi's `:browse` of each module: what
   every known module exports (`MODULE_EXPORTS`). Modules that clash with
   the Prelude (Data.Map, Data.Map.Strict, Data.Set) are imported, as in
   GHC: `import qualified Data.Map as M`, `import Data.Set (Set, member)`,
-  `hiding`, aliases shared by several imports. Their implementations are
-  library modules (`LIBRARY_IMPLEMENTATIONS`): Haskell sources under
-  `prelude/Data/`, ported from containers, compiled in file mode after the
-  Prelude and kept in the snapshot. At the prompt, as in GHCi, a fully
-  qualified name (`Data.Map.fromList`) works without an import.
+  `hiding`, aliases shared by several imports, and explicit imports of the
+  Prelude itself (`import Prelude hiding (…)` replaces the implicit one).
+  Their implementations are library modules (`LIBRARY_IMPLEMENTATIONS`):
+  Haskell sources under `prelude/Data/`, ported from containers, compiled
+  in file mode after the Prelude and kept in the snapshot. At the prompt,
+  as in GHCi, a fully qualified name (`Data.Map.fromList`) works without
+  an import.
   - An import of a module rhci does not know, or of an item the module
     does not export, is an error. A known name that rhci does not
     implement fails as `unsupported` when used.
-- **`deriving` (Show, Eq, Ord, Enum, Bounded)** is expanded here into
-  ordinary instance source, following the Report's derivation rules
-  verbatim. That alone yields `Just (-3)`, `Circle (-1.0)`,
-  `P {px = 1, py = -2}` and `3 :+: 4` with no special cases in the printer.
+- **`deriving` (Show, Read, Eq, Ord, Enum, Bounded)** is expanded here
+  (`lib/rhci/derive.rb`) into instance source text following the Report's
+  derivation rules as GHC implements them, then parsed and treated like a
+  user-written instance. That alone yields `Just (-3)`, `Circle (-1.0)`,
+  `P {px = 1, py = -2}` and `3 :+: 4` with no special cases in the
+  printer. Generated code refers only to Prelude-internal aliases, so user
+  definitions cannot capture it.
 
 ### Desugarer to Core
-- **Match compilation** (Wadler/Augustsson style) turns multi-equation
-  functions, nested patterns, guards with fall-through, as-patterns,
-  irrefutable `let` patterns, and lambda/case patterns into flat
-  single-level `case`. A failed match calls an error with the GHCi-style
-  message (`Non-exhaustive patterns in function f`).
+- **Match compilation** turns multi-equation functions, nested patterns,
+  guards with fall-through, as-patterns, irrefutable and bang patterns,
+  and lambda/case patterns into flat single-level `case`. A failed match
+  calls an error with the GHCi-style message (`Non-exhaustive patterns in
+  function f`). Pattern-match failure continuations are functions of a
+  dummy argument, not thunks, so a recursive call from a later clause is
+  still a tail call.
 - **Literals become class methods:** `fromInteger n` and `fromRational r`,
   and literal patterns become `==` tests. This makes the type checker infer
   `Num`/`Eq` exactly as Haskell does.
 - The remaining sugar maps onto Prelude functions per the Report:
   comprehensions → `concatMap`, ranges → `enumFromThenTo`, `if` → `case`,
-  sections → λ, `where` → `let`, `do` → `>>=`/`>>`.
-- **String literals stay a single node** (an array of code points) and are
-  unpacked lazily at run time. A 10k-character literal is not 10k cons
-  nodes in the AST.
+  sections → λ, `where` → `let`, `do` → `>>=`/`>>` (and `fail` only where
+  GHC uses MonadFail).
+- **String literals stay a single node** (`Core::Str`) and are unpacked
+  lazily at run time. A 10k-character literal is not 10k cons nodes.
 
-## 3. Type system
+## 3. Types and kinds
 
 ### Representation
-- Types are `TVar` (mutable link plus a *level*), `TCon` (name and kind)
-  and `TApp`. Functions are `TApp(TApp(->, a), b)` and lists are `TApp([], a)`.
+- Types (`lib/rhci/types.rb`) are plain data so they can be snapshotted:
+  `TMeta` (unification variable with a link and a *level*), `TSkol`
+  (rigid variable from a signature), `TCon`, `TAp`, and `TGen` (the i-th
+  quantified variable of a `Scheme`). Functions are `TAp(TAp(->, a), b)`.
   Because application is first-order, constructor classes (`Foldable t`,
   `Functor f`) unify structurally with no special machinery.
-- Kinds are inferred for `data` and `class` declarations, defaulting to `*`.
+
+### Kind inference
+`lib/rhci/kinds.rb` infers kinds as GHC2021 does (PolyKinds): each
+declaration group's kinds are found by unification, and what stays open is
+generalised (`data P a = P` has kind `k -> *`), so each use instantiates
+it afresh. Signatures, annotations and instance heads are checked against
+the declared kinds, so ill-kinded declarations are rejected. `:kind`
+prints `*`, `Constraint` and kind variables `k`, `k1`, ….
 
 ### Two checking modes
 GHCi checks prompt input and loaded files under different flags. Both
-modes are needed, and they have to be tested separately:
+modes are implemented and tested separately:
 
 | | prompt input | `:load`ed file |
 |---|---|---|
@@ -152,27 +176,25 @@ modes are needed, and they have to be tested separately:
   processing one SCC at a time. Explicit signatures are checked and then
   used as the binding's type. Polymorphic recursion is allowed only with a
   signature, as in Haskell.
-- **Monomorphism restriction:** off at the prompt and on in loaded files,
-  as in GHCi.
 - **Constraints** are collected as predicates `C τ` and reduced by
   instance lookup (`Show [a]` → `Show a`). A constraint on a concrete type
   with no instance is a type error (`length xs / 2` →
   `No instance for Fractional Int`).
 - Constraints entailed through a superclass are dropped (`Ord t` subsumes
   `Eq t`), so `:t factorial` gives `(Ord t, Num t) => t -> t` up to renaming.
-- **Defaulting:** a type variable with constraints that is ambiguous (it
-  appears in neither the type nor the environment) is defaulted. Interactive
-  input uses GHCi's ExtendedDefaultRules (candidates `()`, `[]`, `Integer`,
-  `Double`; interactive classes allowed). Prelude code uses the standard
-  rules, and so do loaded files. This is why `Nothing` and `[]` print,
-  `2 ^ 64` is an Integer, and `head 5` is a type error.
+- **Defaulting:** a constrained type variable that is ambiguous is
+  defaulted. Interactive input uses GHCi's ExtendedDefaultRules
+  (candidates `()`, `[]`, `Integer`, `Double`; interactive classes
+  allowed, superclasses seen through). The Prelude and loaded files use
+  the standard rules. This is why `Nothing` and `[]` print, `2 ^ 64` is an
+  Integer, and `head 5` is a type error.
 
 ### Classes and instances
 - **Haskell 98 classes:** single parameter, superclasses, default methods,
   and instance heads of the form `C (T a1 … an)` with contexts. That covers
-  Eq, Ord, Show, Enum, Bounded, Num, Real, Integral, Fractional, Floating,
-  RealFrac, RealFloat, Semigroup, Monoid, Functor, Applicative, Monad,
-  Foldable, Traversable, and Read, plus user-declared classes.
+  Eq, Ord, Show, Read, Enum, Bounded, Num, Real, Integral, Fractional,
+  Floating, RealFrac, RealFloat, Semigroup, Monoid, Functor, Applicative,
+  Monad, MonadFail, Foldable and Traversable, plus user-declared classes.
   - `Read` is a port of base's ReadP, ReadPrec, Text.Read.Lex and GHC.Read,
     so what parses, what is ambiguous and what `reads` leaves over are
     GHC's by construction, and derived Read is GHC's generated code.
@@ -180,13 +202,12 @@ modes are needed, and they have to be tested separately:
     to `()` and coerces at the three places that instantiate it otherwise
     (running a parser, `<++`, `gather`). The machine is untyped, so the
     `coerce` primitive is the identity.
-  - `Show` includes **`showList`**. That is the Report's trick that makes
-    `"hi"` and `[['a'],"b"]` print as strings, so we use the class as
-    specified rather than special-casing the printer.
+  - `Show` includes **`showList`**, the Report's trick that makes `"hi"`
+    and `[['a'],"b"]` print as strings, so the printer has no special case.
 - **Equality contexts** `(a ~ T) => C (K a)` are allowed in instance
   contexts, for Text.Printf's `(a ~ ()) => PrintfType (IO a)`: selecting
   the instance unifies the argument with `T`, so `x <- printf "…"` gives
-  `x :: ()`.
+  `x :: ()`. Equality constraints elsewhere are unsupported.
 - **Elaboration (dictionary passing):** a dictionary is a constructor value
   whose fields are the methods and the superclass dictionaries. A method is
   a field selector. An instance with a context is a function from
@@ -201,8 +222,9 @@ modes are needed, and they have to be tested separately:
 ### Constraints GHC2021 keeps
 - A constraint no instance solves is kept while it mentions a type
   variable (FlexibleContexts): `max (\y -> 1) :: (Ord (p -> a), Num a) =>
-  ...`; a ground one (`Num String`) is an error. A use at concrete types
-  then fails.
+  ...`; a ground one (`Num String`) is an error. Its superclasses are
+  reduced into the context (`Integral [a]` adds `Ord a`). A use at
+  concrete types then fails.
 - Defaulting and ambiguity follow GHC's growThetaTyVars: a variable is
   determined by the type if it is in it or shares a constraint with one
   that is, so `toEnum 1 mempty :: (Enum (t1 -> t2), Monoid t1) => t2`.
@@ -210,8 +232,8 @@ modes are needed, and they have to be tested separately:
 
 ### `:t`
 - `:t e` infers and generalises with no defaulting, simplifies the
-  constraints, renames variables (`a`, `b`, …) and prints. Because names
-  and order don't matter, the naming scheme can be the simplest one.
+  constraints, renames variables (`a`, `b`, …) and prints. Variable names
+  and constraint order are not required to match GHCi's.
 
 ## 4. Runtime
 
@@ -222,44 +244,72 @@ modes are needed, and they have to be tested separately:
 | `Integer` | Ruby `Integer` (bignum through mruby-bigint) |
 | `Double` | Ruby `Float` |
 | `Char` | Ruby `Integer` code point |
-| data constructors, tuples, lists, `()`, `Bool` | `Con` object: tag plus a field array |
-| functions | `Fun` (arity, code, env), `PAP` (partial application) |
-| unevaluated | `Thunk` (code, env), overwritten in place when evaluated |
+| data constructors, tuples, lists, `()`, `Bool` | `ConValue`: a flat Array `[con, field0, …]`; nullary constructors are shared |
+| functions | `Fun` (flat Array: code and captured values), `PAP` (partial application) |
+| unevaluated | `Thunk` (flat Array: code and captures), overwritten in place when evaluated; `StringThunk` for a literal |
 
-Types are erased after checking. Nothing at run time asks "is this a
-list?". Printing goes through the `Show` dictionary like any other code.
+Values are flat Array subclasses so that each is one object rather than an
+object plus a field array; on mruby this cut memory by about a third and
+with it most of the GC's superlinearity at depth. Types are erased after
+checking. Nothing at run time asks "is this a list?". Printing goes
+through the `Show` dictionary like any other code.
 
 ### The machine
 - A **lazy eval/apply machine** in the spirit of the STG machine and
-  Sestoft's mark-2, interpreting machine Core in A-normal form.
-  Allocation happens only at `let`, arguments are atoms, and `case` is the
-  only thing that forces evaluation.
-- **One `while` loop and an explicit frame stack** (a Ruby Array). The
-  frames are *update* (thunk under evaluation), *apply* (pending
-  arguments) and *case continuation*. Evaluation never uses Ruby
-  recursion, so `foldr (+) 0 [1..10⁶]` and the non-tail `count 1000000`
-  only grow an Array.
+  Sestoft's mark-2 (`lib/rhci/vm.rb`), interpreting the code `Lower`
+  produces: plain Arrays `[op, …]` with integer opcodes, variables
+  resolved to local slots, environment slots or global cells, in A-normal
+  form. Allocation happens only at `let`, arguments are atoms, and `case`
+  is the only thing that forces evaluation.
+- **One `while` loop and an explicit frame stack.** The frames are
+  *update* (thunk under evaluation), *apply* (pending arguments) and
+  *case continuation* (three stack entries, not an object). Evaluation
+  never uses Ruby recursion, so `foldr (+) 0 [1..10⁶]` and a non-tail
+  `count 1000000` only grow the stack. The stack is segmented
+  (`VM::FrameStack`), because mruby's incremental GC rescans a huge Array
+  that is written constantly. Known saturated calls and already-evaluated
+  scrutinees are short-cut.
 - **Primitives never force.** Core wraps every primop in `case`, so
   primops see already-evaluated, unboxed values and are plain Ruby methods
-  (`plusInt`, `quotInteger`, `showDouble`, …).
+  (`plusInt`, `quotInteger`, `showDouble`, …), one method per primitive,
+  called without an argument array.
 - **Call-by-need:** a thunk is overwritten with its value through the update
   frame. While a thunk is under evaluation it is *blackholed*, so re-entering
   it raises `<<loop>>` instead of overflowing the stack.
 - **Exceptions** (`error`, `undefined`, a failed match, `div` by zero) unwind
   the frame stack. Thunks under evaluation are overwritten to re-raise the
-  same exception, which is semantically what GHC does.
-- **IO uses state-token passing**, as in GHC. `IO a` is a function of a
-  dummy token, so `do`-notation is just `Monad IO`. `putStr` is written in
+  same exception, as GHC does. A host limit or Ctrl-C instead resets them,
+  so they can be demanded again.
+- **IO** is `newtype IO a = IO (() -> IORes a)`: a function of a dummy
+  token, so `do`-notation is just `Monad IO`. `putStr` is written in
   Haskell as `putChar` per character. That gives **incremental output for
   free**: `[1, 2, undefined]` prints `[1,2,` and then
   `*** Exception: Prelude.undefined`, because the REPL flushes before
   reporting the exception.
 
+### The C evaluation loop (mruby builds)
+`mrbgems/rhci-native/src/machine.c` is a line-by-line port of
+`Machine#run_ruby` that works on the same Ruby objects (code Arrays,
+thunks, closures, constructor values, the segmented frame stack) and calls
+the same Ruby primitives, except for fixnum and Double arithmetic, which
+it does in C. CRuby always runs the Ruby loop, which stays the reference.
+**A change to one loop is a change to both:** `native_machine_test`
+requires the two to give identical output, errors and step counts, and
+`rake torture` runs the mruby tests with forced collections inside the C
+loop to check its GC rooting (mruby does not scan C locals; the loop
+resets the GC arena each step and re-protects its registers).
+
+The same gem holds `bigint_eq.c` and `bigint_ops.c`, which replace
+mruby 4.0.0's Integer comparison and bitwise/additive operators for
+bignum operands (they give wrong results there), and `term.c`, the
+terminal helpers (§6).
+
 ### Numerics (must match exactly)
 - **`Int`** is wrapped with `((x + 2**63) % 2**64) - 2**63`, and so are
-  `maxBound`, `minBound` and `fromIntegral`. **`Integer`** is unbounded.
-- `div`/`mod` map to Ruby `/` and `%`. `quot`/`rem` use truncation and `remainder`.
-  Division by zero raises `divide by zero`.
+  `maxBound`, `minBound` and `fromIntegral`. **`Integer`** is unbounded,
+  up to the session's integer size limit (§6).
+- `div`/`mod` map to Ruby `/` and `%`; `quot`/`rem` are computed from
+  them. Division by zero raises `divide by zero`.
 - **Double → String:** a Ruby port of GHC's `floatToDigits` (Burger–Dybvig,
   shortest digits that round-trip) on exact Integers, plus `showFloat`'s
   layout (fixed notation when 0.1 ≤ |x| < 10⁷, otherwise `d.ddde±n`).
@@ -267,18 +317,20 @@ list?". Printing goes through the `Show` dictionary like any other code.
   Ruby's own `Float#to_s` is never used, because mruby's prints `%.15g`.
 - **Double → Integer** (`truncate`/`floor`/`round`/`ceiling`) uses
   `frexp` plus Integer shifts, because mruby's `Float#to_i` is wrong past 2⁶³.
-  `round` rounds half to even, as in `properFraction` in base.
+  `round` rounds half to even, as in base.
 - `enumFromThenTo` for Double, `^`/`^^`/`**`, `gcd`, `lcm` and similar are
   **ported from base's Haskell source** into the Prelude, so their edge
   cases (overshoot by half a step, `Negative exponent`) match by construction.
 
 ### Prelude
-- **Written in Haskell** (`prelude/*.hs`), ported from base where possible.
-  Ruby supplies only primitives: arithmetic and comparison per numeric
-  type, char/code point conversion and classification, `showDouble`,
-  `error`, `seq`, handle IO (`hPutChar`, `getChar`, `getLine`, `isEOF`,
-  a lazily read stdin, `getArgs`, buffering modes), bit operations,
-  IORefs, and files.
+- **Written in Haskell**: `prelude/Prelude.hs` (about 4400 lines) plus the
+  containers ports under `prelude/Data/`, taken from base and containers
+  with GHC's definitions wherever behaviour is observable (evaluation order
+  included). Ruby supplies only primitives (`foreign import prim`):
+  arithmetic and comparison per numeric type, char/code point conversion
+  and classification, `showDouble`, `error`, `seq`, handle IO (`hPutChar`,
+  `getChar`, `getLine`, `isEOF`, a lazily read stdin, `getArgs`, buffering
+  modes), bit operations, IORefs, and files.
 - **Files** (`readFile`, `writeFile`, `appendFile`) follow GHC's
   observable behaviour, checked against the oracle
   (`oracle/probes_files.txt`):
@@ -301,52 +353,76 @@ list?". Printing goes through the `Show` dictionary like any other code.
   `oracle/unicode/Tables.hs` dumps them in the oracle container and
   `tools/gen_unicode.rb` packs them into `lib/rhci/unicode_data.rb`,
   decoded on first use.
-- **Never compiled at startup.** A build step runs the Prelude through the
-  whole pipeline and writes a **snapshot**: the type environment, class and
-  instance tables, and the elaborated machine Core.
-  - **Loaded in stages** (format in `lib/rhci/snapshot.rb`). The name
-    tables, the type environment, the globals, unfoldings and class
-    instance tables are `LazyTable`s: their entries are decoded one at a
-    time. The records come in three runs, split into chunks of 256 that
-    are only split into records when first needed:
-    1. **The core**, decoded at startup: the entries a corpus of typical
-       inputs (`tools/snapshot_corpus.txt`) looks up, found at build time
-       by running it against a snapshot with every entry pending.
-    2. **The rest of the structure**, decoded entry by entry: on a lookup
-       that misses the loaded entries (a missing name can't be reported
-       before the rest is checked), by an operation over a whole table
-       (`:info`'s instance lists, Tab completion), or in the background.
-    3. **Compiled code**, decoded per global on first use, ordered so
-       that the corpus's code comes first and an input's code sits in few
-       chunks. Arrays of integers that only one place refers to (most
-       code operands) are written inline in their parent's record.
-  - **Specialisations made ahead.** The specialisations the corpus makes
-    (Prelude functions at Prelude dictionaries, e.g. `toList` at `Ord
-    Integer`) are made at build time and shipped, so `rhci -c` does not
-    redo that compiler work on every run. Making them runs only the
-    compiler: no top-level value is evaluated into the snapshot.
-  - **Background loading, paced by the machine itself** (the REPL; not
-    `-c`/`-x`, which exit when done). The session measures, with the
-    runtime clock, how long decoding the core took (P). While an input
-    runs, the machine checks every 4096 steps: after P of running it loads
-    entries for about P, runs for P again, and so on until everything is
-    loaded; no fixed durations, so it adapts to the hardware. While the
-    REPL waits for a key, it loads in 2 ms steps between non-blocking
-    input checks, so the snapshot is usually complete before the first
-    Enter.
-  - `LazyTable` is deliberately not a Hash: a method it doesn't define
-    fails loudly instead of seeing only the loaded part. The mruby test
-    bundle embeds a snapshot whose entries are all pending, so every
-    mruby test also checks that lookups find what isn't loaded yet.
-  - Compiled code and types are shared and read-only. **CAFs (top-level
-    thunks) are instantiated per session**, because evaluating one mutates
-    it, and two embedded sessions must never share mutable heap.
-- The snapshot is regenerated whenever `prelude/*.hs` or the compiler
-  changes. A test checks that it is up to date.
+
+### The Core simplifier
+`lib/rhci/simplify.rb` runs between the desugarer and `Lower`. Every rule
+keeps call-by-need: only lambdas, atoms and constructor applications are
+duplicated or moved, and a `case` that forces an unevaluated scrutinee is
+never dropped.
+- dead lets, inlining of single-use and small lambdas, beta reduction;
+- case of known constructor/literal, binder swap, and merging a case on
+  an already evaluated variable into the enclosing case (so the
+  desugarer's clause-by-clause matching becomes one case per variable),
+  unreachable defaults;
+- case-of-case with one inner alternative, case-of-let, application
+  pushed into case/let, let-to-case for a thunk forced at once, integer
+  primitives on literals folded.
+
+Across definitions, **unfoldings** (the simplified Core of small global
+functions and of constants; dictionary fields are lifted to globals so
+every instance is a constant) make methods at known instances reduce to
+the instance's code. A dictionary-abstracted function called at known
+instances is **specialised** once per session (memoised by function and
+dictionaries, recursion included, at most 5000 per session), as GHC's
+SPECIALISE does. Machine steps fell 1.5–4x (`length (filter even (map
+(*3) [1..10^5]))`: 12.2M → 3.1M).
+
+### Snapshot and staged loading
+The Prelude is **never compiled at startup** by the binary or the compact
+build. `tools/snapshot.rb` (run by `tools/bundle.rb`, so on every build)
+compiles it through the whole pipeline and encodes the session state: name
+tables, type environment, class and instance tables, unfoldings and the
+machine code. `test/unit/snapshot_test.rb` checks that a snapshot session
+and a session compiled from source give the same results.
+- **Format** (documented in `lib/rhci/snapshot.rb`): text records in
+  chunks of 256, each chunk split into records only when one of them is
+  first needed. Arrays of integers that only one place refers to (most
+  code operands) are written inline in their parent's record.
+- **Tables are `LazyTable`s** (`lib/rhci/lazy_table.rb`) whose entries are
+  decoded one at a time. `LazyTable` is deliberately not a Hash: a method
+  it doesn't define fails loudly instead of seeing only the loaded part.
+- **Three runs of records:**
+  1. **The core**, decoded at startup: the entries that a corpus of typical
+     inputs (`tools/snapshot_corpus.txt`) looks up, found at build time by
+     running it against a snapshot with every entry pending.
+  2. **The rest of the structure**, decoded entry by entry: on a lookup
+     that misses the loaded entries (a missing name can't be reported
+     before the rest is checked), by an operation over a whole table
+     (`:info`'s instance lists, Tab completion), or in the background.
+  3. **Compiled code**, decoded per global on first use, ordered so that
+     the corpus's code comes first and an input's code sits in few chunks.
+- **Specialisations made ahead.** The specialisations the corpus makes
+  (Prelude functions at Prelude dictionaries) are made at build time and
+  shipped. Making them runs only the compiler: no top-level value is
+  evaluated into the snapshot.
+- **Background loading, paced by the machine itself** (the REPL only, not
+  `-c`/`-x`). The session measures how long decoding the core took (P).
+  While an input runs, the machine calls back every 4096 steps: after P of
+  running it loads entries for about P, runs for P again, and so on until
+  everything is loaded; no fixed durations, so it adapts to the hardware.
+  While the REPL waits for a key, it loads in 2 ms steps between
+  non-blocking input checks, so the snapshot is usually complete before
+  the first Enter. Embedders opt in with `background_loading` (§6).
+- Compiled code and types are shared and read-only. **CAFs (top-level
+  thunks) are instantiated per session**, because evaluating one mutates
+  it, and two embedded sessions must never share mutable heap.
+- The binary embeds the trained snapshot. The mruby test bundle embeds one
+  with every entry pending, so every mruby test also checks that lookups
+  find what isn't loaded yet.
 
 ## 5. REPL surface
 - An input is one of: an expression, a declaration group (functions,
-  signatures, `data`, `newtype`, `class`, `instance`, fixity), a
+  signatures, `data`, `newtype`, `type`, `class`, `instance`, fixity), a
   `let` without `in`, a `pat <- io`, or `import`.
 - **`pat <- io`** runs the action and matches the pattern at once, as
   GHCi does: a failed match is an IO error (`Pattern match failure in
@@ -359,30 +435,37 @@ list?". Printing goes through the `Show` dictionary like any other code.
   value of an ambiguous monad is run in IO, and so is a value of a bare
   type variable when each of its constraints has an IO instance without
   a class context (`printf "%d\n" 5`).
-- **Any other expression:** bind `it` generalised (`:t it` gives `Num a => a`),
-  then run `print it` at the defaulted type. With no `Show` instance this is a
-  type error (functions, or `data` without `deriving Show`).
+- **Any other expression** `e` becomes `rhci_itN = e`, generalised, and is
+  printed with `print` at the defaulted type. When the statement
+  completes, the binding becomes `it`, so `:t it` gives `Num a => a`; an
+  exception while running or printing leaves the previous `it`, as in
+  GHCi. With no `Show` instance this is a type error (functions, or
+  `data` without `deriving Show`).
 - **Commands:** `:t`/`:type`, `:i`/`:info`, `:k`/`:kind`, `:q`/`:quit`,
-  `:{ … :}`, `:l`/`:load`, `:r`/`:reload`, and a minimal `:?`. `:info`
-  shows a type's definition or a class's methods with the instances in
-  scope, or a value's type; `:kind` prints kinds with `*`.
+  `:{ … :}`, `:l`/`:load`, `:r`/`:reload`, and a minimal `:?`/`:help`,
+  abbreviated as GHCi resolves them. `:info` shows a type's definition or
+  a class's methods with the instances in scope, or a value's type.
 - **`:load file`, with GHCi semantics:**
   - The `.hs` extension is optional and an optional `module M where`
     header is accepted.
   - The file is checked in file mode (monomorphism restriction on,
     standard defaulting).
-  - Imported modules are found as `A/B.hs` relative to the **current
-    directory**, which is GHCi's default `-i.`. Imports are loaded
-    transitively, and a cycle is an error.
+  - Imported modules are found as `A/B.hs` relative to the session's
+    directory, which is GHCi's default `-i.`. Imports are loaded
+    transitively, and a cycle is an error. Within a module, a top-level
+    definition and an imported name of the same name are ambiguous where
+    used.
   - A successful load **discards all prompt bindings**. Then every
     top-level name of the loaded module is in scope (exports are ignored, as
     in GHCi's `*M` context), along with the exports of the modules it imports.
-  - A failed load leaves only the Prelude in scope, as with GHCi's
-    `Failed, no modules loaded.`.
+  - A failed load keeps the modules that compiled, with the topmost one's
+    scope, as GHCi does.
   - `:reload` repeats the last `:load`. Running `main` at the prompt works,
     because it's just an `IO ()` expression.
-- **Error classes:** parse, scope, type and runtime. The text is GHC-like
-  but not GHC-exact, for example `*** Exception: Prelude.head: empty list`.
+- **Error classes:** parse, scope, type, unsupported, runtime and limit.
+  The text is GHC-like but not GHC-exact, for example
+  `*** Exception: Prelude.head: empty list`. Runtime exception messages
+  match GHC's apart from source locations. No warnings are emitted.
 - **stdin is shared** by Haskell code and the REPL, as in GHCi: a line
   read by `getLine` is not seen by the prompt, and a character `isEOF`
   looked ahead at is handed back to it. `getContents` is lazy and leaves
@@ -408,172 +491,91 @@ list?". Printing goes through the `Show` dictionary like any other code.
 ### CRuby library (embedding)
 - Two forms: `lib/` (require `lib/rhci.rb`; each session compiles the
   Prelude from source, about 2.5 s) and the **compact build**,
-  `build/rhci.rb` from `tools/bundle.rb`: the same code, Prelude sources
-  and trained snapshot as the mruby binary, in one file of about 7 MB.
-  `require_relative 'rhci'` embeds it (sessions decode the snapshot, about
-  20 ms); run directly, it is the CLI.
+  `build/rhci.rb` (`rake compact`, made by `tools/bundle.rb`): the same
+  code, Prelude sources and trained snapshot as the mruby binary, in one
+  file of about 7 MB. `require_relative 'rhci'` embeds it (a session
+  starts in about 20 ms); run directly, it is the CLI. It runs unchanged
+  on CRuby 2.7 through 3.4.
 - Everything lives under `module Rhci`. There are **no globals, no
   core-class monkey patches, no signal traps, no `exit`**, and no writes to
   `$stdout`/`$stdin` except through the IO objects the host passes in.
-- **The API** is roughly:
-  - `Rhci::Session.new(stdout:, stdin:, limits:, cwd:, files:)`: `cwd`
-    is where `:load` and `readFile`/`writeFile` resolve relative paths;
-    `files: false` makes file access fail (`permission denied (file
-    access is disabled)`), for hosts that must not touch the disk.
+- **The API** (`lib/rhci/session.rb`):
+  - `Rhci::Session.new(stdout:, stdin:, stderr:, limits:, prelude:, cwd:,
+    files:)`. `prelude:` is `:source`, `:snapshot` or `:auto` (the
+    snapshot when one is embedded). `cwd` is where `:load` and
+    `readFile`/`writeFile` resolve relative paths; `files: false` makes
+    file access fail (`permission denied (file access is disabled)`), for
+    hosts that must not touch the disk.
+  - `session.eval(input)` writes output to `stdout` and returns a `Result`
+    with a `status` (`:ok`, `:parse_error`, `:scope_error`,
+    `:compile_error`, `:exception`, `:unsupported`, `:limit`,
+    `:command_error`) and a `message`.
+  - `session.type_of(expr)`, `session.load(paths)`, `session.reload`,
+    `session.interrupt!`, `session.completions(text)`.
   - `session.background_loading = true` lets inputs load the rest of the
-    snapshot as they run (off by default: a host's step and time limits
-    then measure only its own inputs); `session.load_while_idle(ready)`
-    loads while `ready.call` is false.
-  - `session.eval(input)` returns a result object: the output text and a
-    status of ok, parse error, scope error, type error, runtime exception
-    or limit hit.
-  - `session.type_of(expr)`, `session.load(path)`, `session.interrupt!`
+    snapshot as they run (off by default, so a host's step and time limits
+    measure only its own inputs); `session.load_while_idle(ready)` loads
+    while `ready.call` is false.
 - **Sessions are independent.** Prelude code and types are shared
-  read-only, and each session has its own heap (see Prelude/CAFs). Running
-  different sessions on different threads is allowed. A single session is
-  not thread-safe.
-- **Limits, because a host can't afford a hang.** The host can set a
-  step budget, a stack-depth cap, and a wall-clock deadline (checked
-  every N machine steps). `interrupt!` sets a flag the machine polls.
-  When a limit is hit, the input is aborted and the session stays usable,
-  the same way a Ctrl-C at GHCi's prompt behaves. With no limits set,
-  behaviour is GHCi's (`[1..]` prints forever).
+  read-only, and each session has its own heap (see CAFs above). A single
+  session is not thread-safe.
+
+### Limits
+A host can't afford a hang or unbounded memory. `limits:` is a Hash with
+optional keys:
+- `:steps`, a machine step budget per top-level evaluation;
+- `:stack`, a cap on frames;
+- `:deadline`, a wall-clock deadline (monotonic seconds; refused as
+  unsupported on a runtime without a clock);
+- `:integer_bits`, the largest Integer result allowed (default 2³⁰ bits,
+  set by default because the step limit does not bound the memory of one
+  bignum operation: `4 ^ (2 ^ 127)` once grew a process to 85 GB).
+
+Steps, stack and deadline are checked every 4096 machine steps, as is the
+interrupt flag. When a limit is hit the input is aborted with status
+`:limit`, thunks under evaluation are reset, and the session stays usable,
+the same way a Ctrl-C at GHCi's prompt behaves. Apart from the integer
+size, with no limits set the behaviour is GHCi's (`[1..]` prints forever).
 
 ### mruby command `rhci`
 - **A static binary** is built from the mrbgem `mrbgems/rhci`. The
-  generated bundle is that gem's `mrblib`, which mruby's build compiles to
-  bytecode and links in. `mrb_open()` loads it, and a small C `main` calls
-  `Rhci::CLI.main`. Ruby source is never parsed at startup. The Prelude
-  snapshot will be embedded the same way.
-- **Startup budget, measured on this machine:** `bash -c exit` takes
-  about 1.5 ms. An empty mruby takes 1.3 ms. Loading 5k lines of Ruby
-  takes 2.7 ms as bytecode but 10.7 ms as source. Lexing and parsing 2000
-  lines of Haskell with the old front end took 550 ms. Allocating an
-  object costs about 0.5 µs, and a 20k-node snapshot written as Ruby code
-  loads in 11.6 ms.
-  - These figures came from a bash timing loop, which adds about 0.4 ms
-    of its own per run. Measured with `Process.spawn` and a monotonic
-    clock (the method `tools/bench_startup.rb` uses), the floor is
-    `/bin/true` 0.52 ms, then mruby 0.91 ms and `bash -c exit` 1.11 ms.
-    The skeleton `rhci` takes 0.94 ms, the same as plain mruby.
-  - **Front end (measured after build step 2):** lexing, layout, parsing
-    and fixity on 157k characters take 728 ms on mruby and 337 ms on CRuby.
-    A 60–90k character Prelude would cost about 0.3–0.4 s on mruby before
-    type checking even starts, which confirms the snapshot.
-  - **Machine, at 10⁶ elements** (hand-written Core; after step 3 → after
-    the machine stretch):
-    | | GHCi | CRuby | mruby |
-    |---|---|---|---|
-    | `foldr (+) 0 [1..n]` | 0.27 s | 22.2 → 17.7 s | 122.5 → 39.5 s |
-    | `count n` (non-tail) | 0.87 s | 11.3 → 8.1 s | 55.3 → 21.6 s |
-    | `foldl' (+) 0 [1..n]` | 0.04 s | 18.2 → 15.1 s | 38.4 → 27.7 s |
-
-    What helped:
-    - no blocks in the loop (mruby allocates a Proc per block);
-    - a segmented frame stack (mruby's GC rescanned one huge array);
-    - `while` instead of `loop do`;
-    - integer opcodes and integer-encoded variables;
-    - case continuations as three stack entries rather than an object;
-    - known saturated calls and already-evaluated scrutinees short-cut
-      (24 → 19 steps per element);
-    - one method per primitive, called without an argument array;
-    - flat Array-backed values, which cut memory by ~1/3 and with it
-      most of mruby's GC superlinearity at depth.
-
-    The machine now runs at ~1.1–1.4M steps/s on CRuby and ~0.5–0.7M on
-    mruby. The levers named here, fewer steps and a C machine for the
-    mruby binary, were taken in step 7 (below).
-  - **Through the real Prelude (step 5):** `sum [1..1000000]` first took
-    37 s on CRuby and 101 s on mruby, with memory growing with the list.
-    - **The memory growth was a tail-call bug.** Pattern-match failure
-      continuations were let-bound *thunks*, so a recursive call from a
-      later clause ran under the thunk's update frame. They are now
-      functions of a dummy argument.
-    - **Method calls at a known instance** now go straight to that
-      instance's implementation, and implementations that merely alias a
-      primitive are inlined (`x + y` at Integer is a single primitive
-      step). That took the cost from 39 to 28 steps per element.
-    - **After step 6:** about 26 s on CRuby and 46 s on mruby, in
-      constant memory.
-  - **Step 7 (the speed stretch):**
-    - **A Core simplifier** (`lib/rhci/simplify.rb`) between the desugarer
-      and Lower; every rule keeps call-by-need (only lambdas, atoms and
-      constructors are duplicated or moved, and a case that forces is
-      never dropped):
-      - dead lets, inlining of single-use and small lambdas, beta
-        reduction;
-      - case of known constructor/literal, binder swap, and merging a
-        case on an already evaluated variable into the enclosing case (so
-        the desugarer's clause-by-clause matching becomes one case per
-        variable), unreachable defaults;
-      - case-of-case with one inner alternative, case-of-let,
-        application pushed into case/let, let-to-case for a thunk forced
-        at once, integer primitives on literals folded.
-      Across definitions, unfoldings (the simplified Core of small global
-      functions and of constants; dictionary fields are lifted to globals
-      so every instance is a constant) make methods at known instances
-      reduce to the instance's code. A dictionary-abstracted function
-      called at known instances is **specialised** once per session
-      (memoised by function and dictionaries, recursion included), as
-      GHC's SPECIALISE does. Steps fell 1.5–4x (`length (filter even
-      (map (*3) [1..10^5]))`: 12.2M → 3.1M).
-    - **The evaluation loop in C** for the mruby builds
-      (`mrbgems/rhci-native/src/machine.c`): a line-by-line port of
-      `run_ruby` on the same objects, with integer and double primitives
-      in C. Code is plain Arrays (`[op, ...]`), which the Ruby loop reads
-      as fast as attributes and C indexes directly. A test requires both
-      loops to give identical output, errors and step counts; `rake
-      torture` runs the mruby tests with forced collections inside the C
-      loop, which checks its GC rooting.
-    - CRuby's `bin/rhci` enables YJIT (1.7x on the loop).
-    - **Now:** `sum [1..1000000]` takes 1.9 s with the mruby binary
-      (from 46 s) and 10 s with `bin/rhci` on CRuby (from 26 s; YJIT on,
-      the library without it about 15 s), about 10M machine
-      steps/s in C. Reading and summing 2,000 numbers with `read` takes
-      0.7 s (from 13.7 s).
-- **Prelude snapshot (step 5):** compiling the ~1900-line Prelude takes
-  0.23 s on CRuby and about 0.34 s on mruby. Decoding the whole snapshot
-  eagerly was *slower* on mruby (0.54 s), so decoding is lazy: names and
-  types up front, each global's code on first use. `rhci -c '"Hello"'`
-  now takes about 44 ms.
-  - **Interactive: a usable prompt in under 10 ms**, meaning the prompt is
-    printed and keystrokes are accepted. The order is: load bytecode, put
-    the terminal in raw mode, print the prompt, *then* decode the Prelude
-    snapshot. Anything typed while the snapshot decodes waits in the tty
-    buffer, so Enter or Tab just run once it's done. No threads and no
-    background loading are needed.
-  - **`rhci -c …` finishes in under 200 ms** end to end for a simple
-    expression.
-  - Both are enforced by benchmark tests from build step 1 on.
-  - Together these rule out parsing Ruby source at startup and compiling
-    the Prelude at startup (an estimated 0.5–1.5 s). Bytecode and the
-    snapshot are mandatory. The snapshot is decoded eagerly unless the
-    benchmarks force lazy, per-binding decoding.
-- **Line editor:** our own (`lib/rhci/line_editor.rb`), because mruby has
-  no readline. Emacs keys, xterm arrow/Home/End/Delete sequences, history
-  (`~/.rhci_history`, the last 1000 lines), and Tab completion of names in
-  scope, commands, and paths after `:load`. A line wider than the terminal
-  scrolls horizontally. Both executables use it when stdin and stdout are
-  a terminal; it talks to the terminal only through the shim, which uses
-  io/console on CRuby and the C helpers in `mrbgems/rhci-native/src/term.c`
-  (termios, window size, unbuffered reads, SIGINT, getenv, directory
-  listing) on mruby. Embedding code never reaches it.
-- **Command-line modes:**
+  generated bundle (library plus snapshot) is that gem's `mrblib`, which
+  mruby's build compiles to bytecode and links in. `mrb_open()` loads it,
+  and a small C `main` calls `Rhci::CLI.main`. Ruby source is never parsed
+  at startup.
+- **Startup.** The order is: load bytecode, put the terminal in raw mode,
+  print the prompt, *then* decode the snapshot's core, while waiting for
+  a key. Anything typed meanwhile waits in the tty buffer. `rhci -c
+  '"Hello"'` takes about 24 ms. `rake bench` (`tools/bench_startup.rb`,
+  timing with `Process.spawn` and a monotonic clock) enforces a prompt in
+  under 10 ms and `rhci -c` in under 200 ms. These budgets rule out
+  parsing Ruby source and compiling the Prelude at startup (compiling the
+  Prelude from source takes seconds); bytecode and the snapshot are
+  mandatory.
+- **Line editor:** rhci's own (`lib/rhci/line_editor.rb`), because mruby
+  has no readline. Emacs keys, xterm arrow/Home/End/Delete sequences,
+  history (`~/.rhci_history`, the last 1000 lines), and Tab completion of
+  names in scope, commands, and paths after `:load`. A line wider than the
+  terminal scrolls horizontally. Both executables use it when stdin and
+  stdout are a terminal; it talks to the terminal only through the shim,
+  which uses io/console on CRuby and the C helpers in
+  `mrbgems/rhci-native/src/term.c` (termios, window size, unbuffered
+  reads, SIGINT, getenv, directory listing) on mruby. Embedding code never
+  reaches it.
+- **Command-line modes** (`lib/rhci/cli.rb`, shared by both executables):
   | form | meaning |
   |---|---|
   | `rhci -c EXPR [ARG…]` | **Pure evaluation.** Each ARG is itself a Haskell **expression**. The input is checked and run as `(EXPR) (ARG1) (ARG2) …`, with prompt rules (extended defaulting, no monomorphism restriction). |
   | `rhci -x EXPR [ARG…]` | **IO.** EXPR must have type `IO t` and is run. The ARGs are plain `String`s, visible only through `getArgs`, and the program parses them itself. |
   | `rhci -i …` | Combines with `-c`/`-x`: the result (after applying any ARGs) is applied to stdin as a lazy `String` (`String -> String`, or `String -> IO t` with `-x`), and output streams as it's produced. |
   - **`-c` arity and type rules.** EXPR must take exactly as many
-    arguments as given. If the applied result still has a function type,
-    that's an explicit arity error ("`(+)` expects 2 arguments, got 1").
-    Too many arguments, or arguments of the wrong type, are ordinary type
-    errors. `-c` with an `IO` type is an error that points at `-x`, and
-    `-x` with a non-IO type is an error that points at `-c`.
+    arguments as given: if the applied result still has a function type,
+    that is an error ("the function expects more arguments than the N
+    given"). Too many arguments, or arguments of the wrong type, are
+    ordinary type errors. `-c` with an `IO` type is an error that points
+    at `-x`, and `-x` with a non-IO type is an error that points at `-c`.
   - **Examples:**
-    - `rhci -c '(+)' '3 :: Double' 10` checks
-      `((+)) (3 :: Double) (10)` and prints `13.0`.
-    - `rhci -c '"Hello\n"'` writes `Hello` and a newline.
+    - `rhci -c '(+)' '3 :: Double' 10` prints `13.0`.
     - `rhci -c 'map toUpper' hello` is a scope error (`hello` is a
       variable). Write `'"hello"'`.
     - `rhci -x 'getArgs >>= mapM_ putStrLn' a b` writes `a` and `b` on
@@ -581,105 +583,100 @@ list?". Printing goes through the `Show` dictionary like any other code.
   - **Output rule:** a result of type `String` is written raw with
     `putStr` (no quotes, escapes become real characters, no newline
     added), so `-c '"Hello\n"'` writes `Hello` and a newline. Any other
-    type is written with `print` (`show` plus newline). For `-x`, the
-    result of the action is written by the same rule unless it's `()`.
-  - **Exit status:** 0 on success. Distinct non-zero codes for a parse,
-    scope or type error, an uncaught exception, and a usage error.
-- `MRB_CALL_LEVEL_MAX=100000` is set in the build config (see below).
+    type is written with `print`. For `-x`, the result of the action is
+    written by the same rule unless it's `()`.
+  - **Exit status:** 0 on success, 1 for an uncaught exception or a
+    limit, 2 for a usage error, 3 for a parse, scope or type error, 4 for
+    unsupported input.
+
+### Performance
+Speed is best effort. At 10⁶ elements, `sum [1..1000000]` takes about
+1.9 s with the mruby binary and about 10 s with `bin/rhci` on CRuby (which
+enables YJIT, worth about 1.7x on the loop; the library leaves that choice
+to the host); GHCi takes 0.02 s. The main levers were the simplifier and
+specialisation (fewer steps), the C loop (about 10M steps/s), flat
+values, a segmented stack, and keeping blocks out of hot loops (mruby
+allocates a Proc per block). `rake bench_runtime` measures
+`bench/programs.txt`; `tools/profile.rb` (steps per function) and
+`tools/dump_core.rb` (simplified Core) help find work.
 
 ## 7. Dual-runtime discipline
+The rules themselves, and the measured mruby facts behind them, are in
+`docs/DEVELOPMENT.md`. Structurally:
 - **One source tree, one manifest.** `lib/rhci/manifest.txt` lists the
-  files in load order. CRuby loads them through `lib/rhci.rb`, the only
-  file allowed to `require`. Because mruby has no `require`,
-  `tools/bundle.rb` concatenates them into `mrbgems/rhci/mrblib/rhci.rb`
-  (compiled into the binary) and, together with the harness and unit
-  tests, into `build/test_bundle.rb` (run by the plain `build/mruby/bin/mruby`).
+  files in load order. CRuby loads them through `lib/rhci.rb`. Because
+  mruby has no `require`, `tools/bundle.rb` concatenates them into
+  `mrbgems/rhci/mrblib/rhci.rb` (compiled into the binary), into
+  `build/rhci.rb` (the compact CRuby build), and, together with the
+  harness and unit tests, into `build/test_bundle.rb` (run by the plain
+  `build/mruby/bin/mruby`).
 - **`lib/rhci/shim.rb` is the only file that may branch on runtime.** It
-  covers reading lines, flushing, reading files, interrupts and `exit`.
-- **Coding rules,** checked by a lint script that greps for forbidden constructs:
-  - No `Struct`, `Set`, `catch`/`throw`, `Fiber`, `format`/`sprintf`/`%`,
-    `pack`, `instance_variable_get`, `ObjectSpace`, or `case/in`.
-  - No blockless enumerators (`each_char` with no block, `each_with_index.map`).
-  - Never `Float#to_s`/`to_i` on a Haskell-visible value.
-  - Recursion is allowed only along syntactic nesting (parser, renamer,
-    type checker), and every recursive pass carries a depth guard that
-    raises a clean "too deeply nested" error.
-  - Inside recursive methods, iterate with `while`, not blocks. On mruby a
-    block frame costs as much as about 4 plain frames.
-- **Recursion budget (measured):** stock mruby allows about 508 plain
-  frames and about 100–170 through `map`/`each`, while CRuby allows about
-  10k and 3.7k. With `MRB_CALL_LEVEL_MAX=100000` in the build config,
-  mruby reaches about 131k plain and 26k–44k through blocks, which is
-  deeper than CRuby. **Decided:** the define is set in our build, and the
-  machine stays stack-free regardless.
+  covers the clock, reading lines and bytes, flushing, files, the
+  terminal, signals, environment variables and directory listings.
+- **`tools/lint.rb`** greps every file that runs on mruby for constructs
+  the lean build lacks or gets wrong (`Struct`, `Set`, `catch`/`throw`,
+  `Fiber`, `format`/`sprintf`/`String#%`, `pack`, Regexp, `require`,
+  blockless enumerators, `round(half:)`, `$!`, bare `raise` in a rescue,
+  `strip`/`rstrip`, Ruby float printing, AST classes named like core
+  classes, and more).
+- The build sets `MRB_CALL_LEVEL_MAX=100000` (about 131k plain Ruby frames
+  on mruby, deeper than CRuby), and `MRB_ARY_LENGTH_MAX=0` and
+  `MRB_STR_LENGTH_MAX=0`. The evaluator never recurses regardless; only
+  the parser, renamer and type checker recurse, and only along syntactic
+  nesting.
 
 ## 8. Testing
-- **Oracle runner** (`test/oracle_test.rb`): replays `oracle/probes.txt` on
-  each runtime and compares against the goldens using the semantic rules.
-  Values must match exactly. `:t` results are compared up to renaming with
-  constraints as a set. Errors are compared by class only. It runs green or
-  red per section, and expected gaps are listed in a single
-  `oracle/known_gaps.txt` instead of hiding them.
-- **A tiny in-house test framework** that works on both runtimes
-  (`assert_equal`, sections, a failure summary). It replaces the
-  minitest/test-unit that mruby lacks.
-- **Focused differential suites** from the GHC container:
-  - about 10k random and edge-case Doubles through `show` (subnormals,
-    powers of ten, 0.1 ≤ x < 10⁷ boundaries)
-  - `Int` overflow
-  - `div`/`mod`/`quot`/`rem` sign tables
-  - `round`/`truncate` on halves
-- **`:load` probes:** the oracle harness mounts a directory of `.hs`
-  fixtures into the container, so module loading, the monomorphism
-  restriction in files, and standard defaulting all get GHCi goldens.
-- **Embedding tests** (CRuby only): session isolation (CAFs not shared),
-  each limit aborting cleanly with the session reusable afterwards, and
-  nothing written outside the provided IO.
-- **`rake test` runs everything twice,** on `ruby` and on
-  `build/mruby/bin/mruby` against the bundle. A test that passes on one
-  runtime only counts as failing.
+- **A tiny in-house test framework** (`test/harness.rb`, `RT`) that works
+  on both runtimes, replacing the minitest/test-unit that mruby lacks.
+  `rake test` runs the lint, then the unit tests on CRuby (`test/run.rb`)
+  and on `build/mruby/bin/mruby` against the bundle. The e2e tests
+  (`test/e2e/`, CRuby only) spawn both executables, including a
+  pseudo-terminal test of editing, completion, history and Ctrl-C.
+- **Oracle** (`oracle/`, see its README): probe inputs and real GHCi 9.6.7
+  goldens, regenerated in a podman container. `test/oracle.rb` and
+  `test/unit/oracle_*_test.rb` replay them in fresh sessions on both
+  runtimes. Values and the output printed before an exception must match
+  exactly; runtime exceptions must match GHCi's message (locations
+  aside); `:t` is compared up to renaming with constraints as a set;
+  other errors by kind. Each input gets a step budget: rhci answers 1737
+  of 1746 probes, all agreeing, and 9 (million-element computations)
+  exceed the budget. Probes where rhci differs by decision (names in scope
+  without an import) are listed in `oracle/known_gaps.txt`. Separate
+  goldens cover `:load` (`probes_load.txt`) and file IO
+  (`probes_files.txt`, CRuby, in a scratch directory).
+- **Numeric suite** (`oracle/numeric/`): about 14.5k cases (Double `show`
+  by bit pattern, `decodeFloat`, rounding, conversions, literals, `Int`
+  edges) run through real GHC; `num_golden_test` requires an exact match
+  on both runtimes.
+- **`runtime_assumptions_test`** pins the runtime facts the design relies
+  on (the mruby bignum fixes, no array or string length cap), and `snapshot_test` that
+  snapshot and source sessions agree.
+- **Differential testing against GHC** (podman and network, not part of
+  `rake`), described in `test/fuzz/README.md` and
+  `test/exercism/README.md`:
+  - `rake fuzz`: random well-typed expressions, optionally with tagged
+    `error`s that expose evaluation order, and `:t` of random
+    compositions, compared with GHCi;
+  - `rake fuzz_progs`: random multi-module programs run by `runghc` and by
+    `:load` + `main`, optionally respelt (layout, comments, braces);
+  - further `test/fuzz/run.rb` modes: GHCi sessions, defaulting in files
+    versus the prompt, numbers at the edges, user data types, `read` on
+    damaged text, type errors, tokens, laziness, classes, failing
+    patterns, kinds, instances, equal-element choice and library breadth;
+  - `rake exercism`: the exercism Haskell track's reference solutions and
+    test suites on rhci and GHC.
+  Every fuzzer takes `--mruby`. Each bug found is pinned by an oracle
+  probe. Test runs cap their address space at 8 GB.
 
-## 9. Build order
-Each step ends green on **both** runtimes before the next one starts.
-
-1. **Skeleton:** manifest, shim, bundler, test framework, lint, `rake test`
-   on both runtimes, the `rhci` static binary with embedded bytecode, and
-   the startup benchmark.
-2. **Lexer, layout, parser, fixity:** a parse-only pass over every probe,
-   with error *class* matching the goldens for parse errors.
-3. **Machine and primitives** driven by hand-written Core: laziness,
-   sharing, deep stacks, exceptions, incremental output. Also
-   `showDouble`, `Int` wrapping and float→integer conversion, with their
-   differential suites.
-4. **HM without classes:** monomorphic Core types and `:t` for
-   Bool/Char/list/function types.
-5. **Classes:** dictionary elaboration, defaulting, deriving, and the
-   Prelude in Haskell. Then the oracle sections switch on one by one.
-6. **REPL surface:** `it`, shadowing, IO at the prompt, `:{ :}`, `:load`
-   and `:reload` in file mode, and the embedding API with limits. The full
-   oracle should then be green or in `known_gaps.txt`.
-7. **Performance:** best effort, driven by what feels slow in use. Done:
-   the Core simplifier with specialisation, and the C evaluation loop for
-   mruby (§6, measurements).
-
-## 10. Decisions taken in review (2026-10-09)
-- mruby is only our own build, so `MRB_CALL_LEVEL_MAX` may be raised.
-  The parser and type checker may recurse along syntactic nesting, and the
-  machine stays stack-free.
-- CRuby is for embedding, where startup doesn't matter. mruby is the
-  standalone command, with startup similar to bash.
-- Runtime performance is best effort. Semantics come first, and if
-  something can't be exact it fails rather than approximates.
-- No 32-bit `Float` for now. Using it is an "unsupported" error, not a
-  silent Double.
-- `:load` is in scope now.
-- (2026-10-10) Libraries chosen for everyday use, the most used 80% for
-  20% of the effort: qualified imports, Data.Map (and .Strict), Data.Set,
-  the missing Control.Monad/Data.List functions, `:info`/`:kind`, then
-  Text.Printf, Data.Bits, Data.Ratio, file IO and Data.IORef. Faithful
-  ports of containers and base, not reimplementations.
-- (2026-10-10) The snapshot loads in stages instead of all at once: a
-  predefined core first, then the rest on demand and in the background,
-  paced by how long the core took on this machine (measured at runtime,
-  never a fixed duration): run the input for that long, load for that
-  long, repeat.
+## History
+rhci was designed up front in this document (2026-10-09) and built in
+seven steps, each green on both runtimes before the next: skeleton
+(manifest, shim, bundler, test framework, lint, binary, startup
+benchmark); lexer, layout, parser and fixity; the machine and primitives on
+hand-written Core; HM without classes; classes, deriving and the Prelude
+in Haskell; the REPL surface, `:load` and the embedding API; and
+performance (the simplifier and the C loop). Later additions, chosen as the
+most used parts of everyday Haskell: qualified imports, Data.Map/Data.Set,
+`:info`/`:kind`, Text.Printf, Data.Bits, Data.Ratio, file IO, Data.IORef,
+staged snapshot loading, and kind inference. Library modules are faithful
+ports of base and containers, not reimplementations.
