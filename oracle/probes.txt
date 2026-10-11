@@ -1567,3 +1567,83 @@ data R = R { rx :: Int } | Q deriving Show
 :}
 (Q :: R) { rx = 1 }
 rx Q
+
+## 50. Found by fuzzing type errors, tokens and laziness
+fst (return (compare 1 2))
+snd (("ab", 1) >>= \x -> ("cd", x + 1))
+(,) "x" (+1) <*> ("y", 2)
+let !x = error "e" in 0
+let !(a, b) = error "e" in 0
+let f = 1; !x = error "e" in f
+let !x = error "e1"; !y = error "e2" in 0
+let f n = r where !r = n `div` 0 in f 4 `seq` ()
+let !x = 1 + 2 in x * 2
+let !f = id in (f 1, f 'c')
+let f = id in (f 1, f 'c')
+take 2 [5, error "e" ..]
+take 2 [5 :: Int, error "e" ..]
+:t \x -> x `div` [1]
+:t \x -> [x] `div` [1]
+:t \x -> [x] + 1
+:t \x -> Just x `div` Just 1
+:t \x -> (x, 'c') `div` (x, 'd')
+:t \x -> [x] < [x]
+:t \x -> fromEnum [x]
+:t \x -> [x] / 2
+:t \x -> show (x `div` [1])
+succ ()
+pred ()
+succ True
+pred False
+succ GT
+pred LT
+succ (maxBound :: Char)
+pred (minBound :: Char)
+toEnum 2 :: Bool
+toEnum (-1) :: Bool
+toEnum 5 :: Ordering
+toEnum 1 :: ()
+toEnum (-1) :: Char
+toEnum 1114112 :: Char
+[True ..]
+[LT, GT ..]
+[GT, EQ ..]
+fromEnum GT
+let !x = error "e" + 1 in 0
+let !x = (error "e" :: Num a => a) in 0
+let !x = 1 + 2 in 0
+let !(a, b) = (error "e" + 1, 2) in 0
+let !f = \y -> y + 1 in 0
+let !x = fromIntegral (error "e" :: Int) in 0
+let !x = show (error "e" :: Int) in 0
+let !x = length [error "e"] in 0
+let !x = 1 + 2 in (x * 2, x / 2)
+
+## 51. Defaulting sees a user class's superclasses (found by fuzzing classes)
+:{
+class Show a => Desc a where
+  desc :: a -> String
+  desc x = "<" ++ show x ++ ">"
+:}
+instance Desc ()
+instance Desc a => Desc (Maybe a)
+:{
+class Plain a where
+  plain :: a -> Int
+:}
+instance Plain ()
+desc Nothing
+(Nothing, desc Nothing)
+let g x = desc x in g Nothing
+desc []
+plain Nothing
+:t \x -> desc (Just x)
+
+## 52. A tilde is a lazy pattern only in prefix position (found by fuzzing tokens)
+let f ~(a,b) = 42 in f undefined
+let f~(a,b) = 42 in f undefined
+let f ~ (a,b) = 42 in f undefined
+let (~) a b = a + b in 3 ~ 4
+let (~) a b = a + b in 3~4
+(\ ~(x, y) -> 1) undefined
+(\(~(x, y)) -> 1) undefined

@@ -15,6 +15,11 @@
 # stdin is ":load Main", "main", then the program's input (the REPL and the
 # program share stdin, as in GHCi).
 require 'fileutils'
+
+# A runaway evaluation must fail here (NoMemoryError), not take the machine
+# down: 4 ^ (2 ^ 127) once grew a run to 85 GB. Subprocesses (the mruby
+# runner, the binary) inherit the limit.
+Process.setrlimit(:AS, 8 * 2**30)
 require 'open3'
 require_relative '../../lib/rhci'
 require_relative '../oracle'
@@ -45,7 +50,7 @@ module Fuzz
         name
       end
       script = names.map do |n|
-        "cd /w/#{n} && (timeout -s KILL 30 runghc Main.hs < input.txt > ghc.out 2> ghc.err; echo $? > ghc.status); cd /w"
+        "cd /w/#{n} && (GHCRTS=-M6g timeout -s KILL 30 runghc Main.hs < input.txt > ghc.out 2> ghc.err; echo $? > ghc.status); cd /w"
       end.join("\n")
       FileUtils.chmod_R('a+rwX', dir)
       _, err, st = Open3.capture3('podman', 'run', '--rm', '-i', '--memory', '8g', '-v', "#{dir}:/w:Z", '-w', '/w', IMAGE, 'sh', '-c', script)
@@ -135,7 +140,7 @@ module Fuzz
       return [:imprecise, "GHC raised #{g.inspect}, rhci #{o.inspect}"] unless Oracle.same_exception?(g, o)
 
       [:agree, '']
-    rescue StandardError => e
+    rescue StandardError, NoMemoryError => e
       [:disagree, "rhci internal error: #{e.class}: #{e.message.lines.first}"]
     end
 

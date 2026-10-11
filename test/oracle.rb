@@ -108,9 +108,16 @@ module Oracle
     i ? text[0, i] : ''
   end
 
+  SYNTAX_ERRORS = ['A section must be enclosed in parentheses', 'Invalid type signature', 'Parser error on',
+                   'Syntax error on', 'Illegal \\case', 'Bang pattern in expression context', 'unterminated `{-',
+                   'numeric escape sequence out of range', 'must have lower precedence than that of the operand',
+                   'Expression syntax in pattern'].freeze
+
   def self.outcome(text)
     t = Rhci::Text.strip(text)
     return :parse if t.include?('parse error') || t.include?('lexical error') || t.include?('Precedence parsing error')
+    # Syntax errors whose GHC message says neither.
+    return :parse if SYNTAX_ERRORS.any? { |m| t.include?(m) }
     return :command if t.start_with?('unknown command') || t.include?('not an expression')
     return :scope if t.include?('not in scope') || t.include?('Not in scope')
     return :runtime if t.include?('*** Exception')
@@ -232,8 +239,11 @@ module Oracle
     elsif t == '('
       items = []
       until toks[pos[0]] == ')' || pos[0] >= toks.length
+        at = pos[0]
         items << parse_fun(toks, pos)
         pos[0] += 1 if toks[pos[0]] == ','
+        # Not a type (a stray `]`): stop rather than loop.
+        break if pos[0] == at
       end
       pos[0] += 1
       items.length == 1 ? items[0] : [:tuple, items]

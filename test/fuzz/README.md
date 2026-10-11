@@ -191,3 +191,37 @@ continuations, `{- -}` comments (nested ones too) between tokens, `--`
 comments and blank lines, tabs in the indentation (GHC's 8-column stops),
 the top level in explicit braces with semicolons. 300 programs agree, on
 CRuby and through the binary; nothing found.
+
+## Type errors, tokens, laziness, classes
+
+- `--typeerrors` (`typeerr_gen.rb`): well-typed expressions changed the
+  way a slip would (an annotation or literal of another type, an argument
+  dropped, doubled or swapped, a near-miss operator, a wrapping function,
+  an ambiguous class use); a third asked `:t`. rhci must accept and
+  reject exactly what GHCi does.
+- `--tokens` (`lex_gen.rb`): operators made of comment and arrow
+  characters, `..` after constructors, negation against sections,
+  backticks, `Just.id`, primes, Unicode names, every numeric literal form,
+  escapes and gaps, nested and unterminated comments, one-line layout,
+  extension keywords as names; half respaced at random.
+- `--laziness` (`lazy_gen.rb`): infinite and self-referential structures,
+  knot-tying, `~` against strict patterns, failing pattern bindings,
+  unused bottoms, `seq`/`$!`/`foldl'`/bang patterns, strict fields,
+  newtype against data patterns, output before an exception.
+- `--classes` (`class_gen.rb`): random hierarchies with defaults,
+  superclass chains, a result-polymorphic method, a constructor class,
+  instances with contexts and some left out; probes use them, rely on
+  defaulting through them, and define polymorphic functions with `:t`.
+
+Found and fixed (oracle sections 50-52): `let !x = e` did not force `x`
+(and a dictionary-abstracted one must not be forced; GHC forces the last
+binding first); `enumFromThen` on Integer lacked GHC's `seq` (`take 2 [5,
+undefined ..]` printed `[5,`); a kept instance-less constraint's
+superclasses are reduced into the context (`Integral [a]` adds `Ord a`)
+and defaulting at the prompt sees a class's superclasses (`class Show a
+=> C a`); `instance Monoid a => Monad ((,) a)` was missing; the Enum
+instances of `()`, Bool, Ordering and Char raise base's messages; a `~`
+not in prefix position is an operator. A ground `^` of 4 to 2^127 grew
+rhci to 85 GB (now an Integer size limit), and the oracle's `:t`
+normaliser looped on GHCi's wrapped answers (fixed). Nothing else
+differs in 23 000 probes, on CRuby and mruby.

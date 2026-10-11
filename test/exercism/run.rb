@@ -8,6 +8,11 @@
 # --ghc reruns GHC (its results are cached in build/exercism); --mruby runs
 # the mruby binary instead of an in-process CRuby session.
 require 'fileutils'
+
+# A runaway evaluation must fail here (NoMemoryError), not take the machine
+# down: 4 ^ (2 ^ 127) once grew a run to 85 GB. Subprocesses (the mruby
+# runner, the binary) inherit the limit.
+Process.setrlimit(:AS, 8 * 2**30)
 require 'open3'
 require_relative '../../lib/rhci'
 

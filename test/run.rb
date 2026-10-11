@@ -3,6 +3,11 @@
 # CRuby test entry. mruby runs the same unit tests from build/test_bundle.rb
 # (tools/bundle.rb); the e2e tests spawn processes and are CRuby-only.
 RHCI_ROOT = File.expand_path('..', __dir__)
+
+# A runaway evaluation must fail here (NoMemoryError), not take the machine
+# down: 4 ^ (2 ^ 127) once grew a run to 85 GB. Subprocesses (the mruby
+# runner, the binary) inherit the limit.
+Process.setrlimit(:AS, 8 * 2**30)
 require_relative '../lib/rhci'
 require_relative 'harness'
 require_relative 'oracle'

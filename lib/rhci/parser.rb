@@ -809,7 +809,7 @@ module Rhci
     def parse_type
       parts = [parse_btype]
       # a ~ T, an equality constraint (instance contexts only).
-      if at_op?('~')
+      if at_op?('~') || at?(:varsym, '~')
         t = advance
         return TApp.new(t, TCon.new(t, '~'), [parts[0], parse_btype])
       end

@@ -3433,3 +3433,182 @@ ghci> (Q :: R) { rx = 1 }
 ghci> rx Q
 *** Exception: No match in record selector rx
 
+## 50. Found by fuzzing type errors, tokens and laziness
+
+ghci> fst (return (compare 1 2))
+()
+ghci> snd (("ab", 1) >>= \x -> ("cd", x + 1))
+2
+ghci> (,) "x" (+1) <*> ("y", 2)
+("xy",3)
+ghci> let !x = error "e" in 0
+*** Exception: e
+CallStack (from HasCallStack):
+  error, called at <interactive>:7:10 in interactive:Ghci4
+ghci> let !(a, b) = error "e" in 0
+*** Exception: e
+CallStack (from HasCallStack):
+  error, called at <interactive>:9:15 in interactive:Ghci4
+ghci> let f = 1; !x = error "e" in f
+*** Exception: e
+CallStack (from HasCallStack):
+  error, called at <interactive>:11:17 in interactive:Ghci4
+ghci> let !x = error "e1"; !y = error "e2" in 0
+*** Exception: e2
+CallStack (from HasCallStack):
+  error, called at <interactive>:13:27 in interactive:Ghci4
+ghci> let f n = r where !r = n `div` 0 in f 4 `seq` ()
+*** Exception: divide by zero
+ghci> let !x = 1 + 2 in x * 2
+6
+ghci> let !f = id in (f 1, f 'c')
+(1,'c')
+ghci> let f = id in (f 1, f 'c')
+(1,'c')
+ghci> take 2 [5, error "e" ..]
+[5*** Exception: e
+CallStack (from HasCallStack):
+  error, called at <interactive>:23:12 in interactive:Ghci7
+ghci> take 2 [5 :: Int, error "e" ..]
+*** Exception: e
+CallStack (from HasCallStack):
+  error, called at <interactive>:25:19 in interactive:Ghci7
+ghci> :t \x -> x `div` [1]
+\x -> x `div` [1] :: (Integral [a], Num a, Ord a) => [a] -> [a]
+ghci> :t \x -> [x] `div` [1]
+\x -> [x] `div` [1] :: (Integral [a], Num a, Ord a) => a -> [a]
+ghci> :t \x -> [x] + 1
+\x -> [x] + 1 :: Num [a] => a -> [a]
+ghci> :t \x -> Just x `div` Just 1
+\x -> Just x `div` Just 1
+  :: (Integral (Maybe a), Num a, Ord a) => a -> Maybe a
+ghci> :t \x -> (x, 'c') `div` (x, 'd')
+\x -> (x, 'c') `div` (x, 'd')
+  :: (Integral (a, Char), Ord a) => a -> (a, Char)
+ghci> :t \x -> [x] < [x]
+\x -> [x] < [x] :: Ord a => a -> Bool
+ghci> :t \x -> fromEnum [x]
+\x -> fromEnum [x] :: Enum [a] => a -> Int
+ghci> :t \x -> [x] / 2
+\x -> [x] / 2 :: Fractional [a] => a -> [a]
+ghci> :t \x -> show (x `div` [1])
+\x -> show (x `div` [1])
+  :: (Show a, Integral [a], Num a, Ord a) => [a] -> String
+ghci> succ ()
+*** Exception: Prelude.Enum.().succ: bad argument
+ghci> pred ()
+*** Exception: Prelude.Enum.().pred: bad argument
+ghci> succ True
+*** Exception: Prelude.Enum.Bool.succ: bad argument
+ghci> pred False
+*** Exception: Prelude.Enum.Bool.pred: bad argument
+ghci> succ GT
+*** Exception: Prelude.Enum.Ordering.succ: bad argument
+ghci> pred LT
+*** Exception: Prelude.Enum.Ordering.pred: bad argument
+ghci> succ (maxBound :: Char)
+*** Exception: Prelude.Enum.Char.succ: bad argument
+ghci> pred (minBound :: Char)
+*** Exception: Prelude.Enum.Char.pred: bad argument
+ghci> toEnum 2 :: Bool
+*** Exception: Prelude.Enum.Bool.toEnum: bad argument
+ghci> toEnum (-1) :: Bool
+*** Exception: Prelude.Enum.Bool.toEnum: bad argument
+ghci> toEnum 5 :: Ordering
+*** Exception: Prelude.Enum.Ordering.toEnum: bad argument
+ghci> toEnum 1 :: ()
+*** Exception: Prelude.Enum.().toEnum: bad argument
+ghci> toEnum (-1) :: Char
+*** Exception: Prelude.chr: bad argument: (-1)
+ghci> toEnum 1114112 :: Char
+*** Exception: Prelude.chr: bad argument: 1114112
+ghci> [True ..]
+[True]
+ghci> [LT, GT ..]
+[LT,GT]
+ghci> [GT, EQ ..]
+[GT,EQ,LT]
+ghci> fromEnum GT
+2
+ghci> let !x = error "e" + 1 in 0
+0
+ghci> let !x = (error "e" :: Num a => a) in 0
+0
+ghci> let !x = 1 + 2 in 0
+0
+ghci> let !(a, b) = (error "e" + 1, 2) in 0
+0
+ghci> let !f = \y -> y + 1 in 0
+0
+ghci> let !x = fromIntegral (error "e" :: Int) in 0
+0
+ghci> let !x = show (error "e" :: Int) in 0
+*** Exception: e
+CallStack (from HasCallStack):
+  error, called at <interactive>:93:16 in interactive:Ghci17
+ghci> let !x = length [error "e"] in 0
+0
+ghci> let !x = 1 + 2 in (x * 2, x / 2)
+(6,1.5)
+
+## 51. Defaulting sees a user class's superclasses (found by fuzzing classes)
+
+ghci> :{
+ghci| class Show a => Desc a where
+ghci|   desc :: a -> String
+ghci|   desc x = "<" ++ show x ++ ">"
+ghci| :}
+ghci> instance Desc ()
+ghci> instance Desc a => Desc (Maybe a)
+ghci> :{
+ghci| class Plain a where
+ghci|   plain :: a -> Int
+ghci| :}
+ghci> instance Plain ()
+
+<interactive>:16:10: warning: [GHC-06201] [-Wmissing-methods]
+    • No explicit implementation for
+        ‘plain’
+    • In the instance declaration for ‘Plain ()’
+ghci> desc Nothing
+"<Nothing>"
+ghci> (Nothing, desc Nothing)
+(Nothing,"<Nothing>")
+ghci> let g x = desc x in g Nothing
+"<Nothing>"
+ghci> desc []
+
+<interactive>:24:1: error: [GHC-39999]
+    • No instance for ‘Desc [()]’ arising from a use of ‘desc’
+    • In the expression: desc []
+      In an equation for ‘it’: it = desc []
+ghci> plain Nothing
+
+<interactive>:26:1: error: [GHC-39999]
+    • No instance for ‘Plain (Maybe a0)’ arising from a use of ‘plain’
+    • In the expression: plain Nothing
+      In an equation for ‘it’: it = plain Nothing
+ghci> :t \x -> desc (Just x)
+\x -> desc (Just x) :: Desc a => a -> String
+
+## 52. A tilde is a lazy pattern only in prefix position (found by fuzzing tokens)
+
+ghci> let f ~(a,b) = 42 in f undefined
+42
+ghci> let f~(a,b) = 42 in f undefined
+
+<interactive>:3:21: error: [GHC-88464]
+    Variable not in scope: f :: t0 -> t
+ghci> let f ~ (a,b) = 42 in f undefined
+
+<interactive>:5:23: error: [GHC-88464]
+    Variable not in scope: f :: t0 -> t
+ghci> let (~) a b = a + b in 3 ~ 4
+7
+ghci> let (~) a b = a + b in 3~4
+7
+ghci> (\ ~(x, y) -> 1) undefined
+1
+ghci> (\(~(x, y)) -> 1) undefined
+1
+

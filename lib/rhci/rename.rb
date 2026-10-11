@@ -717,6 +717,8 @@ module Rhci
 
     def lookup_type(tok, str)
       return @env.tuple_con(str.length - 1).tyinfo.name if str.start_with?('(,')
+      # Equality constraints work in instance contexts only.
+      unsupported(tok, 'equality constraints outside instance contexts') if str == '~'
 
       dot = str.rindex('.')
       if dot && dot.positive? && str[0] >= 'A' && str[0] <= 'Z'

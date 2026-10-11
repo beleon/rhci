@@ -119,4 +119,14 @@ RT.suite 'pipeline' do
     end
     RT.eq "20000\n200010000\n20000\n20000\n", out.written
   end
+
+  RT.test 'an Integer over the size limit is a limit, not unbounded memory' do
+    out = RT::FakeIO.new
+    s = Rhci::Session.new(stdout: out, limits: { integer_bits: 10_000 })
+    RT.eq :limit, s.eval('(4 :: Integer) ^ (2 ^ 127 :: Integer) `mod` 7').status, 'squaring'
+    RT.eq :limit, s.eval('shiftL 1 20000 :: Integer').status, 'shift'
+    r = s.eval('length (show (2 ^ 9000 :: Integer))')
+    RT.ok r.ok?, "under the limit: #{r.message}"
+    RT.eq "2710\n", out.written
+  end
 end

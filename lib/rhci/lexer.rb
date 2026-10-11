@@ -305,6 +305,10 @@ module Rhci
         emit(:reservedop, start, line, col, occurrence(start, @i))
       elsif sym == '!' && occurrence(start, @i) == :prefix
         emit(:bang, start, line, col)
+      elsif sym == '~' && occurrence(start, @i) != :prefix
+        # Only a prefix `~` is a lazy pattern (proposal 229): `f~(a,b)` and
+        # `a ~ b` are the operator.
+        emit(:varsym, start, line, col)
       elsif RESERVED_OPS.key?(sym)
         emit(:reservedop, start, line, col)
       elsif sym.start_with?(':')

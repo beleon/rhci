@@ -25,6 +25,11 @@
 #
 # GHCi's answers are cached per seed and count in build/fuzz.
 require 'fileutils'
+
+# A runaway evaluation must fail here (NoMemoryError), not take the machine
+# down: 4 ^ (2 ^ 127) once grew a run to 85 GB. Subprocesses (the mruby
+# runner, the binary) inherit the limit.
+Process.setrlimit(:AS, 8 * 2**30)
 require 'open3'
 require_relative '../../lib/rhci'
 require_relative '../oracle'
@@ -34,6 +39,10 @@ require_relative 'default_gen'
 require_relative 'num_gen'
 require_relative 'data_gen'
 require_relative 'read_gen'
+require_relative 'typeerr_gen'
+require_relative 'lex_gen'
+require_relative 'lazy_gen'
+require_relative 'class_gen'
 
 module Fuzz
   ROOT = File.expand_path('../..', __dir__)
@@ -43,7 +52,7 @@ module Fuzz
              'import qualified Data.Set as S', 'import Text.Printf'].freeze
 
   STATUS = { ok: :ok, parse_error: :parse, scope_error: :scope, compile_error: :compile,
-             exception: :runtime }.freeze
+             exception: :runtime, command_error: :command }.freeze
 
   module_function
 
@@ -52,7 +61,9 @@ module Fuzz
   # Modes whose generator makes whole sections, imports and declarations
   # included: flag => [cache prefix, generator class].
   SECTION_MODES = { '--numbers' => ['n', 'NumGen'], '--datatypes' => ['t', 'DataGen'],
-                    '--reads' => ['e', 'ReadGen'] }.freeze
+                    '--reads' => ['e', 'ReadGen'], '--typeerrors' => ['y', 'TypeErrGen'],
+                    '--tokens' => ['k', 'LexGen'], '--laziness' => ['z', 'LazyGen'],
+                    '--classes' => ['c', 'ClassGen'] }.freeze
 
   def section_mode(argv)
     argv.find { |a| SECTION_MODES.key?(a) }
@@ -166,7 +177,7 @@ module Fuzz
       before = out.text.length
       r = s.eval(input_of(p))
       [Result.new(r.status, r.message), out.text[before..-1]]
-    rescue StandardError => e
+    rescue StandardError, NoMemoryError => e
       [Result.new(:internal, "#{e.class}: #{e.message.lines.first}"), '']
     end
   end
@@ -260,6 +271,8 @@ module Fuzz
       elsif want == :ok && ours == :ok && p.input.start_with?(':t ')
         # Types up to renaming and constraint order (the oracle's rule).
         arg = p.input[3..-1]
+        # Whitespace normalised on both sides (GHCi wraps long answers).
+        arg = arg.split(' ').join(' ')
         g = p.text.split(' ').join(' ').sub("#{arg} :: ", '')
         o = Rhci::Text.strip(got).split(' ').join(' ').sub("#{arg} :: ", '')
         problems << "#{p.input}\n    GHCi #{g}\n    rhci #{o}" unless Oracle.normalize_type(g) == Oracle.normalize_type(o)

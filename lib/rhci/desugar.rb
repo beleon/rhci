@@ -131,7 +131,12 @@ module Rhci
         saved[n.core] = @subst[n.core]
         @subst[n.core] = "#{n.core}%mono"
       end
+      # A strict binding generalised over dictionaries is forced only to its
+      # dictionary lambda (GHC: `let !x = error "e" + 1 in 0` is 0), so its
+      # value is not forced at all.
+      banged = @banged&.length
       inner = scc.reject(&:signed).flat_map { |b| bind_defs(b) }
+      @banged = @banged[0, banged] if banged
       inner = inner.map { |name, core| [@subst[name] || name, core] }
       members.each { |n| saved[n.core].nil? ? @subst.delete(n.core) : @subst[n.core] = saved[n.core] }
       params = dicts.map { |_, d| d }
@@ -292,6 +297,7 @@ module Rhci
     # (shared, lazy) value of rhs.
     def pattern_binding(b)
       v = fresh('pb')
+      @banged << v if @banged && b.pat.is_a?(PBang)
       defs = [[v, rhs(b.rhs, error_core(b.tok, 'Non-exhaustive patterns in pattern binding'))]]
       b.names.each do |n|
         defs << [n.core, selector(v, b.pat, n, error_core(b.tok, 'Non-exhaustive patterns in pattern binding'))]
@@ -316,8 +322,14 @@ module Rhci
     def groups(gs, body)
       return body if gs.nil? || gs.empty?
 
+      outer = @banged
+      @banged = []
       defs = []
       gs.each { |scc| defs.concat(scc_defs(scc)) }
+      # `let !p = e in b` forces p's value before b (BangPatterns), the
+      # last binding first, as GHC does.
+      @banged.each { |v| body = C::Case.new(var(v), fresh('bang'), [C::Alt.new(:default, nil, [], body)]) }
+      @banged = outer
       C::Let.new(defs, body)
     end
 

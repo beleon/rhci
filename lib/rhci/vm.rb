@@ -378,6 +378,9 @@ module Rhci
     class LimitExceeded < StandardError
     end
 
+    # The largest Integer a session computes by default: 2^30 bits (128 MB).
+    INTEGER_BITS = 2**30
+
     # ---- the machine ----------------------------------------------------------
 
     class Machine
@@ -416,6 +419,7 @@ module Rhci
         @stack = FrameStack.new
         @steps = 0
         @limits = limits || {}
+        @integer_bits = @limits[:integer_bits] || INTEGER_BITS
         @interrupted = false
         @next_check = CHECK_EVERY
       end
@@ -1025,7 +1029,16 @@ module Rhci
       end
 
       def p_integerMul(a0, a1)
+        integer_size!(a0.bit_length + a1.bit_length)
         a0 * a1
+      end
+
+      # One step can double an Integer (x * x in `^`'s squaring), so the
+      # step limit does not bound its memory: 4 ^ (2 ^ 127) once grew rhci
+      # to 85 GB. A result over the session's integer_bits is a limit, like
+      # the step limit (GHC would allocate until memory ran out).
+      def integer_size!(bits)
+        raise LimitExceeded, "Integer too large (#{bits} bits, limit #{@integer_bits})" if bits > @integer_bits
       end
 
       def p_integerNegate(a0)
@@ -1202,7 +1215,8 @@ module Rhci
 
       def p_chr(a0)
         c = a0
-        raise HsException, "Prelude.chr: bad argument: #{c}" if c < 0 || c > 0x10FFFF
+        # GHC shows the argument with showSignedInt 9: (-1).
+        raise HsException, "Prelude.chr: bad argument: #{c < 0 ? "(#{c})" : c}" if c < 0 || c > 0x10FFFF
 
         c
       end
@@ -1579,6 +1593,7 @@ module Rhci
       end
 
       def p_integerShiftL(a, n)
+        integer_size!(a.bit_length + n) unless a.zero?
         a << n
       end
 

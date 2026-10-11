@@ -378,6 +378,13 @@ module Rhci
             level = max_meta_level(ev.type)
             no_instance(ev) unless level
             (level > @level ? quant : deferred) << ev
+            # GHC also expands the kept constraint's superclasses and
+            # reduces those an instance solves: Integral [a] has Ord [a],
+            # so the context gets Ord a.
+            ev.klass.ancestors.each do |anc, _|
+              ai = find_instance(anc, h)
+              queue << Ev.new(anc, ev.type, ev.tok) if ai && ai.tyvars.length == args.length
+            end
             next
           end
           inst.equalities&.each { |i, et| unify(args[i], et, ev.tok) }
@@ -570,7 +577,10 @@ module Rhci
       higher = evs.any? { |ev| ev.klass.var_arity.to_i > 0 }
       candidates =
         if @mode == :prompt
-          ok = names.any? { |n| INTERACTIVE.include?(n) || NUMERIC.include?(n) }
+          # GHC expands superclasses first: a user class with Show above it
+          # (class (Mid a, Show a) => Top a) can be defaulted.
+          supers = evs.flat_map { |ev| ev.klass.ancestors.map { |c, _| c.name.str } }
+          ok = (names + supers).any? { |n| INTERACTIVE.include?(n) || NUMERIC.include?(n) }
           higher ? [T::LIST] : [T::UNIT, T::INTEGER, T::DOUBLE]
         else
           ok = names.any? { |n| NUMERIC.include?(n) } && names.all? { |n| STANDARD.include?(n) }

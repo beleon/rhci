@@ -121,8 +121,8 @@ foreign import prim "doubleShow" rhci_doubleShow :: Double -> [Char]
 
 -- ---- basic types ----------------------------------------------------------------
 
-data Bool = False | True deriving (Eq, Ord, Enum, Bounded, Show)
-data Ordering = LT | EQ | GT deriving (Eq, Ord, Enum, Bounded, Show)
+data Bool = False | True deriving (Eq, Ord, Bounded, Show)
+data Ordering = LT | EQ | GT deriving (Eq, Ord, Bounded, Show)
 data Maybe a = Nothing | Just a deriving (Eq, Ord, Show, Read)
 data Either a b = Left a | Right b deriving (Eq, Ord, Show, Read)
 
@@ -936,7 +936,7 @@ instance Enum Integer where
   enumFromThenTo x y lim = rhci_enumDeltaToInteger x (y - x) lim
 
 rhci_enumDeltaInteger :: Integer -> Integer -> [Integer]
-rhci_enumDeltaInteger x d = x : rhci_enumDeltaInteger (x + d) d
+rhci_enumDeltaInteger x d = x `seq` (x : rhci_enumDeltaInteger (x + d) d)
 
 rhci_enumDeltaToInteger :: Integer -> Integer -> Integer -> [Integer]
 rhci_enumDeltaToInteger x delta lim
@@ -982,8 +982,12 @@ instance Bounded Char where
   maxBound = '\1114111'
 
 instance Enum Char where
-  succ c = rhci_chr (rhci_intAdd (rhci_ord c) 1)
-  pred c = rhci_chr (rhci_intSub (rhci_ord c) 1)
+  succ c
+    | rhci_ord c /= 1114111 = rhci_chr (rhci_intAdd (rhci_ord c) 1)
+    | otherwise = errorWithoutStackTrace "Prelude.Enum.Char.succ: bad argument"
+  pred c
+    | rhci_ord c /= 0 = rhci_chr (rhci_intSub (rhci_ord c) 1)
+    | otherwise = errorWithoutStackTrace "Prelude.Enum.Char.pred: bad argument"
   toEnum = rhci_chr
   fromEnum = rhci_ord
   enumFrom c = map rhci_chr (rhci_enumFromToInt (rhci_ord c) 1114111)
@@ -994,10 +998,61 @@ instance Bounded () where
   minBound = ()
   maxBound = ()
 
+-- base's (GHC.Enum) instances for (), Bool and Ordering, with its messages.
 instance Enum () where
-  toEnum 0 = ()
-  toEnum _ = errorWithoutStackTrace "Prelude.Enum.().toEnum: bad argument"
+  succ _ = errorWithoutStackTrace "Prelude.Enum.().succ: bad argument"
+  pred _ = errorWithoutStackTrace "Prelude.Enum.().pred: bad argument"
+  toEnum x
+    | x == 0 = ()
+    | otherwise = errorWithoutStackTrace "Prelude.Enum.().toEnum: bad argument"
   fromEnum () = 0
+  enumFrom () = [()]
+  enumFromThen () () = let many = () : many in many
+  enumFromTo () () = [()]
+  enumFromThenTo () () () = let many = () : many in many
+
+instance Enum Bool where
+  succ False = True
+  succ True = errorWithoutStackTrace "Prelude.Enum.Bool.succ: bad argument"
+  pred True = False
+  pred False = errorWithoutStackTrace "Prelude.Enum.Bool.pred: bad argument"
+  toEnum n
+    | n == 0 = False
+    | n == 1 = True
+    | otherwise = errorWithoutStackTrace "Prelude.Enum.Bool.toEnum: bad argument"
+  fromEnum False = 0
+  fromEnum True = 1
+  enumFrom = rhci_boundedEnumFrom
+  enumFromThen = rhci_boundedEnumFromThen
+
+instance Enum Ordering where
+  succ LT = EQ
+  succ EQ = GT
+  succ GT = errorWithoutStackTrace "Prelude.Enum.Ordering.succ: bad argument"
+  pred GT = EQ
+  pred EQ = LT
+  pred LT = errorWithoutStackTrace "Prelude.Enum.Ordering.pred: bad argument"
+  toEnum n
+    | n == 0 = LT
+    | n == 1 = EQ
+    | n == 2 = GT
+    | otherwise = errorWithoutStackTrace "Prelude.Enum.Ordering.toEnum: bad argument"
+  fromEnum LT = 0
+  fromEnum EQ = 1
+  fromEnum GT = 2
+  enumFrom = rhci_boundedEnumFrom
+  enumFromThen = rhci_boundedEnumFromThen
+
+rhci_boundedEnumFrom :: (Enum a, Bounded a) => a -> [a]
+rhci_boundedEnumFrom n = map toEnum [fromEnum n .. fromEnum (maxBound `asTypeOf` n)]
+
+rhci_boundedEnumFromThen :: (Enum a, Bounded a) => a -> a -> [a]
+rhci_boundedEnumFromThen n1 n2
+  | i_n2 >= i_n1 = map toEnum [i_n1, i_n2 .. fromEnum (maxBound `asTypeOf` n1)]
+  | otherwise = map toEnum [i_n1, i_n2 .. fromEnum (minBound `asTypeOf` n1)]
+  where
+    i_n1 = fromEnum n1
+    i_n2 = fromEnum n2
 
 instance (Bounded a, Bounded b) => Bounded (a, b) where
   minBound = (minBound, minBound)
@@ -1150,6 +1205,15 @@ instance Monad (Either e) where
 
 instance Functor ((,) a) where
   fmap f (x, y) = (x, f y)
+
+-- base's writer-like instances (GHC.Base).
+instance Monoid a => Applicative ((,) a) where
+  pure x = (mempty, x)
+  (u, f) <*> (v, x) = (u <> v, f x)
+  liftA2 f (u, x) (v, y) = (u <> v, f x y)
+
+instance Monoid a => Monad ((,) a) where
+  (u, a) >>= k = case k a of (v, b) -> (u <> v, b)
 
 instance Functor ((->) r) where
   fmap = (.)

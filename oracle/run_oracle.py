@@ -51,10 +51,12 @@ def run_section(inputs):
         script.append(f":! echo {SEP}")
     mount = ["-v", f"{FILES}:/w:Z", "-w", "/w"] if FILES else []
     proc = subprocess.run(
-        # A runaway probe (2 ^ (2 ^ 70)) must not take the machine with it:
-        # memory is capped, and the time limit kills (GHCi survived a TERM).
+        # A runaway probe (4 ^ (2 ^ 127)) must not take the machine with it:
+        # GHC's heap limit makes it a "heap overflow" exception for that
+        # probe (below the container's cap, which would kill the section),
+        # and the time limit kills (GHCi survived a TERM).
         ["podman", "run", "--rm", "-i", "--memory", "8g", *mount, IMAGE, "sh", "-c",
-         "timeout -s KILL 120 ghci -ignore-dot-ghci -v0 -fdiagnostics-color=never 2>&1"],
+         "timeout -s KILL 120 ghci -ignore-dot-ghci -v0 -fdiagnostics-color=never +RTS -M6g -RTS 2>&1"],
         input="\n".join(script) + "\n", capture_output=True, text=True,
     )
     outs = proc.stdout.split(SEP + "\n")
