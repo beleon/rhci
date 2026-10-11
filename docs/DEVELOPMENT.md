@@ -108,7 +108,9 @@ make what is covered behave like GHCi.
   finishes in < 200 ms. `-c EXPR ARG…` applies a pure EXPR to ARGs that are
   themselves Haskell expressions (arity and types must match); `-x EXPR
   ARG…` runs an IO EXPR with ARGs as Strings via getArgs; `-i` applies the
-  result to stdin (interact). String
+  result to stdin (interact). FILEs before `-c`/`-x` are loaded first, and
+  `-r FILE ARG…` runs FILE's `main` like runghc (a `#!/usr/bin/env -S rhci
+  -r` first line makes a script; GHC reads a `#!` line as a comment). String
   results print raw via putStr, other types via print.
 - **Fail, don't approximate.** Anything that can't match GHCi semantics
   exactly is rejected with an explicit "unsupported" error. Runtime

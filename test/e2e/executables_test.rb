@@ -30,6 +30,33 @@ EXECUTABLES.each do |label, cmd|
       RT.ok out.include?("[1,2,*** Exception: Prelude.undefined\n"), out.inspect
     end
 
+    # Scripts: -r FILE ARG..., files loaded before -c/-x, a #! first line,
+    # and a script run directly through its shebang (env -S).
+    RT.test '-r runs a file\'s main like runghc; files before -c/-x are loaded' do
+      Dir.mktmpdir('rhci-script') do |dir|
+        script = File.join(dir, 'hello.hs')
+        File.write(script, "#!/usr/bin/env -S #{cmd.join(' ')} -r\nimport System.Environment\n" \
+                           "main :: IO ()\nmain = do { args <- getArgs; putStrLn (\"hello \" ++ unwords args); print (length args) }\n")
+        RT.eq ["hello a b\n2\n", '', 0], run_exe(cmd, ['-r', script, 'a', 'b'])
+        RT.eq ["hello x\n1\n", '', 0], run_exe(cmd, [script, '-x', 'main', 'x']), 'file then -x'
+        File.chmod(0o755, script)
+        RT.eq ["hello direct\n1\n", '', 0], run_exe([script], ['direct']), 'run through its #! line'
+        lib = File.join(dir, 'Lib.hs')
+        File.write(lib, "module Lib where\nsq :: Int -> Int\nsq x = x * x\n")
+        RT.eq ["49\n", '', 0], run_exe(cmd, [lib, '-c', 'sq 7']), 'file then -c'
+        File.write(script, "main :: IO ()\nmain = print (head ([] :: [Int]))\n")
+        out, err, code = run_exe(cmd, ['-r', script])
+        RT.eq ['', 1], [out, code], 'an exception exits 1'
+        RT.ok err.include?('Prelude.head: empty list'), err
+        File.write(script, "main :: IO ()\nmain = putStrLn (1 + True)\n")
+        _, err, code = run_exe(cmd, ['-r', script])
+        RT.eq 3, code, 'a type error exits 3'
+        RT.ok !err.include?('Ok, '), 'no "Ok, loaded" line in one-shot mode'
+        _, err, code = run_exe(cmd, ['-i', '-r', script])
+        RT.eq 2, code, '-i needs -c or -x'
+      end
+    end
+
     RT.test '--version' do
       RT.eq ["rhci #{Rhci::VERSION}\n", '', 0], run_exe(cmd, ['--version'])
     end

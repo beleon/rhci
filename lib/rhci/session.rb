@@ -392,13 +392,14 @@ module Rhci
     # `:load PATH...` / `rhci PATH...`: replace the loaded modules, as
     # GHCi does: prompt bindings are discarded; the scope is the (last)
     # module's full scope; on failure, that of the last module that did
-    # load (GHCi keeps them), or only the Prelude.
-    def load(paths)
+    # load (GHCi keeps them), or only the Prelude. quiet: no "Ok, ...
+    # loaded." line (the one-shot modes, like runghc).
+    def load(paths, quiet: false)
       load_prelude
       reset_to_baseline
       @last_load = paths
       if paths.empty?
-        write_text("Ok, no modules loaded.\n")
+        write_text("Ok, no modules loaded.\n") unless quiet
         return Result.new(:ok)
       end
       @modules = {}
@@ -407,7 +408,7 @@ module Rhci
       paths.each { |p| top = load_module_file(resolve_load_target(p), nil) }
       expose_module_scope(top)
       n = @modules.length
-      write_text("Ok, #{n == 1 ? 'one module' : "#{n} modules"} loaded.\n")
+      write_text("Ok, #{n == 1 ? 'one module' : "#{n} modules"} loaded.\n") unless quiet
       Result.new(:ok)
     rescue Error => e
       r = failure(e)
@@ -424,6 +425,15 @@ module Rhci
     rescue VM::HsException => e
       reset_to_baseline
       Result.new(:exception, @machine.exception_message(e))
+    end
+
+    # GHC reads a `#!` first line (a runghc script) as a comment: the line
+    # stays, empty, so positions are unchanged.
+    def self.without_shebang(src)
+      return src unless src.start_with?('#!')
+
+      nl = src.index("\n")
+      nl ? src[nl..-1] : ''
     end
 
     def reload
@@ -528,6 +538,7 @@ module Rhci
 
     def load_module_file(path, expected)
       src = Shim.read_file(in_cwd(path))
+      src = Session.without_shebang(src) if src
       raw = Frontend.parse_module_raw(src, path)
       name = raw.name
       if expected && name != expected

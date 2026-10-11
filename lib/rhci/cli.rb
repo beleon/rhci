@@ -13,15 +13,17 @@ module Rhci
     CONTINUATION_PROMPT = 'rhci| '
 
     USAGE = <<~TEXT
-      usage: rhci [FILE.hs...]                 interactive session
-             rhci [-i] -c EXPR [ARG...]        apply pure EXPR to ARGs (Haskell expressions)
-             rhci [-i] -x EXPR [ARG...]        run IO action EXPR; ARGs via getArgs
+      usage: rhci [FILE.hs...]                 interactive session, FILEs loaded
+             rhci [FILE.hs...] [-i] -c EXPR [ARG...]   apply pure EXPR to ARGs (Haskell expressions)
+             rhci [FILE.hs...] [-i] -x EXPR [ARG...]   run IO action EXPR; ARGs via getArgs
+             rhci -r FILE.hs [ARG...]          run FILE's main with ARGs, like runghc
              rhci -h | --help | --version
 
         -i   apply the result to standard input as a lazy String (like interact)
 
-      Strings print raw; other values print with show. Exit status: 0 ok,
-      1 Haskell exception, 2 usage error, 3 parse/scope/type error, 4 unsupported.
+      A script starts with `#!/usr/bin/env -S rhci -r`. Strings print raw;
+      other values print with show. Exit status: 0 ok, 1 Haskell exception,
+      2 usage error, 3 parse/scope/type error, 4 unsupported.
     TEXT
 
     class UsageError < StandardError; end
@@ -59,6 +61,13 @@ module Rhci
           mode = arg == '-c' ? :pure : :io
           # Everything after EXPR is an argument, even if it looks like a flag.
           return Options.new(:run, mode, expr, argv[(i + 2)..-1], files, interact)
+        when '-r'
+          file = argv[i + 1]
+          raise UsageError, '-r requires a file' if file.nil?
+          raise UsageError, '-i requires -c or -x' if interact
+          raise UsageError, '-r takes one file (its imports are found from it)' unless files.empty?
+
+          return Options.new(:run, :io, 'main', argv[(i + 2)..-1], [file], false)
         else
           raise UsageError, "unknown option #{arg}" if arg.length > 1 && arg[0] == '-'
 
@@ -95,6 +104,13 @@ module Rhci
 
     def self.run(opts, stdin, stdout, stderr)
       session = Session.new(stdout: stdout, stdin: stdin, stderr: stderr)
+      unless opts.files.empty?
+        loaded = session.load(opts.files, quiet: true)
+        unless loaded.ok?
+          report(loaded, stderr)
+          return exit_code(loaded)
+        end
+      end
       result =
         if opts.mode == :pure
           session.run_pure(opts.expr, opts.args, interact: opts.interact)

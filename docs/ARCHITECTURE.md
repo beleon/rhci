@@ -567,6 +567,8 @@ size, with no limits set the behaviour is GHCi's (`[1..]` prints forever).
   |---|---|
   | `rhci -c EXPR [ARG…]` | **Pure evaluation.** Each ARG is itself a Haskell **expression**. The input is checked and run as `(EXPR) (ARG1) (ARG2) …`, with prompt rules (extended defaulting, no monomorphism restriction). |
   | `rhci -x EXPR [ARG…]` | **IO.** EXPR must have type `IO t` and is run. The ARGs are plain `String`s, visible only through `getArgs`, and the program parses them itself. |
+  | `rhci FILE.hs… -c/-x …` | The files are loaded first (as `:load`, but without the "Ok, … loaded" line); a failure reports and exits with its code. |
+  | `rhci -r FILE.hs [ARG…]` | **Script.** Loads FILE and runs its `main` with the ARGs on `getArgs`, like `runghc`. A `#!` first line is a comment, as in GHC, so `#!/usr/bin/env -S rhci -r` makes a file executable. |
   | `rhci -i …` | Combines with `-c`/`-x`: the result (after applying any ARGs) is applied to stdin as a lazy `String` (`String -> String`, or `String -> IO t` with `-x`), and output streams as it's produced. |
   - **`-c` arity and type rules.** EXPR must take exactly as many
     arguments as given: if the applied result still has a function type,
