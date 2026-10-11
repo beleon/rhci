@@ -82,3 +82,28 @@ writeFile "sur" "ab\55296cd"
 readFile "sur"
 writeFile "sur2" (replicate 3000 'a' ++ "\55296")
 length <$> readFile "sur2"
+
+## 5. :reload after editing the loaded files
+:load RMod
+r
+x = 5
+:! cp RMod2.hs RMod.hs
+:reload
+r
+s
+x
+:! cp RModBad.hs RMod.hs
+:reload
+r
+s
+:load RMain
+main
+:! cp RLib2.hs RLib.hs
+:reload
+main
+lib 3
+:! cp RLib3.hs RLib.hs
+:reload
+main
+lib2 3
+lib 3

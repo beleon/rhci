@@ -390,8 +390,9 @@ module Rhci
     end
 
     # `:load PATH...` / `rhci PATH...`: replace the loaded modules, as
-    # GHCi does: prompt bindings are discarded; on success the scope is the
-    # (last) module's full scope; on failure only the Prelude remains.
+    # GHCi does: prompt bindings are discarded; the scope is the (last)
+    # module's full scope; on failure, that of the last module that did
+    # load (GHCi keeps them), or only the Prelude.
     def load(paths)
       load_prelude
       reset_to_baseline
@@ -409,9 +410,17 @@ module Rhci
       write_text("Ok, #{n == 1 ? 'one module' : "#{n} modules"} loaded.\n")
       Result.new(:ok)
     rescue Error => e
-      reset_to_baseline
       r = failure(e)
-      Result.new(r.status, "#{r.message}\nFailed, no modules loaded.")
+      @loading = []
+      n = @modules ? @modules.length : 0
+      if n.zero?
+        reset_to_baseline
+      else
+        # What failed installed nothing; the modules before it stay.
+        expose_module_scope(@modules.values.last)
+      end
+      loaded = n.zero? ? 'no modules' : n == 1 ? 'one module' : "#{n} modules"
+      Result.new(r.status, "#{r.message}\nFailed, #{loaded} loaded.")
     rescue VM::HsException => e
       reset_to_baseline
       Result.new(:exception, @machine.exception_message(e))

@@ -26,7 +26,9 @@ def sem_input(p)
 end
 
 # Replays one section in a fresh Session; returns the disagreements.
-def sem_section(probes, title, gaps, cwd)
+# shell: runs a probe's `:! cmd` (the oracle's way to edit a file between
+# inputs); without one such probes are not expected.
+def sem_section(probes, title, gaps, cwd, shell = nil)
   out = RT::FakeIO.new
   # Speed is not what this checks: each input gets a step budget, and
   # one that exhausts it is skipped (counted), not failed.
@@ -35,6 +37,10 @@ def sem_section(probes, title, gaps, cwd)
   probes.each do |p|
     next unless p.section == title
 
+    if shell && p.input.start_with?(':! ')
+      shell.call(p.input[3..-1])
+      next
+    end
     $oracle_coverage[1] += 1
     input = sem_input(p)
     before = out.written.length
@@ -105,7 +111,14 @@ RT.suite 'oracle: semantics' do
       RT.test "files: #{title}" do
         problems = Dir.mktmpdir('rhci-files') do |dir|
           FileUtils.cp_r(File.join(RHCI_ROOT, 'oracle', 'files_io', '.'), dir)
-          sem_section(io_probes, title, sem_gaps, dir)
+          # `:! cp A B` edits a module between :reloads.
+          shell = lambda do |cmd|
+            op, from, to = cmd.split(' ')
+            raise "oracle: unexpected shell command #{cmd}" unless op == 'cp'
+
+            FileUtils.cp(File.join(dir, from), File.join(dir, to))
+          end
+          sem_section(io_probes, title, sem_gaps, dir, shell)
         end
         RT.ok problems.empty?, problems.join("\n      ")
       end

@@ -345,7 +345,7 @@ module Fuzz
     end
 
     def string_expr(d)
-      case @r.rand(14)
+      case @r.rand(17)
       when 0 then "show #{sub(random_type(2), d)}"
       when 1 then "#{sub(STRING, d)} ++ #{sub(STRING, d)}"
       when 2 then "map #{pick(%w[toUpper toLower succ])} #{sub(STRING, d)}"

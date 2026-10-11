@@ -244,3 +244,22 @@ differs in 23 000 probes, on CRuby and mruby.
   heads (oracle section 54).
 
 5 000 + 3 000 probes agree, on CRuby and mruby.
+
+## After an audit for uncovered surface
+
+An audit of what nothing tested found, and this round fixed:
+- the CRuby builds wrote an exception before the output printed ahead of
+  it (stderr reported before stdout was flushed); an e2e test now reads
+  both streams on one pipe;
+- `gen.rb`'s `string_expr` drew from 14 choices but had 17, so `read` of
+  `show` (Map and Set included) was never generated; seeds 61-62 cover it
+  (6 000 probes agree);
+- a failed `:load` dropped every module, where GHCi keeps those that
+  compiled with the topmost one's scope (oracle L14); `:reload` after
+  editing the files is pinned in `probes_files.txt` section 5 (the CRuby
+  runner performs the probes' `:! cp`);
+- the `:t` normaliser split contexts at commas inside tuples and named
+  context-only variables by constraint order;
+- `--instances` (`inst_gen.rb`): hand-written instances of Show, Eq, Ord,
+  Num, Enum, Bounded, Semigroup, Monoid, Functor, Foldable, Traversable
+  and Applicative with varying minimal definitions; 5 000 probes agree.

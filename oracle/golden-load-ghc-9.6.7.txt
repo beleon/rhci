@@ -233,3 +233,46 @@ ghci> v
 ghci> w
 [E,4 :| "y",-1 :| ""]
 
+## L14. A failed load keeps the modules that did load (their scope)
+
+ghci> :load MMain
+
+MMain.hs:4:23: error: [GHC-88464]
+    Variable not in scope: undefinedName :: Int
+  |
+4 | main = print (pub 3 + undefinedName)
+  |                       ^^^^^^^^^^^^^
+ghci> pub 3
+7
+ghci> hidden 3
+6
+ghci> MLib.pub 4
+9
+ghci> main
+
+<interactive>:9:1: error: [GHC-88464]
+    Variable not in scope: main
+    Suggested fix: Perhaps use ‘min’ (imported from Prelude)
+ghci> :load MOk
+ghci> val
+21
+ghci> pub 1
+3
+ghci> hidden 1
+
+<interactive>:17:1: error: [GHC-88464]
+    Variable not in scope: hidden :: t0 -> t
+ghci> :load MOk
+ghci> :load MMain
+
+MMain.hs:4:23: error: [GHC-88464]
+    Variable not in scope: undefinedName :: Int
+  |
+4 | main = print (pub 3 + undefinedName)
+  |                       ^^^^^^^^^^^^^
+ghci> val
+
+<interactive>:23:1: error: [GHC-88464] Variable not in scope: val
+ghci> pub 2
+5
+

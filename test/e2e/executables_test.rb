@@ -21,6 +21,15 @@ end
 
 EXECUTABLES.each do |label, cmd|
   RT.suite "e2e #{label}" do
+    # stdout and stderr on one pipe: what was printed must come before the
+    # exception (CRuby buffers stdout; a terminal shows both in order).
+    RT.test 'output before an exception comes first, on one stream' do
+      out, = Open3.capture2e(*cmd, '-c', '[1,2,undefined]')
+      RT.eq "[1,2,*** Exception: Prelude.undefined\n", out
+      out, = Open3.capture2e(*cmd, stdin_data: "[1,2,undefined]\n")
+      RT.ok out.include?("[1,2,*** Exception: Prelude.undefined\n"), out.inspect
+    end
+
     RT.test '--version' do
       RT.eq ["rhci #{Rhci::VERSION}\n", '', 0], run_exe(cmd, ['--version'])
     end

@@ -144,13 +144,57 @@ module Oracle
     end
     names = {}
     body = canonical(rename_tokens(type_tokens(s), names))
-    constraints = []
-    if ctx
-      c = Rhci::Text.strip(ctx)
-      c = c[1..-2] if c.start_with?('(') && c.end_with?(')')
-      c.split(', ').each { |one| constraints << rename_tokens(type_tokens(one), names).join(' ') }
+    return [body, []] unless ctx
+
+    c = Rhci::Text.strip(ctx)
+    c = c[1..-2] if c.start_with?('(') && c.end_with?(')') && top_level_parens?(c)
+    toks = split_top(c).map { |one| type_tokens(one) }
+    # Variables only the context mentions are named independently of the
+    # constraints' order: by the sorted shapes (unnamed variables masked).
+    loop do
+      shape = ->(ts) { ts.map { |t| lower_var?(t) && !names.key?(t) ? '?' : (names[t] || t) }.join(' ') }
+      open = toks.select { |ts| ts.any? { |t| lower_var?(t) && !names.key?(t) } }
+      break if open.empty?
+
+      rename_tokens(open.min_by { |ts| shape.call(ts) }, names)
     end
-    [body, constraints.sort]
+    [body, toks.map { |ts| canonical(rename_tokens(ts, names)).join(' ') }.sort]
+  end
+
+  def self.lower_var?(t)
+    t[0] >= 'a' && t[0] <= 'z'
+  end
+
+  # Does the opening parenthesis close only at the end?
+  def self.top_level_parens?(s)
+    depth = 0
+    i = 0
+    while i < s.length
+      depth += 1 if s[i] == '('
+      depth -= 1 if s[i] == ')'
+      return false if depth.zero? && i < s.length - 1
+
+      i += 1
+    end
+    true
+  end
+
+  # s split at commas outside parentheses and brackets.
+  def self.split_top(s)
+    out = []
+    depth = 0
+    cur = +''
+    s.each_char do |ch|
+      depth += 1 if '(['.include?(ch)
+      depth -= 1 if ')]'.include?(ch)
+      if ch == ',' && depth.zero?
+        out << Rhci::Text.strip(cur)
+        cur = +''
+      else
+        cur << ch
+      end
+    end
+    out << Rhci::Text.strip(cur)
   end
 
   def self.type_tokens(s)

@@ -97,3 +97,18 @@ lookup 5
 :load Fix
 v
 w
+
+## L14. A failed load keeps the modules that did load (their scope)
+:load MMain
+pub 3
+hidden 3
+MLib.pub 4
+main
+:load MOk
+val
+pub 1
+hidden 1
+:load MOk
+:load MMain
+val
+pub 2

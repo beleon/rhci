@@ -101,8 +101,9 @@ module Rhci
         else
           session.run_io(opts.expr, opts.args, interact: opts.interact)
         end
-      report(result, stderr)
+      # What was printed comes first, then the error (CRuby buffers stdout).
       Shim.flush(stdout)
+      report(result, stderr)
       exit_code(result)
     end
 
@@ -110,7 +111,11 @@ module Rhci
       session = Session.new(stdout: stdout, stdin: stdin, stderr: stderr)
       session.background_loading = true
       editor = line_editor(session, stdin, stdout)
-      report(session.load(opts.files), stderr) unless opts.files.empty?
+      unless opts.files.empty?
+        loaded = session.load(opts.files)
+        Shim.flush(stdout)
+        report(loaded, stderr)
+      end
       loop do
         input = read_input(session, stdout, editor)
         if input.nil?
@@ -120,8 +125,9 @@ module Rhci
         next if input == :interrupt || Rhci::Text.blank?(input)
         return EXIT_OK if quit?(input)
 
-        report(session.eval(input), stderr)
+        result = session.eval(input)
         Shim.flush(stdout)
+        report(result, stderr)
       end
     end
 
