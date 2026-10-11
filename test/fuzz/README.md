@@ -126,7 +126,9 @@ group is loaded from a module, where Haskell 2010 defaulting and the
 monomorphism restriction decide the types across the whole module, and
 typed at the prompt (a `:{ :}` block or line by line), with extended
 defaulting and no MR; both sections then print the definitions, ask `:t`
-and use them at other types. Each side is compared with GHCi.
+and use them at other types. Each side is compared with GHCi. Seeds 1
+and 2 (300 groups, 7 300 inputs) agree. Found: CRuby's `Math.sqrt(-0.0)`
+is `0.0`, so `sqrt (negate (sum []))` printed `0.0` (oracle section 47).
 
 The oracle runner caps each GHCi container at 8 GB and kills it after its
 time limit: a generated `2 ^ (2 ^ 70)` once grew GHCi to 84 GB.
