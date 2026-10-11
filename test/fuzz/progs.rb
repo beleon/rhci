@@ -6,7 +6,10 @@
 # rhci. They must agree: same stdout, same exception (if any) after it, and
 # a program GHC rejects must be rejected.
 #
-#   ruby test/fuzz/progs.rb [--seed N] [--count N] [--bottoms P] [--mruby]
+#   ruby test/fuzz/progs.rb [--seed N] [--count N] [--bottoms P] [--mruby] [--relayout]
+#
+# --relayout respells each module (relayout.rb): broken lines, comments,
+# tabs, explicit top-level braces.
 #
 # --mruby runs the mruby binary instead of an in-process CRuby session: its
 # stdin is ":load Main", "main", then the program's input (the REPL and the
@@ -16,6 +19,7 @@ require 'open3'
 require_relative '../../lib/rhci'
 require_relative '../oracle'
 require_relative 'prog_gen'
+require_relative 'relayout'
 
 module Fuzz
   module Progs
@@ -24,17 +28,19 @@ module Fuzz
 
     module_function
 
-    def prepare(seed, count, bottoms)
-      dir = File.join(ROOT, 'build', 'fuzz-progs', "s#{seed}-n#{count}#{bottoms.positive? ? "-b#{bottoms}" : ''}")
+    def prepare(seed, count, bottoms, relayout = false)
+      dir = File.join(ROOT, 'build', 'fuzz-progs',
+                      "s#{seed}-n#{count}#{bottoms.positive? ? "-b#{bottoms}" : ''}#{relayout ? '-relayout' : ''}")
       return dir if File.exist?(File.join(dir, 'done'))
 
       FileUtils.rm_rf(dir)
       gen = ProgGen.new(seed, bottoms: bottoms)
+      respell = Relayout.new(Random.new(seed))
       names = Array.new(count) do |i|
         name = format('p%03d', i)
         FileUtils.mkdir_p(File.join(dir, name))
         files, input = gen.program
-        files.each { |f, src| File.write(File.join(dir, name, f), src) }
+        files.each { |f, src| File.write(File.join(dir, name, f), relayout ? respell.apply(src) : src) }
         File.write(File.join(dir, name, 'input.txt'), input)
         name
       end
@@ -173,7 +179,7 @@ module Fuzz
       count = (argv.include?('--count') ? argv[argv.index('--count') + 1] : 100).to_i
       bottoms = (argv.include?('--bottoms') ? argv[argv.index('--bottoms') + 1] : 0).to_f
       mruby = argv.include?('--mruby')
-      dir = prepare(seed, count, bottoms)
+      dir = prepare(seed, count, bottoms, argv.include?('--relayout'))
       counts = Hash.new(0)
       Dir.children(dir).sort.each do |p|
         next unless File.directory?(File.join(dir, p))

@@ -103,8 +103,15 @@ module Rhci
 
     # C pow semantics (what GHC's ** uses): a negative base with a
     # non-integral exponent is NaN, never a Complex as in CRuby.
+    # C's pow: NaN for a negative base and a non-integral exponent (CRuby's
+    # Float#** gives a Complex, also for a NaN exponent).
     def self.pow(a, b)
-      return 0.0 / 0.0 if a < 0 && !nan?(b) && !infinite?(b) && b % 1.0 != 0.0
+      if a < 0 && (nan?(b) || (!infinite?(b) && b % 1.0 != 0.0))
+        # pow(-Infinity, y) for a non-integral y is +Infinity or +0.0.
+        return b > 0 ? 1.0 / 0.0 : 0.0 if infinite?(a) && !nan?(b)
+
+        return 0.0 / 0.0
+      end
 
       a**b
     end

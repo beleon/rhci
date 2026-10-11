@@ -123,6 +123,12 @@ module Oracle
   # variables renamed in order of first appearance and String (and FilePath) spelled [Char].
   def self.normalize_type(s)
     s = s.sub('GHC.Stack.Types.HasCallStack => ', '')
+    # GHC2021's PolyKinds: a phantom parameter's kind is generalised and
+    # shown (`forall {k} (a :: k). T a`); rhci has no kind polymorphism,
+    # and the kind does not change the type's values.
+    if s.start_with?('forall {') && (dot = s.index('. '))
+      s = s[(dot + 2)..-1]
+    end
     ctx = nil
     k = s.index(' => ')
     if k

@@ -225,3 +225,11 @@ ghci> lookup 5
            or ‘Prelude.lookup’,
               imported from ‘Prelude’ (and originally defined in ‘GHC.List’)
 
+## L13. Derived Show in a module uses its fixity declarations
+
+ghci> :load Fix
+ghci> v
+-3 :| "x"
+ghci> w
+[E,4 :| "y",-1 :| ""]
+

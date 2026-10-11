@@ -773,7 +773,8 @@ module Rhci
         fields.each_with_index { |f, i| args[c.fields.index(f)] = newvals[i] }
         alts << C::Alt.new(:con, c.con, vs, saturated(c, args))
       end
-      alts << C::Alt.new(:default, nil, [], error_core(e.tok, 'No match in record update'))
+      # GHC (9.4 on) desugars a record update to a case expression.
+      alts << C::Alt.new(:default, nil, [], error_core(e.tok, 'Non-exhaustive patterns in case'))
       C::Let.new([[v, expr(e.expr)]], C::Case.new(var(v), nil, alts))
     end
   end

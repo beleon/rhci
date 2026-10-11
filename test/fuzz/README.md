@@ -132,3 +132,62 @@ is `0.0`, so `sqrt (negate (sum []))` printed `0.0` (oracle section 47).
 
 The oracle runner caps each GHCi container at 8 GB and kills it after its
 time limit: a generated `2 ^ (2 ^ 70)` once grew GHCi to 84 GB.
+
+## Numbers at the edges
+
+`ruby test/fuzz/run.rb --numbers --seed N [--count N]` (`num_gen.rb`):
+Doubles from random bit patterns (subnormals, huge values, `-0.0`, NaN,
+infinities, halves), Ints and Integers clustered at 2^31, 2^53, 2^63,
+2^64, powers of ten and beyond, through `show`/`read`, Numeric's
+`showFFloat`/`showEFloat`/`showGFloat`/`showHex`/`floatToDigits`, the
+RealFrac and RealFloat methods, conversions, Integral arithmetic (zero
+divisors, `minBound \`div\` (-1)`), Data.Bits, Data.Ratio and printf.
+Found (oracle section 48, `runtime_assumptions_test`):
+- mruby 4.0.0's bignum arithmetic with a fixnum operand: `-18446744073709551614
+  + -9` was positive, `~` of a positive bignum off by two, `&`/`^` with a
+  negative bignum wrong, `>>` of a negative bignum truncated. rhci-native
+  (`src/bigint_ops.c`) replaces those operators for bignum operands;
+  mruby and CRuby then agree on 40 000 random pairs, every operator;
+- CRuby's `Float#**` returns a Complex for a negative base and a NaN
+  exponent (`(-x) ** NaN` crashed rhci), and `(-Infinity) ** 0.5` is
+  `+Infinity` in C (and GHC), not NaN;
+- `properFraction (-0.0)` is `(0, 0.0)`: GHC's fraction is never `-0.0`.
+
+Seeds 1-3 (30 000 probes) agree on CRuby and on mruby.
+
+## User data types
+
+`ruby test/fuzz/run.rb --datatypes --seed N [--count N]` (`data_gen.rb`):
+random declarations (nullary, positional and record constructors, infix
+constructors with random fixities, a type parameter, newtypes, fields of
+other declared types and of the type itself) deriving Show and a random
+choice of Eq, Ord, Read, Enum and Bounded, then `show` at several
+precedences and inside other values, `read` of shown and respaced text,
+comparisons, ranges and `succ`/`pred` at the ends, `minBound`/`maxBound`,
+selectors and updates on the wrong constructor, `:t` of constructors.
+Found (oracle sections 49 and L13): derived Show and Read used precedence
+9 for an infix constructor whose fixity is declared in the same input or
+module (`-3 :| "x"` came out `(-3) :| "x"`); a record update on the wrong
+constructor raises GHC 9.6's "Non-exhaustive patterns in case". `:t`
+comparisons now ignore GHC2021's kind-polymorphic `forall {k} (a :: k).`
+prefix (rhci has no PolyKinds). Seeds 1-3 (7 400 probes) agree.
+
+## Read on damaged input
+
+`ruby test/fuzz/run.rb --reads --seed N [--count N]` (`read_gen.rb`):
+text `show` would give for a random value (numbers, Chars and Strings
+with every escape form, lists, tuples, Maybe, Either, Ratio, a record and
+an infix constructor) altered: other spacing and line breaks, redundant
+or missing parentheses, other spellings of numbers (hex, octal, exponents,
+signs, `1_000`), truncation, trailing text, other case, a dropped or
+doubled comma; then `read`, `reads`, `readMaybe` or `readEither`. 3 000
+probes (2 150 parse, 850 fail) agree; nothing found.
+
+## Syntax variation
+
+`ruby test/fuzz/progs.rb --relayout` (`relayout.rb`) respells every
+generated module before GHC and rhci see it: lines broken into indented
+continuations, `{- -}` comments (nested ones too) between tokens, `--`
+comments and blank lines, tabs in the indentation (GHC's 8-column stops),
+the top level in explicit braces with semicolons. 300 programs agree, on
+CRuby and through the binary; nothing found.

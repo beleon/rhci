@@ -3379,3 +3379,57 @@ ghci> log (-0.0) :: Double
 ghci> sqrt 0 :: Double
 0.0
 
+## 48. Found by fuzzing numbers at the edges
+
+ghci> (-2.0633e-261) ** (0/0) :: Double
+NaN
+ghci> (-1) ** (1/0) :: Double
+1.0
+ghci> 1 ** (0/0) :: Double
+1.0
+ghci> properFraction (-0.0) :: (Integer, Double)
+(0,0.0)
+ghci> properFraction (-3.0) :: (Integer, Double)
+(-3,0.0)
+ghci> properFraction (-2.5) :: (Integer, Double)
+(-2,-0.5)
+ghci> (-1/0) ** 0.5 :: Double
+Infinity
+ghci> (-1/0) ** (-0.5) :: Double
+0.0
+ghci> (-1/0) ** 3 :: Double
+-Infinity
+ghci> (-0.0) ** 0.5 :: Double
+0.0
+ghci> (-0.0) ** (-0.5) :: Double
+Infinity
+
+## 49. Derived instances use the declared fixity (found by fuzzing data types)
+
+ghci> :{
+ghci| data T = Int :| String | Double :<> T | E deriving (Show, Read, Eq)
+ghci| infixr 5 :|
+ghci| infixl 2 :<>
+ghci| :}
+ghci> (-3) :| "x"
+-3 :| "x"
+ghci> (-2.5) :<> ((-1) :| "")
+-2.5 :<> -1 :| ""
+ghci> Just ((-3) :| "x")
+Just (-3 :| "x")
+ghci> showsPrec 6 ((-3) :| "x") ""
+"(-3 :| \"x\")"
+ghci> showsPrec 5 ((-3) :| "x") ""
+"-3 :| \"x\""
+ghci> read "-3 :| \"x\"" :: T
+-3 :| "x"
+ghci> read " ( -2.5 :<> E ) " :: T
+-2.5 :<> E
+ghci> :{
+ghci| data R = R { rx :: Int } | Q deriving Show
+ghci| :}
+ghci> (Q :: R) { rx = 1 }
+*** Exception: <interactive>:25:1-19: Non-exhaustive patterns in case
+ghci> rx Q
+*** Exception: No match in record selector rx
+

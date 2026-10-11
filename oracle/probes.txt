@@ -1535,3 +1535,35 @@ sqrt (negate (sum [])) :: Double
 isNegativeZero (sqrt (-0.0 :: Double))
 log (-0.0) :: Double
 sqrt 0 :: Double
+
+## 48. Found by fuzzing numbers at the edges
+(-2.0633e-261) ** (0/0) :: Double
+(-1) ** (1/0) :: Double
+1 ** (0/0) :: Double
+properFraction (-0.0) :: (Integer, Double)
+properFraction (-3.0) :: (Integer, Double)
+properFraction (-2.5) :: (Integer, Double)
+(-1/0) ** 0.5 :: Double
+(-1/0) ** (-0.5) :: Double
+(-1/0) ** 3 :: Double
+(-0.0) ** 0.5 :: Double
+(-0.0) ** (-0.5) :: Double
+
+## 49. Derived instances use the declared fixity (found by fuzzing data types)
+:{
+data T = Int :| String | Double :<> T | E deriving (Show, Read, Eq)
+infixr 5 :|
+infixl 2 :<>
+:}
+(-3) :| "x"
+(-2.5) :<> ((-1) :| "")
+Just ((-3) :| "x")
+showsPrec 6 ((-3) :| "x") ""
+showsPrec 5 ((-3) :| "x") ""
+read "-3 :| \"x\"" :: T
+read " ( -2.5 :<> E ) " :: T
+:{
+data R = R { rx :: Int } | Q deriving Show
+:}
+(Q :: R) { rx = 1 }
+rx Q

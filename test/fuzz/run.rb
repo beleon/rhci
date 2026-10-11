@@ -31,6 +31,9 @@ require_relative '../oracle'
 require_relative 'gen'
 require_relative 'session_gen'
 require_relative 'default_gen'
+require_relative 'num_gen'
+require_relative 'data_gen'
+require_relative 'read_gen'
 
 module Fuzz
   ROOT = File.expand_path('../..', __dir__)
@@ -46,7 +49,20 @@ module Fuzz
 
   SESSION_LENGTH = 40
 
-  def probes(seed, count, bottoms, sessions)
+  # Modes whose generator makes whole sections, imports and declarations
+  # included: flag => [cache prefix, generator class].
+  SECTION_MODES = { '--numbers' => ['n', 'NumGen'], '--datatypes' => ['t', 'DataGen'],
+                    '--reads' => ['e', 'ReadGen'] }.freeze
+
+  def section_mode(argv)
+    argv.find { |a| SECTION_MODES.key?(a) }
+  end
+
+  def probes(seed, count, bottoms, sessions, mode = nil)
+    if mode
+      gen = Fuzz.const_get(SECTION_MODES[mode][1]).new(seed)
+      return Array.new((count + PER_SECTION - 1) / PER_SECTION) { gen.section(PER_SECTION) }
+    end
     if sessions
       gen = SessionGen.new(seed, bottoms: bottoms)
       return Array.new((count + SESSION_LENGTH - 1) / SESSION_LENGTH) { gen.session(SESSION_LENGTH) }
@@ -92,16 +108,21 @@ module Fuzz
     File.write(path, out.join("\n"))
   end
 
-  def golden(seed, count, bottoms, sessions = false, defaulting: false)
+  def golden(seed, count, bottoms, sessions = false, defaulting: false, mode: nil)
     FileUtils.mkdir_p(WORK)
-    base = File.join(WORK, "#{sessions ? 'r' : defaulting ? 'd' : 's'}#{seed}-n#{count}#{bottoms.positive? ? "-b#{bottoms}" : ''}")
+    prefix = if mode then SECTION_MODES[mode][0]
+             elsif sessions then 'r'
+             elsif defaulting then 'd'
+             else 's'
+             end
+    base = File.join(WORK, "#{prefix}#{seed}-n#{count}#{bottoms.positive? ? "-b#{bottoms}" : ''}")
     unless File.exist?("#{base}.golden")
       files = []
       if defaulting
         write_defaulting(seed, count, "#{base}.probes", "#{base}-files")
         files = ['--files', "#{base}-files"]
       else
-        write_probes("#{base}.probes", probes(seed, count, bottoms, sessions), sessions)
+        write_probes("#{base}.probes", probes(seed, count, bottoms, sessions, mode), sessions || mode)
       end
       out, err, st = Open3.capture3('uv', 'run', '--no-project', 'python',
                                     File.join(ROOT, 'oracle', 'run_oracle.py'), "#{base}.probes", *files)
@@ -274,7 +295,8 @@ module Fuzz
     bottoms = (argv.include?('--bottoms') ? argv[argv.index('--bottoms') + 1] : 0).to_f
     sessions = argv.include?('--sessions')
     defaulting = argv.include?('--defaulting')
-    probes = golden(seed, count, bottoms, sessions, defaulting: defaulting)
+    mode = section_mode(argv)
+    probes = golden(seed, count, bottoms, sessions, defaulting: defaulting, mode: mode)
     cwd = defaulting ? File.join(WORK, "d#{seed}-n#{count}-files") : nil
     sections = probes.map(&:section).uniq
     mruby = argv.include?('--mruby') ? mruby_results(probes, cwd) : nil

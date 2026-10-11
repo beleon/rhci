@@ -92,3 +92,8 @@ lookup 1 [(1, 2)]
 :load PreHideOwn
 twice 3
 lookup 5
+
+## L13. Derived Show in a module uses its fixity declarations
+:load Fix
+v
+w

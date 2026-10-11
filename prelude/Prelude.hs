@@ -692,9 +692,11 @@ instance Floating Double where
   atanh = rhci_doubleAtanh
 
 instance RealFrac Double where
-  -- GHC's goes through decodeFloat: Infinity is (2^1024, 0.0).
+  -- GHC's goes through decodeFloat: Infinity is (2^1024, 0.0), and the
+  -- fraction (encodeFloat r e) is never -0.0.
   properFraction x = case rhci_doubleTruncate x of
-    n -> (fromInteger n, if isInfinite x then 0 else rhci_doubleSub x (rhci_integerToDouble n))
+    n -> (fromInteger n, if isInfinite x then 0 else nonNegZero (rhci_doubleSub x (rhci_integerToDouble n)))
+    where nonNegZero f = if f == 0 then 0 else f
   truncate x = fromInteger (rhci_doubleTruncate x)
   round x = fromInteger (rhci_doubleRound x)
   ceiling x = fromInteger (rhci_doubleCeiling x)

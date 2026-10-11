@@ -213,7 +213,12 @@ module SnapshotEncoder
     when nil then 'n'
     when true then 'T'
     when false then 'F'
-    when Integer then "i#{o}"
+    when Integer
+      # mruby 4.0.0's String#to_i reads "-9223372036854775808" followed by
+      # more digits as INT64_MIN; the decoder uses to_i.
+      raise "snapshot: #{o} would decode wrongly on mruby" if o.to_s.start_with?('-9223372036854775808') && o < -(2**63)
+
+      "i#{o}"
     when Float then "f#{Rhci::Num.double_to_bits(o).to_s(16)}"
     when Symbol then "y#{o}"
     when String then "s#{escape(o)}"

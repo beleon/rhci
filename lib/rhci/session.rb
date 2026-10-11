@@ -216,7 +216,7 @@ module Rhci
       when AST::ReplExpr then eval_expression(node.expr, layer)
       when AST::ReplBind then eval_bind(node, layer)
       else
-        rtop = Renamer.new(@names, fixity: fixity_lookup).repl(node)
+        rtop = Renamer.new(@names, fixity: fixity_lookup(layer)).repl(node)
         return prompt_import(rtop.import) if rtop.import
 
         tc = TypeChecker.new(@names, @tenv)
@@ -235,7 +235,7 @@ module Rhci
       @it_count = (@it_count || 0) + 1
       name_it = "rhci_it#{@it_count}"
       it_decl = AST::FunEq.new(expr.tok, name_it, [], AST::Rhs.new(expr.tok, expr, nil, nil))
-      rtop = Renamer.new(@names, fixity: fixity_lookup, internal: internal)
+      rtop = Renamer.new(@names, fixity: fixity_lookup(layer), internal: internal)
                     .repl(AST::ReplDecls.new(expr.tok, [it_decl]))
       tc = TypeChecker.new(@names, @tenv)
       tc.top(rtop)
@@ -321,7 +321,7 @@ module Rhci
 
     # pat <- action
     def eval_bind(node, layer)
-      rtop = Renamer.new(@names, fixity: fixity_lookup).repl(node)
+      rtop = Renamer.new(@names, fixity: fixity_lookup(layer)).repl(node)
       tc = TypeChecker.new(@names, @tenv)
       tc.top(rtop)
       defs, core = Desugar.new(@names).top(rtop)
@@ -554,8 +554,9 @@ module Rhci
         fixities.merge!(mod[:fixities])
       end
       m = Frontend.resolve_module(raw, fixities, path)
-      renamer = Renamer.new(@names, path, fixity: fixity_lookup, imported: imported, module_mode: true,
-                                          scope: scope, qualified: qualified)
+      layer = FixityResolver.new(fixities, path).group_layer(m.decls)
+      renamer = Renamer.new(@names, path, fixity: fixity_lookup(fixities.merge(layer), prompt: false), imported: imported,
+                                          module_mode: true, scope: scope, qualified: qualified)
       renamer.imported_modules = local
       rtop = renamer.module_decls(m)
       tc = TypeChecker.new(@names, @tenv, path, mode: :file)
@@ -564,7 +565,6 @@ module Rhci
       install(defs)
       tc.pending.each { |n, sc| @tenv[n] = sc if n.global || n.kind != :var }
       tc.new_instances.each { |(klass, key), inst| add_instance(klass, key, inst) }
-      layer = FixityResolver.new(fixities, path).group_layer(m.decls)
       mod = { name: name, rtop: rtop, imported: imported, scope: scope, fixities: fixities.merge(layer) }
       mod[:exports] = module_exports(m, rtop, imported, path)
       @modules[name] = mod
@@ -800,9 +800,12 @@ module Rhci
       [@names, @tenv, @globals, @unfoldings, @full_cores, @specs]
     end
 
-    def fixity_lookup
-      table = @fixities
-      ->(op) { table[op] || FixityResolver::BASE[op] || FixityResolver::DEFAULT }
+    # Fixities for deriving Show and Read: own (the input's or module's own
+    # declarations, which are committed only after it compiles) first, then
+    # the prompt's (prompt: false for a module, which has its own scope).
+    def fixity_lookup(own = nil, prompt: true)
+      table = prompt ? @fixities : {}
+      ->(op) { (own && own[op]) || table[op] || FixityResolver::BASE[op] || FixityResolver::DEFAULT }
     end
 
     # ---- the Prelude -----------------------------------------------------------
@@ -847,7 +850,9 @@ module Rhci
       qualified = { 'Prelude' => [['Prelude', @names.module_table('Prelude')]] }
       raw.imports.each { |imp| base_import(imp, scope, imported, qualified, fixities, label) }
       m = Frontend.resolve_module(raw, fixities, label)
-      renamer = Renamer.new(@names, label, fixity: fixity_lookup, imported: imported, module_mode: true,
+      layer = FixityResolver.new(fixities, label).group_layer(m.decls)
+      renamer = Renamer.new(@names, label, fixity: fixity_lookup(fixities.merge(layer), prompt: false), imported: imported,
+                                           module_mode: true,
                                            scope: scope, qualified: qualified, internal: true)
       rtop = renamer.module_decls(m)
       tc = TypeChecker.new(@names, @tenv, label, mode: :file)

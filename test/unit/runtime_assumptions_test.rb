@@ -69,6 +69,20 @@ RT.suite 'runtime assumptions' do
     RT.ok 3 < 3.5 && (2**70) > 1.5 && !(3 < 0.0 / 0.0) && (3 <=> 0.0 / 0.0).nil?, 'with Floats and NaN'
   end
 
+  RT.test 'bignum arithmetic with a fixnum operand (rhci-native fixes mruby 4.0.0)' do
+    a = -18_446_744_073_709_551_614
+    RT.eq [-18_446_744_073_709_551_623, -18_446_744_073_709_551_623, -18_446_744_073_709_551_623],
+          [a + -9, -9 + a, a - 9], 'a carry into a new limb keeps the sign'
+    RT.eq [-36_893_488_147_419_103_235, -9_223_372_036_854_775_809, 1_180_591_620_717_411_303_423],
+          [~36_893_488_147_419_103_234, ~(2**63), ~(-(2**70))], '~'
+    RT.eq [12, 12, -1_180_591_620_717_411_303_419], [-20_225_548_937_302_257_624_269_431_286_731_800_148 & 92,
+                                                      92 & -20_225_548_937_302_257_624_269_431_286_731_800_148,
+                                                      -(2**70) | 5], '& and | with a negative bignum'
+    RT.eq [-147_573_952_589_676_412_929, -4_336_808_689_942_017_737, -1, -147_573_952_589_676_412_929],
+          [(-(2**70) - 1) >> 3, -9_999_999_999_999_999_999_999_999_999_999_999_999 >> 61, -(2**70) >> 1000,
+           (-(2**70) - 1) << -3], '>> of a negative bignum floors'
+  end
+
   RT.test 'String#rstrip on non-ASCII is broken on mruby; Rhci::Text is not' do
     RT.eq Rhci::Shim::MRUBY, "é \n".rstrip != 'é', 'documents the quirk' # lint:ok (the quirk itself)
     RT.eq 'λ é', Rhci::Text.strip("  λ é \t\n")
