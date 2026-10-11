@@ -3206,3 +3206,57 @@ False
 ghci> max (negate (2 ^ 63)) (-9223372036854775807 - 1 :: Integer)
 -9223372036854775808
 
+
+## 45. `it` after a failing statement (found by session fuzzing)
+
+ghci> 1 + 1
+2
+ghci> head []
+*** Exception: Prelude.head: empty list
+CallStack (from HasCallStack):
+  error, called at libraries/base/GHC/List.hs:1644:3 in base:GHC.List
+  errorEmptyList, called at libraries/base/GHC/List.hs:87:11 in base:GHC.List
+  badHead, called at libraries/base/GHC/List.hs:83:28 in base:GHC.List
+  head, called at <interactive>:3:1 in interactive:Ghci2
+ghci> it
+2
+ghci> [1, 2, undefined]
+[1,2,*** Exception: Prelude.undefined
+CallStack (from HasCallStack):
+  undefined, called at <interactive>:7:8 in interactive:Ghci3
+ghci> it
+2
+ghci> "ok"
+"ok"
+ghci> it
+"ok"
+ghci> length it
+2
+ghci> error "boom" :: Int
+*** Exception: boom
+CallStack (from HasCallStack):
+  error, called at <interactive>:17:1 in interactive:Ghci7
+ghci> it
+2
+ghci> True && undefined
+*** Exception: Prelude.undefined
+CallStack (from HasCallStack):
+  undefined, called at <interactive>:21:9 in interactive:Ghci8
+ghci> it
+2
+ghci> x <- return (it, it)
+ghci> x
+(2,2)
+ghci> 'c' + 1
+
+<interactive>:29:5: error: [GHC-39999]
+    • No instance for ‘Num Char’ arising from a use of ‘+’
+    • In the expression: 'c' + 1
+      In an equation for ‘it’: it = 'c' + 1
+ghci> it
+(2,2)
+ghci> print (it, 1)
+((2,2),1)
+ghci> it
+()
+

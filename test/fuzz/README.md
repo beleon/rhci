@@ -54,3 +54,37 @@ rhci as `:load Main` then `main` with the same stdin -- in process, or with
 They must print the same, raise the same exception after it, and reject
 the same programs. 1 650 programs agree (including the mruby binary on
 300 and a run with tagged bottoms); none has disagreed.
+
+## On mruby
+
+`--mruby` runs either fuzzer through the mruby build: expressions and
+sessions in the mruby test interpreter (the binary's bundle plus a small
+runner, `build/fuzz/mruby_runner.rb`), programs through the binary itself.
+The 31 000 cached expressions, the sessions and the programs agree there
+too.
+
+## Sessions
+
+`ruby test/fuzz/run.rb --sessions --seed N [--count N]` (`session_gen.rb`)
+generates GHCi sessions: definitions and redefinitions (a definition is
+recursive, so its own name in the right-hand side is the new one; `x <-
+return e` is not), `let`, functions on one line or in `:{ :}` blocks,
+`pat <- return e`, expressions and `it`, IO statements (`print`,
+`return e`, `mapM_`), and `:t`; each section is one session. 6 000 inputs
+agree. Found: GHCi changes `it` only when a statement completes (an
+exception while running or printing leaves the previous one), and binds
+`()` after `print`.
+
+## Programs, extended
+
+Half the programs are three modules (`Types` with or without an export
+list; `Lib` exporting a subset; `Main` importing it qualified, by a list,
+hiding some, or whole, and reusing names it cannot see), and functions
+now also include a hand-rolled State monad (user Functor, Applicative and
+Monad instances, `forM_`, `when`), Maybe and list `do` blocks with
+`guard`, a Foldable container, class-polymorphic functions called at
+several types, and record updates (`TD {} -> t { tdx = ... }`). 2 100
+programs agree. Found: in a module, a top-level definition and an import
+of the same name are ambiguous where used (rhci let the definition shadow
+the import, which only the prompt does).
+

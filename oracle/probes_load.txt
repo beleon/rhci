@@ -66,3 +66,11 @@ built
 sorted
 check
 :t insert
+
+## L11. A module's own definitions do not shadow its imports
+:load AmbUse
+:load AmbUnused
+h
+:load AmbQual
+h
+:load AmbType

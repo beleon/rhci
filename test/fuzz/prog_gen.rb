@@ -111,17 +111,14 @@ module Fuzz
                'import qualified Data.Set as S', 'import Text.Printf', 'import Data.IORef', 'import Data.Bits',
                'import Data.Ratio', 'import Control.Monad', 'import System.IO'].freeze
 
-    # [module source, stdin]
+    # [{file name => source}, stdin]: one module, or (half the time) three.
     def program
       @env = []
       @funcs = []
       @cons = (%w[TC TA] + CONS.keys.reject { |c| %w[TC TA].include?(c) }.select { chance(0.5) }).uniq
-      out = ['module Main where', ''] + IMPORTS + ['']
-      out.concat(Gen::DECLS.reject { |l| l == ':{' || l == ':}' })
-      out << ''
-      out << "data T = #{@cons.map { |c| CONS[c][0] }.join(' | ')} deriving (Show, Eq, Ord)"
-      out << ''
-      out.concat(measure_class)
+      return multi_module_program if chance(0.5)
+
+      out = ['module Main where', ''] + IMPORTS + [''] + type_decls
       @r.rand(6..10).times do |i|
         out << ''
         out.concat(function("f#{i}"))
@@ -129,7 +126,103 @@ module Fuzz
       out << ''
       body, input = main_body
       out.concat(body)
-      [out.join("\n") + "\n", input]
+      [{ 'Main.hs' => out.join("\n") + "\n" }, input]
+    end
+
+    def type_decls
+      Gen::DECLS.reject { |l| l == ':{' || l == ':}' } +
+        ['', "data T = #{@cons.map { |c| CONS[c][0] }.join(' | ')} deriving (Show, Eq, Ord)", ''] + measure_class +
+        [''] + MONAD_DECLS
+    end
+
+    # A hand-rolled State monad and a Foldable container: user instances of
+    # Functor, Applicative, Monad and Foldable.
+    MONAD_DECLS = [
+      'newtype St s a = St { runSt :: s -> (a, s) }',
+      '',
+      'instance Functor (St s) where',
+      "  fmap f (St g) = St (\\s -> let (a, s') = g s in (f a, s'))",
+      '',
+      'instance Applicative (St s) where',
+      '  pure a = St (\\s -> (a, s))',
+      '  St f <*> St g = St (\\s -> let { (h, s1) = f s; (a, s2) = g s1 } in (h a, s2))',
+      '',
+      'instance Monad (St s) where',
+      '  St g >>= k = St (\\s -> let (a, s1) = g s in runSt (k a) s1)',
+      '',
+      'getSt :: St s s',
+      'getSt = St (\\s -> (s, s))',
+      '',
+      'putSt :: s -> St s ()',
+      'putSt s = St (\\_ -> ((), s))',
+      '',
+      'modifySt :: (s -> s) -> St s ()',
+      'modifySt f = St (\\s -> ((), f s))',
+      '',
+      'data Bag a = NoBag | One a | Both a a deriving (Show, Eq)',
+      '',
+      'instance Functor Bag where',
+      '  fmap _ NoBag = NoBag',
+      '  fmap f (One a) = One (f a)',
+      '  fmap f (Both a b) = Both (f a) (f b)',
+      '',
+      'instance Foldable Bag where',
+      '  foldr _ z NoBag = z',
+      '  foldr f z (One a) = f a z',
+      '  foldr f z (Both a b) = f a (f b z)'
+    ].freeze
+
+    TYPE_EXPORTS = 'T(..), Measure(..), Shape(..), R(..), V(..), Describe(..), Rank(..), Box(..), St(..), ' \
+                   'getSt, putSt, modifySt, Bag(..)'
+
+    # Types (the declarations), Lib (functions, some exported) and Main (the
+    # rest, and main), importing Lib qualified, by a list, hiding some, or
+    # whole; Main may reuse the name of a Lib function it cannot see.
+    def multi_module_program
+      header = chance(0.5) ? 'module Types where' : "module Types (#{TYPE_EXPORTS}) where"
+      types = [header, ''] + type_decls
+      first = @funcs.length
+      lib = []
+      @r.rand(3..6).times do |i|
+        lib << ''
+        lib.concat(function("f#{i}"))
+      end
+      # Every function Lib defines (a mutual pair defines two).
+      lib_names = @funcs[first..-1].map { |f| f[:name] }.uniq
+      exported = lib_names.select { chance(0.7) }
+      exported = [lib_names.last] if exported.empty?
+      lib_src = ["module Lib (#{exported.join(', ')}) where", '', 'import Types'] + IMPORTS + lib
+      style = pick(%i[qualified list hiding whole])
+      visible, import_line = case style
+                             when :qualified then [exported.to_h { |n| [n, "L.#{n}"] }, 'import qualified Lib as L']
+                             when :list
+                               some = exported.select { chance(0.6) }
+                               some = [exported.first] if some.empty?
+                               [some.to_h { |n| [n, n] }, "import Lib (#{some.join(', ')})"]
+                             when :hiding
+                               hidden = exported.select { chance(0.3) }
+                               [(exported - hidden).to_h { |n| [n, n] },
+                                hidden.empty? ? 'import Lib' : "import Lib hiding (#{hidden.join(', ')})"]
+                             else [exported.to_h { |n| [n, n] }, 'import Lib']
+                             end
+      @funcs = @funcs.filter_map do |f|
+        next f unless lib_names.include?(f[:name])
+
+        visible.key?(f[:name]) ? f.merge(name: visible[f[:name]]) : nil
+      end
+      # Names Main may define again: Lib's that are not in scope unqualified.
+      free = lib_names.reject { |n| visible[n] == n }
+      main = ['module Main where', '', 'import Types', import_line] + IMPORTS
+      @r.rand(2..4).times do |i|
+        name = !free.empty? && chance(0.4) ? free.delete(pick(free)) : "m#{i}"
+        main << ''
+        main.concat(function(name))
+      end
+      main << ''
+      body, input = main_body
+      main.concat(body)
+      [{ 'Types.hs' => types.join("\n") + "\n", 'Lib.hs' => lib_src.join("\n") + "\n",
+         'Main.hs' => main.join("\n") + "\n" }, input]
     end
 
     def measure_class
@@ -163,7 +256,10 @@ module Fuzz
     # ---- functions --------------------------------------------------------------
 
     def function(name)
-      kind = pick(%i[guards equations equations recursive case lambda mutual local_poly])
+      kind = pick(%i[guards equations equations recursive case lambda mutual local_poly state maybe_do list_do bag
+                     poly record])
+      return send_template(kind, name) if %i[state maybe_do list_do bag poly record].include?(kind)
+
       args = Array.new(@r.rand(1..2)) { pick(ARG_TYPES) }
       ret = pick(RET_TYPES)
       lines = case kind
@@ -178,6 +274,92 @@ module Fuzz
       sig = lines.shift
       @funcs << sig[:info]
       (chance(0.15) && kind != :lambda ? [] : ["#{name} :: #{sig[:text]}"]) + lines
+    end
+
+    # The templates for monads, user Functor/Foldable instances, class-
+    # polymorphic functions and record updates; each registers the function
+    # at ordinary types, so expressions can call it.
+    def send_template(kind, name)
+      case kind
+      when :state then state_fn(name)
+      when :maybe_do then maybe_do_fn(name)
+      when :list_do then list_do_fn(name)
+      when :bag then bag_fn(name)
+      when :poly then poly_fn(name)
+      else @cons.include?('TD') ? record_fn(name) : bag_fn(name)
+      end
+    end
+
+    def state_fn(name)
+      lines = ["#{name} :: [Int] -> Int", "#{name} xs = fst (runSt (go xs) #{@r.rand(0..9)})", '  where']
+      cond = with_env([['x', INT]]) { expr(BOOL, 2) }
+      step = with_env([['x', INT]]) { expr(INT, 2) }
+      put = with_env([['s', INT]]) { expr(INT, 2) }
+      ret = with_env([['s', INT]]) { expr(INT, 2) }
+      lines.concat(['    go :: [Int] -> St Int Int', '    go ys = do',
+                    "      forM_ ys (\\x -> when (#{cond}) (modifySt (+ (#{step}))))",
+                    '      s <- getSt', "      putSt (#{put})", "      fmap (+ 1) (return (#{ret}))"])
+      @funcs << { name: name, args: [[:list, INT]], ret: INT }
+      lines
+    end
+
+    def maybe_do_fn(name)
+      lines = ["#{name} :: Int -> Maybe Int", "#{name} n = do"]
+      with_env([['n', INT]]) do
+        lines << "  a <- #{sub([:maybe, INT], 2)}"
+        with_env([['a', INT]]) do
+          lines << "  guard (#{expr(BOOL, 2)})"
+          lines << "  b <- #{chance(0.5) ? "Just (#{expr(INT, 2)})" : 'Nothing'}"
+          with_env([['b', INT]]) { lines << "  return (#{expr(INT, 2)})" }
+        end
+      end
+      @funcs << { name: name, args: [INT], ret: [:maybe, INT] }
+      lines
+    end
+
+    def list_do_fn(name)
+      lines = ["#{name} :: [Int] -> [Int]", "#{name} xs = do", '  x <- xs']
+      with_env([['xs', [:list, INT]], ['x', INT]]) do
+        lines << "  y <- [x, x + 1, #{expr(INT, 1)}]"
+        with_env([['y', INT]]) do
+          lines << "  guard (#{expr(BOOL, 2)})"
+          lines << "  return (#{expr(INT, 2)})"
+        end
+      end
+      @funcs << { name: name, args: [[:list, INT]], ret: [:list, INT] }
+      lines
+    end
+
+    def bag_fn(name)
+      lines = ["#{name} :: [Int] -> Int", "#{name} xs = sum b' + length b' + foldr (\\v acc -> v - acc) 0 b'",
+               '  where', '    b = case xs of { [] -> NoBag; [a] -> One a; (a : c : _) -> Both a c }']
+      lines << "    b' = fmap (#{with_env([['v', INT]]) { "\\v -> #{expr(INT, 2)}" }}) b"
+      @funcs << { name: name, args: [[:list, INT]], ret: INT }
+      lines
+    end
+
+    # Class-polymorphic, called at several types.
+    def poly_fn(name)
+      if chance(0.5)
+        lines = ["#{name} :: (Measure a, Show a) => [a] -> String",
+                 "#{name} vs = concatMap (\\v -> show v ++ mname v) vs ++ show (measure vs)"]
+        [[:list, INT], [:list, BOOL]].each { |t| @funcs << { name: name, args: [t], ret: STRING } }
+      else
+        lines = ["#{name} :: Ord a => a -> a -> [a]", "#{name} p q = if p < q then [p, q, max p q] else [min p q]"]
+        @funcs << { name: name, args: [INT, INT], ret: [:list, INT] }
+        @funcs << { name: name, args: [CHAR, CHAR], ret: STRING }
+      end
+      lines
+    end
+
+    def record_fn(name)
+      lines = ["#{name} :: T -> T", "#{name} t = case t of"]
+      with_env([['t', USERT]]) do
+        lines << "  TD {} -> t { tdx = tdx t + #{sub(INT, 2)}, tdy = fmap (+ 1) (tdy t) }"
+        lines << "  _ -> #{chance(0.5) ? 't' : 'TD { tdx = 0, tdy = Nothing }'}"
+      end
+      @funcs << { name: name, args: [USERT], ret: USERT }
+      lines
     end
 
     def signature(name, args, ret)

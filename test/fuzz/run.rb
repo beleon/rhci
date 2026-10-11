@@ -5,7 +5,14 @@
 # oracle's rules -- values exactly, errors by kind, and the output printed
 # before an exception exactly.
 #
-#   ruby test/fuzz/run.rb [--seed N] [--count N] [--bottoms P]
+#   ruby test/fuzz/run.rb [--seed N] [--count N] [--bottoms P] [--mruby] [--sessions]
+#
+# --sessions generates GHCi sessions instead (session_gen.rb): COUNT inputs
+# in sessions of SESSION_LENGTH, each section one session.
+#
+# --mruby evaluates in the mruby test interpreter (build/mruby/bin/mruby,
+# with the C loop and rhci-native, as the binary) instead of in-process
+# CRuby: the binary's bundle plus a small runner, all sections in one run.
 #
 # --bottoms P makes a leaf a tagged error with probability P; when both
 # sides raise, the same tag must come out (the same subexpression was
@@ -17,6 +24,7 @@ require 'open3'
 require_relative '../../lib/rhci'
 require_relative '../oracle'
 require_relative 'gen'
+require_relative 'session_gen'
 
 module Fuzz
   ROOT = File.expand_path('../..', __dir__)
@@ -30,16 +38,23 @@ module Fuzz
 
   module_function
 
-  def probes(seed, count, bottoms)
+  SESSION_LENGTH = 40
+
+  def probes(seed, count, bottoms, sessions)
+    if sessions
+      gen = SessionGen.new(seed, bottoms: bottoms)
+      return Array.new((count + SESSION_LENGTH - 1) / SESSION_LENGTH) { gen.session(SESSION_LENGTH) }
+    end
     gen = Gen.new(seed, bottoms: bottoms)
-    Array.new(count) { gen.probe }
+    Array.new(count) { gen.probe }.each_slice(PER_SECTION).to_a
   end
 
-  def write_probes(path, list)
+  def write_probes(path, list, sessions = false)
     out = []
-    list.each_slice(PER_SECTION).with_index do |chunk, i|
+    list.each_with_index do |chunk, i|
       out << "## fuzz #{i + 1}" << ''
-      out.concat(IMPORTS)
+      # Sessions use what programs use (Data.Bits, Data.Ratio, ...).
+      out.concat(sessions ? ProgGen::IMPORTS : IMPORTS)
       out.concat(Gen::DECLS)
       out.concat(chunk)
       out << ''
@@ -47,11 +62,11 @@ module Fuzz
     File.write(path, out.join("\n"))
   end
 
-  def golden(seed, count, bottoms)
+  def golden(seed, count, bottoms, sessions = false)
     FileUtils.mkdir_p(WORK)
-    base = File.join(WORK, "s#{seed}-n#{count}#{bottoms.positive? ? "-b#{bottoms}" : ''}")
+    base = File.join(WORK, "#{sessions ? 'r' : 's'}#{seed}-n#{count}#{bottoms.positive? ? "-b#{bottoms}" : ''}")
     unless File.exist?("#{base}.golden")
-      write_probes("#{base}.probes", probes(seed, count, bottoms))
+      write_probes("#{base}.probes", probes(seed, count, bottoms, sessions), sessions)
       out, err, st = Open3.capture3('uv', 'run', '--no-project', 'python',
                                     File.join(ROOT, 'oracle', 'run_oracle.py'), "#{base}.probes")
       raise "oracle failed: #{err}" unless st.success?
@@ -76,25 +91,105 @@ module Fuzz
     def flush; end
   end
 
-  # [kind, detail] for each disagreement in one section.
-  def compare_section(probes)
+  Result = Struct.new(:status, :message) do
+    def ok?
+      status == :ok
+    end
+  end
+
+  def input_of(p)
+    p.input.start_with?(":{\n") ? p.input.split("\n")[1..-2].join("\n") : p.input
+  end
+
+  # [[Result, output], ...] for one section, in a CRuby session.
+  def cruby_results(probes)
     out = Sink.new
     s = Rhci::Session.new(stdout: out, stderr: out, limits: { steps: 5_000_000 })
+    probes.map do |p|
+      before = out.text.length
+      r = s.eval(input_of(p))
+      [Result.new(r.status, r.message), out.text[before..-1]]
+    rescue StandardError => e
+      [Result.new(:internal, "#{e.class}: #{e.message.lines.first}"), '']
+    end
+  end
+
+  MRUBY_RUNNER = <<~'RUBY'
+    class FuzzSink
+      def initialize
+        @t = ''.dup
+      end
+
+      def write(s)
+        @t << s
+        s.length
+      end
+
+      def flush; end
+
+      def take
+        t = @t
+        @t = ''.dup
+        t
+      end
+    end
+    text = File.open(ARGV[0]) { |f| f.read }
+    text.split("\x1c").each do |sec|
+      out = FuzzSink.new
+      s = Rhci::Session.new(stdout: out, stderr: out, limits: { steps: 5_000_000 })
+      sec.split("\x1d").each do |input|
+        begin
+          r = s.eval(input)
+          $stdout.write("#{r.status}\x1e#{r.message}\x1e#{out.take}\x1f")
+        rescue StandardError => e
+          $stdout.write("internal\x1e#{e.class}: #{e.message}\x1e\x1f")
+        end
+      end
+    end
+  RUBY
+
+  # Section title => [[Result, output], ...], from one mruby run.
+  def mruby_results(probes)
+    sections = probes.map(&:section).uniq
+    FileUtils.mkdir_p(WORK)
+    runner = File.join(WORK, 'mruby_runner.rb')
+    File.write(runner, File.read(File.join(ROOT, 'mrbgems', 'rhci', 'mrblib', 'rhci.rb')) + MRUBY_RUNNER)
+    inputs = File.join(WORK, 'mruby_inputs.txt')
+    File.write(inputs, sections.map { |s| probes.select { |p| p.section == s }.map { |p| input_of(p) }.join("\x1d") }.join("\x1c"))
+    out, err, st = Open3.capture3(File.join(ROOT, 'build', 'mruby', 'bin', 'mruby'), runner, inputs)
+    raise "mruby runner failed: #{err[0, 500]}" unless st.success?
+
+    records = out.split("\x1f", -1)
+    results = {}
+    sections.each do |s|
+      results[s] = probes.select { |p| p.section == s }.map do
+        status, message, got = records.shift.to_s.split("\x1e", -1)
+        [Result.new(status.to_s.to_sym, message.to_s.empty? ? nil : message), got.to_s]
+      end
+    end
+    results
+  end
+
+  # [kind, detail] for each disagreement in one section.
+  def compare_section(probes, results, sessions: false)
     problems = []
     imprecise = []
     stats = Hash.new(0)
-    probes.each do |p|
-      before = out.text.length
-      input = p.input.start_with?(":{\n") ? p.input.split("\n")[1..-2].join("\n") : p.input
-      r = s.eval(input)
-      got = out.text[before..-1]
+    probes.each_with_index do |p, i|
+      r, got = results[i]
+      if r.status == :internal
+        problems << "#{p.input}\n    rhci internal error: #{r.message}"
+        next
+      end
       if p.input.start_with?('import ', 'data ', 'infixl ', 'instance ', ':{')
-        problems << "#{p.input}\n    rhci rejected a declaration: #{r.message}" unless r.ok?
+        if !r.ok? && Oracle.outcome(p.text) == :ok
+          problems << "#{p.input}\n    rhci rejected a declaration GHCi accepts: #{r.message}"
+        end
         next stats[:import] += 1
       end
       # Every expression prints something; no answer means GHCi's session
       # ended (its two-minute limit), so the rest of the section is unknown.
-      next stats[:ghci_lost] += 1 if Rhci::Text.strip(p.text).empty?
+      next stats[:ghci_lost] += 1 if !sessions && Rhci::Text.strip(p.text).empty?
       next stats[:unsupported] += 1 if r.status == :unsupported
       next stats[:limit] += 1 if r.status == :limit
 
@@ -135,13 +230,20 @@ module Fuzz
     seed = 1 if seed.zero?
     count = (argv.include?('--count') ? argv[argv.index('--count') + 1] : 1000).to_i
     bottoms = (argv.include?('--bottoms') ? argv[argv.index('--bottoms') + 1] : 0).to_f
-    probes = golden(seed, count, bottoms)
+    sessions = argv.include?('--sessions')
+    probes = golden(seed, count, bottoms, sessions)
     sections = probes.map(&:section).uniq
+    mruby = argv.include?('--mruby') ? mruby_results(probes) : nil
     total = Hash.new(0)
     all = []
     loose = []
     sections.each do |sec|
-      problems, stats, imprecise = compare_section(probes.select { |p| p.section == sec })
+      in_sec = probes.select { |p| p.section == sec }
+      # A session whose last input got no answer ended early (GHCi's time
+      # limit): nothing in it is known.
+      next total[:ghci_lost] += in_sec.length if sessions && Rhci::Text.strip(in_sec.last.text).empty?
+
+      problems, stats, imprecise = compare_section(in_sec, mruby ? mruby[sec] : cruby_results(in_sec), sessions: sessions)
       stats.each { |k, v| total[k] += v }
       all.concat(problems)
       loose.concat(imprecise)

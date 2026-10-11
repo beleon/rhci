@@ -483,7 +483,12 @@ module Rhci
       own = @top.values[str] || @imported[:values][str]
       base = @hidden.key?(str) ? nil : @env.values[str]
       if @module_mode && own
-        candidates = own.is_a?(Array) ? own.dup : [own]
+        # In a module a top-level definition does not shadow an import (the
+        # prompt's do): using the name is ambiguous.
+        candidates = []
+        [@top.values[str], @imported[:values][str]].each do |found|
+          (found.is_a?(Array) ? found : [found]).each { |n| candidates << n if n && !candidates.include?(n) }
+        end
         candidates << base if base && official?(BASE_VALUES[str], str) && !candidates.include?(base)
         return candidates[0] if candidates.length == 1
 
@@ -581,6 +586,10 @@ module Rhci
         return resolve_qualified(tok, :types, str[0, dot], str[(dot + 1)..-1])
       end
       n = @top.types[str] || @imported[:types][str]
+      imp = @imported[:types][str]
+      if @module_mode && @top.types[str] && imp && !imp.equal?(@top.types[str])
+        err(:compile, tok, "Ambiguous occurrence ‘#{str}’")
+      end
       if n.nil? && !@hidden.key?(str)
         base = @env.types[str]
         n = if !@module_mode && !@env.defined?("type:#{str}") && @env.import_types.key?(str)

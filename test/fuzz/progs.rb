@@ -33,8 +33,8 @@ module Fuzz
       names = Array.new(count) do |i|
         name = format('p%03d', i)
         FileUtils.mkdir_p(File.join(dir, name))
-        src, input = gen.program
-        File.write(File.join(dir, name, 'Main.hs'), src)
+        files, input = gen.program
+        files.each { |f, src| File.write(File.join(dir, name, f), src) }
         File.write(File.join(dir, name, 'input.txt'), input)
         name
       end

@@ -152,3 +152,37 @@ True
 ghci> :t insert
 insert :: Ord a => a -> MySet.Set a -> MySet.Set a
 
+
+## L11. A module's own definitions do not shadow its imports
+
+ghci> :load AmbUse
+
+AmbUse.hs:9:5: error:
+    Ambiguous occurrence ‘f’
+    It could refer to
+       either ‘AmbA.f’,
+              imported from ‘AmbA’ at AmbUse.hs:3:1-11
+              (and originally defined at AmbA.hs:4:1)
+           or ‘AmbUse.f’, defined at AmbUse.hs:6:1
+  |
+9 | h = f 3
+  |     ^
+ghci> :load AmbUnused
+ghci> h
+1
+ghci> :load AmbQual
+ghci> h
+(6,4)
+ghci> :load AmbType
+
+AmbType.hs:7:6: error:
+    Ambiguous occurrence ‘T’
+    It could refer to
+       either ‘AmbA.T’,
+              imported from ‘AmbA’ at AmbType.hs:3:1-11
+              (and originally defined at AmbA.hs:9:1-28)
+           or ‘AmbType.T’, defined at AmbType.hs:5:1
+  |
+7 | h :: T
+  |      ^
+

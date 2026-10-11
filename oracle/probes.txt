@@ -1471,3 +1471,23 @@ instance Describe a => Describe (Maybe a) where tag = maybe (-1) tag
 compare (negate (2 ^ 63) :: Integer) (-9223372036854775807 - 1)
 (negate (2 ^ 63) :: Integer) < (-9223372036854775807 - 1)
 max (negate (2 ^ 63)) (-9223372036854775807 - 1 :: Integer)
+
+## 45. `it` after a failing statement (found by session fuzzing)
+1 + 1
+head []
+it
+[1, 2, undefined]
+it
+"ok"
+it
+length it
+error "boom" :: Int
+it
+True && undefined
+it
+x <- return (it, it)
+x
+'c' + 1
+it
+print (it, 1)
+it

@@ -247,17 +247,35 @@ module Rhci
       ds = Desugar.new(@names)
       it_core = ds.expression(plan[:node])
       commit(rtop, tc, defs, layer)
+      # As in GHCi, `it` changes only if the statement completes: an
+      # exception while running or printing leaves the previous one.
+      prev_it = @names.values['it']
+      prev_refused = @names.refused['it']
       @names.values['it'] = it_name
       @names.refused.delete('it')
-      if plan[:io]
-        value = run_io_value(eval_core(it_core))
-        result_type = Types.spine(value_type)[1][0]
-        bind_it(value, result_type) unless unit_type?(result_type)
-        print_value(ds, plan[:show], value_cell(value), result_type, raw_strings) if plan[:show]
-      else
-        print_value(ds, plan[:show], it_core, value_type, raw_strings)
+      begin
+        if plan[:io]
+          value = run_io_value(eval_core(it_core))
+          result_type = Types.spine(value_type)[1][0]
+          bind_it(value, result_type) # () too: after `print x`, it is ()
+          print_value(ds, plan[:show], value_cell(value), result_type, raw_strings) if plan[:show]
+        else
+          print_value(ds, plan[:show], it_core, value_type, raw_strings)
+        end
+      rescue VM::HsException, VM::LimitExceeded => e
+        restore_it(prev_it, prev_refused)
+        raise e
       end
       Result.new(:ok)
+    end
+
+    def restore_it(name, refused)
+      if name
+        @names.values['it'] = name
+      else
+        @names.values.delete('it')
+      end
+      @names.refused['it'] = refused if refused
     end
 
     def check_command_mode(plan, t, arity_args, want)
