@@ -49,7 +49,7 @@ task test: %i[lint mruby] do
   abort 'tests failed' unless cruby && mruby
 end
 
-desc 'Startup budgets: prompt < 10 ms, rhci -c < 200 ms'
+desc 'Startup budgets: prompt < 10 ms, rhci -c < 200 ms (a desktop-class machine; run before committing startup changes)'
 task bench: :mruby do
   ruby 'tools/bench_startup.rb', RHCI
 end
@@ -71,7 +71,7 @@ task torture: %i[lint bundle] do
                                                       File.join(ROOT, 'build', 'test_bundle.rb'))
 end
 
-task default: %i[test bench]
+task default: %i[test]
 
 # The Cosmopolitan toolchain, pinned: a zip from cosmo.zip (about 1.4 GB
 # unpacked), fetched once into build/.

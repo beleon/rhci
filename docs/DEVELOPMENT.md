@@ -7,9 +7,9 @@ that shape the code. The design itself is in
 ## Commands
 
 ```
-rake            # lint, build mruby, tests on CRuby and mruby, startup benchmarks
+rake            # lint, build mruby, tests on CRuby and mruby
 rake test       # lint + both test runs (CRuby also runs e2e against both executables)
-rake bench      # prompt < 10 ms, `rhci -c` < 200 ms (build/rhci/bin/rhci)
+rake bench      # startup budgets: prompt < 10 ms, `rhci -c` < 200 ms (build/rhci/bin/rhci)
 rake mruby      # rebuild build/mruby/bin/mruby and build/rhci/bin/rhci
 rake compact    # build/rhci.rb: the compact CRuby build (one file, snapshot embedded)
 rake bench_runtime  # runtime benchmarks, CRuby and the mruby binary
@@ -47,6 +47,13 @@ makes all assets into `dist/`):
 Both binaries contain a libc; `THIRD_PARTY_NOTICES` carries its licence.
 Measured on 2026-10-11: prompt 3-4 ms on all three, `sum [1..1000000]`
 2.07 s glibc, 2.04 s musl, 1.86 s Cosmopolitan.
+
+`rake bench` is not part of the default task: its budgets are absolute
+times (about 3 ms and 25 ms here, so with wide margins), expected to hold
+on a desktop-class machine and to fail on a loaded CI runner or a slow
+laptop through no fault of the code. Run it before committing anything
+that touches startup: the snapshot, what the Prelude core contains,
+background loading, the CLI.
 
 ## Layout
 

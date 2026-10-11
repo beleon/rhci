@@ -98,7 +98,7 @@ and the compact build any CRuby from 2.7 to 3.4.
 ```bash
 rake mruby      # build/rhci/bin/rhci: the standalone binary
                 # build/rhci.rb: the compact CRuby build (also: rake compact)
-rake            # lint, build, the tests on CRuby and mruby, startup benchmarks
+rake            # lint, build, the tests on CRuby and mruby (rake bench: startup budgets)
 ```
 
 ### Install
