@@ -225,3 +225,22 @@ not in prefix position is an operator. A ground `^` of 4 to 2^127 grew
 rhci to 85 GB (now an Integer size limit), and the oracle's `:t`
 normaliser looped on GHCi's wrapped answers (fixed). Nothing else
 differs in 23 000 probes, on CRuby and mruby.
+
+## Failing patterns and kinds
+
+- `--fail` (`fail_gen.rb`): refutable patterns in `do` blocks in Maybe,
+  lists, IO and Either (no MonadFail: a type error), comprehensions,
+  lazy patterns, explicit `fail`/`ioError`/`userError`, failures after
+  output, inside `mapM` and `sequence`. Found: no `Show`/`Eq IOError`;
+  GHC 9.6 writes `'do' block`; a lazy pattern's failure is "Non-exhaustive
+  patterns in Just x", the pattern printed with its source parentheses
+  (oracle section 53).
+- `--kinds` (`kind_gen.rb`): declarations whose parameters are used at
+  different kinds, `:k` of them, partial and wrong applications, base
+  types and classes. rhci had no kind inference (ill-kinded declarations
+  and signatures were accepted, `:k` guessed from arities): `kinds.rb`
+  now infers kinds as GHC2021 does, polymorphic where open (`P :: k ->
+  *`), and checks declarations, signatures, annotations and instance
+  heads (oracle section 54).
+
+5 000 + 3 000 probes agree, on CRuby and mruby.

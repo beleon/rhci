@@ -38,6 +38,8 @@ module Rhci
       # `ev`: class-constraint evidence (Ev objects) this node needs, in the
       # order the desugarer applies the dictionaries.
       attr_accessor :ref, :ty, :groups, :ev
+      # parens: how many parentheses the source put around a pattern.
+      attr_accessor :parens
 
       def line
         @tok&.line

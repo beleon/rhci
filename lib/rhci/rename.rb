@@ -51,7 +51,8 @@ module Rhci
   # What a type constructor is. `synonym` is [params, AST type] for `type`.
   class TyInfo
     attr_reader :name, :tcon, :params, :cons, :newtype
-    attr_accessor :synonym
+    # kind: the declared kind (Kinds), generalised.
+    attr_accessor :synonym, :kind
 
     def initialize(name, tcon, params, cons, newtype = false)
       @name = name
@@ -71,6 +72,8 @@ module Rhci
     # Filled by the checker: dict_con (the dictionary's ConInfo),
     # var_arity (number of type arguments the class variable takes),
     # instances (head key => InstInfo), method_schemes.
+    # param_kind: the kind of the class's variable (Kinds), generalised.
+    attr_accessor :param_kind
     attr_accessor :supers, :sigs, :defaults, :context_ast, :dict_con, :var_arity, :instances,
                   :method_schemes, :super_names
 
@@ -492,6 +495,12 @@ module Rhci
       when ReplDecls then top_decls(node.decls)
       when ReplImport then @top.import = node.import
       end
+    end
+
+    # A type expression on its own (:kind).
+    def rename_type(t)
+      type(t)
+      t
     end
 
     def expression(e)

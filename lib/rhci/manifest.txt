@@ -18,6 +18,7 @@ lower
 types
 base_names
 rename
+kinds
 typecheck
 desugar
 derive

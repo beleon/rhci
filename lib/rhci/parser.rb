@@ -768,7 +768,11 @@ module Rhci
           end
         end
         POpSeq.new(e.tok, items)
-      when Paren then to_pat(e.expr)
+      when Paren
+        # Kept for messages: GHC prints a pattern with its parentheses.
+        p = to_pat(e.expr)
+        p.parens = (p.parens || 0) + 1
+        p
       when Tuple then PTuple.new(e.tok, e.elems.map { |x| to_pat(x) })
       when List then PList.new(e.tok, e.elems.map { |x| to_pat(x) })
       when AsPat then PAs.new(e.tok, e.name, to_pat(e.expr))

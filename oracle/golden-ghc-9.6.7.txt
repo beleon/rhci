@@ -3612,3 +3612,161 @@ ghci> (\ ~(x, y) -> 1) undefined
 ghci> (\(~(x, y)) -> 1) undefined
 1
 
+## 53. Failing patterns and IOError (found by fuzzing MonadFail)
+
+ghci> do { Just x <- Just Nothing; return (x + 1) }
+Nothing
+ghci> do { (a:b:_) <- [[1], [1,2,3], []]; return (a + b) }
+[3]
+ghci> [x | Just x <- [Nothing, Just 3, Nothing, Just 4]]
+[3,4]
+ghci> do { Just x <- return Nothing; print x }
+*** Exception: user error (Pattern match failure in 'do' block at <interactive>:7:6-11)
+ghci> do { print 1; [x] <- return [1, 2]; print x }
+1
+*** Exception: user error (Pattern match failure in 'do' block at <interactive>:9:15-17)
+ghci> do { Right v <- Right (Left 2); return v } :: Either Int Int
+
+<interactive>:11:6: error: [GHC-39999]
+    • No instance for ‘MonadFail (Either Int)’
+        arising from a do statement
+        with the failable pattern ‘Right v’
+    • In a stmt of a 'do' block: Right v <- Right (Left 2)
+      In the expression:
+          do Right v <- Right (Left 2)
+             return v ::
+            Either Int Int
+      In an equation for ‘it’:
+          it
+            = do Right v <- Right (Left 2)
+                 return v ::
+                Either Int Int
+ghci> do { ~(Just x) <- Just Nothing; return (x + 1) }
+Just *** Exception: <interactive>:13:6-30: Non-exhaustive patterns in Just x
+ghci> let f ~(a:b:_) = a in f [1]
+*** Exception: <interactive>:15:5-18: Non-exhaustive patterns in a : b : _
+ghci> let f ~((Just x), [y]) = x + y in f (Nothing, [])
+*** Exception: <interactive>:17:5-30: Non-exhaustive patterns in ((Just x), [y])
+ghci> let f ~(Just 'c') = 'd' in f (Just 'e') `seq` f Nothing
+'d'
+ghci> let f ~(Just (Left (-1))) = 1 + case f Nothing of _ -> 0 in f Nothing
+1
+ghci> userError "u"
+user error (u)
+ghci> show (userError "s")
+"user error (s)"
+ghci> userError "a" == userError "a"
+True
+ghci> fail "boom" :: IO ()
+*** Exception: user error (boom)
+ghci> (fail "m" :: Maybe Int)
+Nothing
+ghci> (fail "l" :: [Int])
+[]
+ghci> ioError (userError "oops")
+*** Exception: user error (oops)
+
+## 54. Kinds are inferred, polymorphic where open, and checked (found by fuzzing kinds)
+
+ghci> data P a = P
+ghci> :k P
+P :: k -> *
+ghci> :k P Maybe
+P Maybe :: *
+ghci> x = P :: P Maybe
+ghci> data T2 f a = T2 (f a)
+ghci> :k T2
+T2 :: (k -> *) -> k -> *
+ghci> :k T2 Maybe
+T2 Maybe :: * -> *
+ghci> :k T2 Int
+
+<interactive>:1:4: error: [GHC-83865]
+    • Expected kind ‘k0 -> *’, but ‘Int’ has kind ‘*’
+    • In the first argument of ‘T2’, namely ‘Int’
+      In the type ‘T2 Int’
+ghci> data K f t = K (f Int) (t Maybe)
+ghci> :k K
+K :: (* -> *) -> ((* -> *) -> *) -> *
+ghci> data Bad a = Bad (a a)
+
+<interactive>:21:21: error: [GHC-27958]
+    • Expected kind ‘k0’, but ‘a’ has kind ‘k0 -> *’
+    • In the first argument of ‘a’, namely ‘a’
+      In the type ‘(a a)’
+      In the definition of data constructor ‘Bad’
+ghci> newtype W m a = W (m (Maybe a))
+ghci> :k W
+W :: (* -> *) -> * -> *
+ghci> type Syn f = f Int
+ghci> :k Syn
+Syn :: (* -> k) -> k
+ghci> :k Syn Maybe
+Syn Maybe :: *
+ghci> :{
+ghci| class Lift t where
+ghci|   lift2 :: m a -> t m a
+ghci| :}
+ghci> :k Lift
+Lift :: ((k -> *) -> k -> *) -> Constraint
+ghci> :k Functor
+Functor :: (* -> *) -> Constraint
+ghci> :k Either Int
+Either Int :: * -> *
+ghci> :k Maybe Int Int
+
+<interactive>:1:1: error: [GHC-83865]
+    • Expected kind ‘* -> k0’, but ‘Maybe Int’ has kind ‘*’
+    • In the type ‘Maybe Int Int’
+ghci> let f :: Maybe -> Int; f _ = 1 in 2
+
+<interactive>:46:10: error: [GHC-83865]
+    • Expecting one more argument to ‘Maybe’
+      Expected a type, but ‘Maybe’ has kind ‘* -> *’
+    • In the type signature: f :: Maybe -> Int
+      In the expression:
+        let
+          f :: Maybe -> Int
+          f _ = 1
+        in 2
+      In an equation for ‘it’:
+          it
+            = let
+                f :: Maybe -> Int
+                f _ = 1
+              in 2
+ghci> let g :: f -> f Int; g = undefined in 1
+
+<interactive>:48:15: error: [GHC-83865]
+    • Expected kind ‘* -> *’, but ‘f’ has kind ‘*’
+    • In the type signature: g :: f -> f Int
+      In the expression:
+        let
+          g :: f -> f Int
+          g = undefined
+        in 1
+      In an equation for ‘it’:
+          it
+            = let
+                g :: f -> f Int
+                g = undefined
+              in 1
+ghci> Nothing :: Maybe
+
+<interactive>:50:12: error: [GHC-83865]
+    • Expecting one more argument to ‘Maybe’
+      Expected a type, but ‘Maybe’ has kind ‘* -> *’
+    • In an expression type signature: Maybe
+      In the expression: Nothing :: Maybe
+      In an equation for ‘it’: it = Nothing :: Maybe
+ghci> :{
+ghci| class Box f where
+ghci|   bsize :: f a -> Int
+ghci| :}
+ghci> instance Box Int
+
+<interactive>:57:14: error: [GHC-83865]
+    • Expected kind ‘k -> *’, but ‘Int’ has kind ‘*’
+    • In the first argument of ‘Box’, namely ‘Int’
+      In the instance declaration for ‘Box Int’
+

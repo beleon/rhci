@@ -60,6 +60,7 @@ module Rhci
       @new_types = rtop.types
       rtop.tyinfos.each { |ti| define_type(ti) }
       rtop.classes.each { |ci| define_class(ci) }
+      Kinds.new(@source).declarations(rtop.tyinfos, rtop.classes)
       rtop.instances.each { |inst| register_instance(inst) }
       infer_groups(rtop.groups)
       rtop.classes.each { |ci| check_defaults(ci) }
@@ -780,6 +781,7 @@ module Rhci
     def register_instance(inst)
       ci = inst.klass
       t = inst.type_ast
+      Kinds.new(@source).instance_head(t, ci) if t && !inst.derived
       head, args = instance_head(t)
       vars = args.map do |a|
         err(:compile, a, 'instance heads must be a type constructor applied to distinct type variables') unless a.is_a?(TVar)
@@ -886,7 +888,12 @@ module Rhci
       return unless groups
 
       groups.each do |scc|
-        scc.each { |b| b.sigs.each { |n, sig| @pending[n] = sig_scheme(sig.type) } }
+        scc.each do |b|
+          b.sigs.each do |n, sig|
+            @pending[n] = sig_scheme(sig.type)
+            Kinds.new(@source).signature(sig.type)
+          end
+        end
       end
       groups.each { |scc| infer_scc(scc) }
     end
@@ -1210,6 +1217,7 @@ module Rhci
         T.list(infer(e.expr))
       when Annot
         s = sig_scheme(e.type)
+        Kinds.new(@source).signature(e.type)
         check_annotation(e, s)
       when RecCon
         con = e.con.ref

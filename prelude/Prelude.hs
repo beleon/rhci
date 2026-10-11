@@ -1258,6 +1258,13 @@ rhci_thenIO a b = rhci_bindIO a (\_ -> b)
 
 newtype IOError = IOError String
 
+-- An IOError holds its message as GHC's Show IOException renders it.
+instance Show IOError where
+  showsPrec _ (IOError s) = showString s
+
+instance Eq IOError where
+  IOError a == IOError b = a == b
+
 userError :: String -> IOError
 userError s = IOError ("user error (" ++ s ++ ")")
 

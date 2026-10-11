@@ -116,6 +116,12 @@ module Rhci
     end
 
     def pat(p)
+      q = rebuild_pat(p)
+      q.parens = p.parens if p.parens
+      q
+    end
+
+    def rebuild_pat(p)
       case p
       when PVar, PWild, PLit then p
       when PCon then PCon.new(p.tok, p.con, p.args.map { |a| pat(a) })

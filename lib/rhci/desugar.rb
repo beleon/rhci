@@ -473,13 +473,58 @@ module Rhci
       end
     end
 
+    # A pattern as GHC shows it in "Non-exhaustive patterns in ...": with
+    # the source's parentheses, but for the outermost layer.
+    def pat_text(p, top = true)
+      s = case p
+          when PVar then name_text(p.name)
+          when PWild then '_'
+          when PLit then lit_text(p)
+          when PCon
+            con = name_text(p.con)
+            if p.args.empty?
+              con
+            elsif con.start_with?(':') && p.args.length == 2
+              "#{pat_text(p.args[0], false)} #{con} #{pat_text(p.args[1], false)}"
+            else
+              ([con] + p.args.map { |a| pat_text(a, false) }).join(' ')
+            end
+          when PTuple then "(#{p.elems.map { |e| pat_text(e, false) }.join(', ')})"
+          when PList then "[#{p.elems.map { |e| pat_text(e, false) }.join(', ')}]"
+          when PAs then "#{name_text(p.name)}@#{pat_text(p.pat, false)}"
+          when PLazy then "~#{pat_text(p.pat, false)}"
+          when PBang then "!#{pat_text(p.pat, false)}"
+          when PRec then "#{name_text(p.con)} {..}"
+          else '_'
+          end
+      layers = (p.parens || 0) - (top ? 1 : 0)
+      layers.times { s = "(#{s})" }
+      s
+    end
+
+    def name_text(n)
+      return name_text(n.name) if n.respond_to?(:name) && !n.respond_to?(:str)
+
+      n.respond_to?(:str) ? n.str : n.to_s
+    end
+
+    def lit_text(p)
+      v = p.lit.value
+      text = case p.lit.kind
+             when :char then "'#{codes_text(v)}'"
+             when :string then "\"#{codes_text(v)}\""
+             else v.to_s
+             end
+      p.negative ? "-#{text}" : text
+    end
+
     # ~p: each variable of p becomes a selector thunk; nothing is forced here.
     def lazy_pattern(v, pat, rest, success, fail)
       names = {}
       collect_vars(pat, names)
       binds = names.keys.map do |n|
         s = fresh('lz')
-        sel = selector(v, pat, n, error_core(pat.tok, 'Irrefutable pattern failed'))
+        sel = selector(v, pat, n, error_core(pat.tok, "Non-exhaustive patterns in #{pat_text(pat)}"))
         [n, s, sel]
       end
       binds.each { |n, s, _| @subst[n.core] = s }
@@ -637,10 +682,10 @@ module Rhci
       when BindStmt
         x = fresh('b')
         fail = if s.ev && !s.ev.empty?
-                 msg = "Pattern match failure in `do' block at #{@source}:#{s.tok.line}:#{s.tok.col}"
+                 msg = "Pattern match failure in 'do' block at #{@source}:#{s.tok.line}:#{s.tok.col}"
                  C::App.new(method_var('MonadFail', 'fail'), [ev_core(s.ev[0]), C::Str.new(msg.codepoints)])
                else
-                 error_core(s.tok, 'Irrefutable pattern failed')
+                 error_core(s.tok, "Non-exhaustive patterns in #{pat_text(s.pat)}")
                end
         k = C::Lam.new([x], mp([[x, s.pat]], -> { do_stmts(rest, dict, node) }, fail))
         C::App.new(method_var('Monad', '>>='), [dict, expr(s.expr), k])

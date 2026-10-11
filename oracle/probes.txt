@@ -1647,3 +1647,57 @@ let (~) a b = a + b in 3 ~ 4
 let (~) a b = a + b in 3~4
 (\ ~(x, y) -> 1) undefined
 (\(~(x, y)) -> 1) undefined
+
+## 53. Failing patterns and IOError (found by fuzzing MonadFail)
+do { Just x <- Just Nothing; return (x + 1) }
+do { (a:b:_) <- [[1], [1,2,3], []]; return (a + b) }
+[x | Just x <- [Nothing, Just 3, Nothing, Just 4]]
+do { Just x <- return Nothing; print x }
+do { print 1; [x] <- return [1, 2]; print x }
+do { Right v <- Right (Left 2); return v } :: Either Int Int
+do { ~(Just x) <- Just Nothing; return (x + 1) }
+let f ~(a:b:_) = a in f [1]
+let f ~((Just x), [y]) = x + y in f (Nothing, [])
+let f ~(Just 'c') = 'd' in f (Just 'e') `seq` f Nothing
+let f ~(Just (Left (-1))) = 1 + case f Nothing of _ -> 0 in f Nothing
+userError "u"
+show (userError "s")
+userError "a" == userError "a"
+fail "boom" :: IO ()
+(fail "m" :: Maybe Int)
+(fail "l" :: [Int])
+ioError (userError "oops")
+
+## 54. Kinds are inferred, polymorphic where open, and checked (found by fuzzing kinds)
+data P a = P
+:k P
+:k P Maybe
+x = P :: P Maybe
+data T2 f a = T2 (f a)
+:k T2
+:k T2 Maybe
+:k T2 Int
+data K f t = K (f Int) (t Maybe)
+:k K
+data Bad a = Bad (a a)
+newtype W m a = W (m (Maybe a))
+:k W
+type Syn f = f Int
+:k Syn
+:k Syn Maybe
+:{
+class Lift t where
+  lift2 :: m a -> t m a
+:}
+:k Lift
+:k Functor
+:k Either Int
+:k Maybe Int Int
+let f :: Maybe -> Int; f _ = 1 in 2
+let g :: f -> f Int; g = undefined in 1
+Nothing :: Maybe
+:{
+class Box f where
+  bsize :: f a -> Int
+:}
+instance Box Int

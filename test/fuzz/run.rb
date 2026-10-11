@@ -43,6 +43,8 @@ require_relative 'typeerr_gen'
 require_relative 'lex_gen'
 require_relative 'lazy_gen'
 require_relative 'class_gen'
+require_relative 'fail_gen'
+require_relative 'kind_gen'
 
 module Fuzz
   ROOT = File.expand_path('../..', __dir__)
@@ -63,7 +65,8 @@ module Fuzz
   SECTION_MODES = { '--numbers' => ['n', 'NumGen'], '--datatypes' => ['t', 'DataGen'],
                     '--reads' => ['e', 'ReadGen'], '--typeerrors' => ['y', 'TypeErrGen'],
                     '--tokens' => ['k', 'LexGen'], '--laziness' => ['z', 'LazyGen'],
-                    '--classes' => ['c', 'ClassGen'] }.freeze
+                    '--classes' => ['c', 'ClassGen'], '--fail' => ['f', 'FailGen'],
+                    '--kinds' => ['j', 'KindGen'] }.freeze
 
   def section_mode(argv)
     argv.find { |a| SECTION_MODES.key?(a) }

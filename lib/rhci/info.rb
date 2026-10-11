@@ -31,9 +31,8 @@ module Rhci
       load_prelude
 
       ty = Parser.new(src).parse_type_expression
-      renamer = Renamer.new(@names, fixity: fixity_lookup)
-      k = type_kind(renamer, ty)
-      write_text("#{src} :: #{show_kind(k)}\n")
+      Renamer.new(@names, fixity: fixity_lookup).rename_type(ty)
+      write_text("#{src} :: #{Kinds.show(Kinds.new.kind_of(ty))}\n")
       Result.new(:ok)
     end
 
@@ -225,135 +224,6 @@ module Rhci
       elsif vars.empty? then name
       else "(#{([name] + vars).join(' ')})"
       end
-    end
-
-    # ---- kinds -------------------------------------------------------------------
-    # A kind is an Integer n (n arguments of kind *, then *), :constraint,
-    # or [arg kinds, result] for higher-kinded arguments.
-
-    def show_kind(k)
-      return 'Constraint' if k == :constraint
-      return '*' if k == 0
-
-      args, res = k.is_a?(Array) ? k : [Array.new(k, 0), 0]
-      parts = args.map { |a| a == 0 ? '*' : "(#{show_kind(a)})" }
-      (parts + [show_kind(res)]).join(' -> ')
-    end
-
-    # The kind of a type expression (simple kinds only: what Haskell 98
-    # types have).
-    def type_kind(renamer, t)
-      case t
-      when AST::TVar
-        raise Error.new(:scope, "Not in scope: type variable ‘#{t.name}’", t.tok&.line, t.tok&.col)
-      when AST::TCon then con_kind(renamer, t)
-      when AST::TList
-        expect_star(renamer, t.elem)
-        0
-      when AST::TTuple
-        t.elems.each { |e| expect_star(renamer, e) }
-        0
-      when AST::TFun
-        expect_star(renamer, t.from)
-        expect_star(renamer, t.to)
-        0
-      when AST::TApp
-        k = type_kind(renamer, t.fn)
-        t.args.each do |a|
-          args, res = k.is_a?(Array) ? k : [Array.new(k.is_a?(Integer) ? k : 0, 0), 0]
-          if args.empty?
-            raise Error.new(:compile, "Expected kind ‘#{show_kind_arg(type_kind(renamer, a))} -> k0’, " \
-                                      "but ‘#{type_ast_text(t.fn)}’ has kind ‘#{show_kind(k)}’",
-                            t.tok&.line, t.tok&.col)
-          end
-          ak = type_kind(renamer, a)
-          unless ak == args[0]
-            raise Error.new(:compile, "Expected kind ‘#{show_kind(args[0])}’, but ‘#{type_ast_text(a)}’ " \
-                                      "has kind ‘#{show_kind(ak)}’", a.tok&.line, a.tok&.col)
-          end
-          k = args.length == 1 && res == 0 ? 0 : simplify_kind([args[1..-1], res])
-        end
-        k
-      else
-        raise Error.new(:unsupported, ':kind of this type is not supported')
-      end
-    end
-
-    def show_kind_arg(k)
-      k == 0 ? '*' : "(#{show_kind(k)})"
-    end
-
-    def expect_star(renamer, t)
-      k = type_kind(renamer, t)
-      return if k == 0
-
-      raise Error.new(:compile, "Expecting #{kind_arity(k)} more argument(s) to ‘#{type_ast_text(t)}’",
-                      t.tok&.line, t.tok&.col)
-    end
-
-    def kind_arity(k)
-      k.is_a?(Array) ? k[0].length : k
-    end
-
-    def simplify_kind(k)
-      args, res = k
-      args.all? { |a| a == 0 } && res == 0 ? args.length : k
-    end
-
-    def con_kind(renamer, t)
-      name = t.name
-      return 2 if name == '->'
-      return 1 if name == '[]'
-      return 0 if name == '()'
-      return name.length - 1 if name.start_with?('(,')
-
-      n = renamer.lookup_entity(:types, name)
-      raise Error.new(:scope, "Not in scope: type constructor or class ‘#{name}’", t.tok&.line, t.tok&.col) unless n
-      return [[n.klass.var_arity.to_i.zero? ? 0 : n.klass.var_arity.to_i], :constraint] if n.kind == :class
-
-      ti = n.tyinfo
-      return 0 unless ti
-      return synonym_kind(ti) if ti.synonym
-
-      param_kinds = param_arities(ti)
-      param_kinds.all? { |a| a == 0 } ? param_kinds.length : [param_kinds, 0]
-    end
-
-    def synonym_kind(ti)
-      ti.params.length
-    end
-
-    # How many arguments each parameter of a data type is applied to in
-    # its constructors' fields.
-    def param_arities(ti)
-      ar = Array.new(ti.params.length, 0)
-      ti.cons.each do |c|
-        s = @tenv[c]
-        next unless s
-
-        _, res_args = Types.spine(result_type(s.type))
-        index = {}
-        res_args.each_with_index { |a, i| index[a.index] = i if a.is_a?(Types::TGen) }
-        scan_applied(s.type, index, ar)
-      end
-      ar
-    end
-
-    def result_type(t)
-      loop do
-        h, args = Types.spine(t)
-        return t unless h.equal?(Types::ARROW) && args.length == 2
-
-        t = args[1]
-      end
-    end
-
-    def scan_applied(t, index, ar)
-      h, args = Types.spine(Types.prune(t))
-      if h.is_a?(Types::TGen) && index.key?(h.index) && args.length > ar[index[h.index]]
-        ar[index[h.index]] = args.length
-      end
-      args.each { |a| scan_applied(a, index, ar) }
     end
   end
 end
