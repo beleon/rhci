@@ -112,9 +112,10 @@ embedded); copy one anywhere on your `PATH`:
 
 | File | Runs on |
 |---|---|
-| `rhci` | Linux, macOS, Windows, FreeBSD, OpenBSD, NetBSD; x86-64 and ARM64. One [Cosmopolitan](https://github.com/jart/cosmopolitan) executable, no libc needed. Verified on Linux x86-64 so far; reports from the other systems are welcome |
-| `rhci-linux-x86_64-musl` | Any x86-64 Linux, however old: a static binary |
-| `rhci.rb` | Anything with a Ruby from 2.7 to 3.4 (`chmod +x` it, or `ruby rhci.rb`) |
+| `rhci-1.0.0` | Linux, macOS, FreeBSD, OpenBSD, NetBSD; x86-64 and ARM64. One [Cosmopolitan](https://github.com/jart/cosmopolitan) executable, no libc needed. Verified on Linux x86-64 so far; reports from the other systems are welcome |
+| `rhci-1.0.0.exe` | Windows, x86-64 and ARM64: the same file, named so that Windows runs it |
+| `rhci-1.0.0-linux-x86_64-musl` | Any x86-64 Linux, however old: a static binary |
+| `rhci-1.0.0.rb` | Anything with a Ruby from 2.7 to 3.4 (`chmod +x` it, or `ruby rhci-1.0.0.rb`) |
 
 The only file rhci writes is its history, `~/.rhci_history`.
 
@@ -128,7 +129,7 @@ itself.
 rake mruby      # build/rhci/bin/rhci: a binary for this machine's glibc
                 # build/rhci.rb: the compact CRuby build (also: rake compact)
 rake            # lint, build, the tests on CRuby and mruby (rake bench: startup budgets)
-rake release    # the three release files into dist/ (needs curl, unzip, podman)
+rake release    # the release files into dist/, with SHA256SUMS (needs curl, unzip, podman)
 ```
 
 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) has the details, including

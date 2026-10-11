@@ -17,7 +17,7 @@ rake torture    # mruby tests with GC torture in the C loop (after machine.c cha
 rake exercism   # the exercism Haskell track vs GHC (podman, network)
 rake cosmo      # release: build/rhci-cosmo/bin/rhci, one portable executable (curl, unzip)
 rake musl       # release: build/rhci-musl/bin/rhci, static x86-64 Linux (podman)
-rake release    # both plus the compact build, as dist/rhci, dist/rhci-linux-x86_64-musl, dist/rhci.rb
+rake release    # both plus the compact build into dist/, versioned, with SHA256SUMS
 rake fuzz[1,1000,0.05]  # differential fuzzing vs GHCi (podman)
 rake fuzz_progs[1,150]  # random whole programs vs runghc (podman)
 bin/rhci        # CRuby launcher
@@ -27,8 +27,10 @@ bin/rhci        # CRuby launcher
 
 `rake mruby` is the development build: dynamically linked against this
 machine's glibc, so the binary needs a glibc at least as new where it
-runs. Releases use two other builds of the same sources (`rake release`
-makes all assets into `dist/`):
+runs. Releases use two other builds of the same sources. `rake release`
+puts the assets into `dist/` as `rhci-VERSION` (and the same file again
+as `rhci-VERSION.exe`, since Windows runs it only under that extension),
+`rhci-VERSION-linux-x86_64-musl`, `rhci-VERSION.rb` and a `SHA256SUMS`:
 
 - **`rake cosmo`** (`tools/cosmo_build_config.rb`): Cosmopolitan Libc,
   with the pinned `cosmocc` toolchain fetched once into `build/cosmocc`.

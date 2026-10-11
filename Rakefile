@@ -108,13 +108,21 @@ task musl: [MRUBY_DIR, :bundle] do
   sh 'podman', 'run', '--rm', '--memory', '8g', '-v', "#{ROOT}:/src:Z", ALPINE_IMAGE, 'sh', '-c', script
 end
 
-desc 'All release assets into dist/: rhci (portable), rhci-linux-x86_64-musl, rhci.rb'
+desc 'The release assets, versioned, into dist/ with SHA256SUMS'
 task release: %i[cosmo musl compact] do
+  require 'digest'
+  require_relative 'lib/rhci/version'
+  v = Rhci::VERSION
   dist = File.join(ROOT, 'dist')
+  rm_rf dist
   mkdir_p dist
-  cp RHCI_COSMO, File.join(dist, 'rhci')
-  cp RHCI_MUSL, File.join(dist, 'rhci-linux-x86_64-musl')
-  cp File.join(ROOT, 'build', 'rhci.rb'), File.join(dist, 'rhci.rb')
+  # The portable executable twice: Windows runs it only with an .exe (or
+  # .com) extension; elsewhere the name is free.
+  files = { "rhci-#{v}" => RHCI_COSMO, "rhci-#{v}.exe" => RHCI_COSMO,
+            "rhci-#{v}-linux-x86_64-musl" => RHCI_MUSL, "rhci-#{v}.rb" => File.join(ROOT, 'build', 'rhci.rb') }
+  files.each { |name, src| cp src, File.join(dist, name) }
+  sums = files.keys.sort.map { |name| "#{Digest::SHA256.file(File.join(dist, name)).hexdigest}  #{name}\n" }
+  File.write(File.join(dist, 'SHA256SUMS'), sums.join)
   puts "dist/: #{Dir.children(dist).sort.join(', ')}"
 end
 
