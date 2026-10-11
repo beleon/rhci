@@ -109,7 +109,7 @@ module Exercism
     script = names.map do |n|
       "cd /w/#{n} && (timeout 300 runghc -i. Tests.hs > ghc.out 2> ghc.err; echo $? > ghc.status); cd /w"
     end.join("\n")
-    Open3.capture3('podman', 'run', '--rm', '-i', '-v', "#{WORK}:/w:Z", '-w', '/w', IMAGE, 'sh', '-c', script)
+    Open3.capture3('podman', 'run', '--rm', '-i', '--memory', '8g', '-v', "#{WORK}:/w:Z", '-w', '/w', IMAGE, 'sh', '-c', script)
   end
 
   def ghc_result(dir)

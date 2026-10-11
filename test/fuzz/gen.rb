@@ -72,6 +72,8 @@ module Fuzz
       @bottoms = bottoms
       @tag = 0
       @empty_rate = 0.3 # how often a list or Maybe leaf is [] or Nothing
+      @mq = 'M' # the qualifiers Data.Map and Data.Set are imported under
+      @sq = 'S'
     end
 
     def pick(a)
@@ -151,8 +153,8 @@ module Fuzz
       when PAIRT then 'V'
       else
         case t[0]
-        when :map then "M.Map #{paren_type(t[1])} #{paren_type(t[2])}"
-        when :set then "S.Set #{paren_type(t[1])}"
+        when :map then "#{@mq}.Map #{paren_type(t[1])} #{paren_type(t[2])}"
+        when :set then "#{@sq}.Set #{paren_type(t[1])}"
         when :list then "[#{hs_type(t[1])}]"
         when :maybe then "Maybe #{paren_type(t[1])}"
         when :pair then "(#{hs_type(t[1])}, #{hs_type(t[2])})"
@@ -220,8 +222,8 @@ module Fuzz
       when PAIRT then pick(['((-1) :+ 2)', '(3 :+ (-4))', '(0 :+ 0)'])
       else
         case t[0]
-        when :map then "(M.fromList [#{Array.new(@r.rand(0..3)) { "(#{leaf(t[1])}, #{leaf(t[2])})" }.join(', ')}] :: #{hs_type(t)})"
-        when :set then "(S.fromList [#{Array.new(@r.rand(0..3)) { leaf(t[1]) }.join(', ')}] :: #{hs_type(t)})"
+        when :map then "(#{@mq}.fromList [#{Array.new(@r.rand(0..3)) { "(#{leaf(t[1])}, #{leaf(t[2])})" }.join(', ')}] :: #{hs_type(t)})"
+        when :set then "(#{@sq}.fromList [#{Array.new(@r.rand(0..3)) { leaf(t[1]) }.join(', ')}] :: #{hs_type(t)})"
         when :list then chance(@empty_rate) ? "([] :: #{hs_type(t)})" : "[#{Array.new(@r.rand(1..4)) { leaf(t[1]) }.join(', ')}]"
         when :maybe then chance(@empty_rate) ? "(Nothing :: #{hs_type(t)})" : "(Just #{leaf(t[1])})"
         when :pair then "(#{leaf(t[1])}, #{leaf(t[2])})"
@@ -260,8 +262,8 @@ module Fuzz
         end
       else
         case @r.rand(3)
-        when 0 then "M.size #{sub([:map, pick([INT, CHAR]), pick(ELEMS)], d)}"
-        when 1 then "S.size #{sub([:set, pick([INT, CHAR])], d)}"
+        when 0 then "#{@mq}.size #{sub([:map, pick([INT, CHAR]), pick(ELEMS)], d)}"
+        when 1 then "#{@sq}.size #{sub([:set, pick([INT, CHAR])], d)}"
         else "maximum #{sub(list_of(INT), d)}"
         end
       end
@@ -322,9 +324,9 @@ module Fuzz
       when 10 then "and #{sub(list_of(BOOL), d)}"
       else
         case @r.rand(4)
-        when 0 then "M.member #{sub(INT, d)} #{sub([:map, INT, pick(ELEMS)], d)}"
-        when 1 then "S.member #{sub(CHAR, d)} #{sub([:set, CHAR], d)}"
-        when 2 then "S.isSubsetOf #{sub([:set, INT], d)} #{sub([:set, INT], d)}"
+        when 0 then "#{@mq}.member #{sub(INT, d)} #{sub([:map, INT, pick(ELEMS)], d)}"
+        when 1 then "#{@sq}.member #{sub(CHAR, d)} #{sub([:set, CHAR], d)}"
+        when 2 then "#{@sq}.isSubsetOf #{sub([:set, INT], d)} #{sub([:set, INT], d)}"
         else "maybe False even #{sub([:maybe, INT], d)}"
         end
       end
@@ -420,9 +422,9 @@ module Fuzz
       when 14 then "[x | x <- #{sub(t, d)}, #{pred(e)} x]"
       else
         case @r.rand(4)
-        when 0 then "M.elems #{sub([:map, pick([INT, CHAR]), e], d)}"
-        when 1 then "S.toList (S.fromList #{sub(t, d)})"
-        when 2 then "map snd (M.toList #{sub([:map, INT, e], d)})"
+        when 0 then "#{@mq}.elems #{sub([:map, pick([INT, CHAR]), e], d)}"
+        when 1 then "#{@sq}.toList (#{@sq}.fromList #{sub(t, d)})"
+        when 2 then "map snd (#{@mq}.toList #{sub([:map, INT, e], d)})"
         else "zipWith const #{sub(t, d)} #{sub(list_of(pick(ELEMS)), d)}"
         end
       end
@@ -468,7 +470,7 @@ module Fuzz
       when 1 then "lookup #{sub(INT, d)} (zip [1 ..] #{sub(list_of(e), d)})"
       when 2 then "find #{pred(e)} #{sub(list_of(e), d)}"
       when 3 then "fmap #{endo(e)} #{sub([:maybe, e], d)}"
-      when 4 then chance(0.5) ? "listToMaybe #{sub(list_of(e), d)}" : "M.lookup #{sub(INT, d)} #{sub([:map, INT, e], d)}"
+      when 4 then chance(0.5) ? "listToMaybe #{sub(list_of(e), d)}" : "#{@mq}.lookup #{sub(INT, d)} #{sub([:map, INT, e], d)}"
       else "#{sub([:maybe, e], d)} >>= \\v -> if #{sub(BOOL, d)} then Just v else Nothing"
       end
     end
@@ -493,30 +495,30 @@ module Fuzz
     def map_expr(k, v, d)
       t = [:map, k, v]
       case @r.rand(11)
-      when 0 then "M.insert #{sub(k, d)} #{sub(v, d)} #{sub(t, d)}"
-      when 1 then "M.delete #{sub(k, d)} #{sub(t, d)}"
-      when 2 then "M.fromList (zip #{sub([:list, k], d)} #{sub([:list, v], d)})"
-      when 3 then "M.union #{sub(t, d)} #{sub(t, d)}"
-      when 4 then "M.map #{endo(v)} #{sub(t, d)}"
-      when 5 then "M.filter #{pred(v)} #{sub(t, d)}"
-      when 6 then "M.adjust #{endo(v)} #{sub(k, d)} #{sub(t, d)}"
-      when 7 then "M.alter (fmap #{endo(v)}) #{sub(k, d)} #{sub(t, d)}"
-      when 8 then "M.insertWith const #{sub(k, d)} #{sub(v, d)} #{sub(t, d)}"
-      when 9 then "M.difference #{sub(t, d)} #{sub(t, d)}"
-      else "M.fromListWith const #{sub([:list, [:pair, k, v]], d)}"
+      when 0 then "#{@mq}.insert #{sub(k, d)} #{sub(v, d)} #{sub(t, d)}"
+      when 1 then "#{@mq}.delete #{sub(k, d)} #{sub(t, d)}"
+      when 2 then "#{@mq}.fromList (zip #{sub([:list, k], d)} #{sub([:list, v], d)})"
+      when 3 then "#{@mq}.union #{sub(t, d)} #{sub(t, d)}"
+      when 4 then "#{@mq}.map #{endo(v)} #{sub(t, d)}"
+      when 5 then "#{@mq}.filter #{pred(v)} #{sub(t, d)}"
+      when 6 then "#{@mq}.adjust #{endo(v)} #{sub(k, d)} #{sub(t, d)}"
+      when 7 then "#{@mq}.alter (fmap #{endo(v)}) #{sub(k, d)} #{sub(t, d)}"
+      when 8 then "#{@mq}.insertWith const #{sub(k, d)} #{sub(v, d)} #{sub(t, d)}"
+      when 9 then "#{@mq}.difference #{sub(t, d)} #{sub(t, d)}"
+      else "#{@mq}.fromListWith const #{sub([:list, [:pair, k, v]], d)}"
       end
     end
 
     def set_expr(e, d)
       t = [:set, e]
       case @r.rand(7)
-      when 0 then "S.insert #{sub(e, d)} #{sub(t, d)}"
-      when 1 then "S.delete #{sub(e, d)} #{sub(t, d)}"
-      when 2 then "S.fromList #{sub([:list, e], d)}"
-      when 3 then "S.union #{sub(t, d)} #{sub(t, d)}"
-      when 4 then "S.difference #{sub(t, d)} #{sub(t, d)}"
-      when 5 then "S.intersection #{sub(t, d)} #{sub(t, d)}"
-      else "S.filter #{pred(e)} #{sub(t, d)}"
+      when 0 then "#{@sq}.insert #{sub(e, d)} #{sub(t, d)}"
+      when 1 then "#{@sq}.delete #{sub(e, d)} #{sub(t, d)}"
+      when 2 then "#{@sq}.fromList #{sub([:list, e], d)}"
+      when 3 then "#{@sq}.union #{sub(t, d)} #{sub(t, d)}"
+      when 4 then "#{@sq}.difference #{sub(t, d)} #{sub(t, d)}"
+      when 5 then "#{@sq}.intersection #{sub(t, d)} #{sub(t, d)}"
+      else "#{@sq}.filter #{pred(e)} #{sub(t, d)}"
       end
     end
 

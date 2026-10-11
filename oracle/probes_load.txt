@@ -74,3 +74,21 @@ h
 :load AmbQual
 h
 :load AmbType
+
+## L12. Explicit imports of the Prelude in files, and the scope after :load
+:load PreOnly
+w
+length [1]
+show 1
+:load PreQual
+w
+length [1, 2]
+:load PreHideBack
+w
+:load PreHidden
+lookup 1 [(1, 2)]
+import Prelude
+lookup 1 [(1, 2)]
+:load PreHideOwn
+twice 3
+lookup 5

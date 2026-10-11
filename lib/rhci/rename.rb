@@ -176,6 +176,51 @@ module Rhci
     end
   end
 
+  # Which names of the default scope an import context (a file's imports,
+  # or the prompt's) brings in unqualified. The Prelude follows GHC: an
+  # explicit import of it, even a qualified one, replaces the implicit
+  # `import Prelude`. rhci's other default modules are in scope without an
+  # import, except for names an import hides; but only names the context
+  # does import (`ghc?`) clash with its other imports and definitions.
+  class DefaultScope
+    def initialize
+      @selections = []
+      @hidden = {}
+      @explicit_prelude = false
+    end
+
+    # An import of default module mod: selection is what it brings in
+    # unqualified ({values:, types:}), hidden what its hiding list removes
+    # ("str" or "type:str").
+    def import(mod, qualified, selection, hidden)
+      @explicit_prelude = true if mod == 'Prelude'
+      return if qualified
+
+      @selections << selection
+      hidden.each { |k| @hidden[k] = true }
+    end
+
+    # implicit: false leaves out the implicit Prelude import.
+    def ghc?(str, n, type, implicit: true)
+      return true if implicit && !@explicit_prelude && prelude_name?(str, type)
+
+      kind = type ? :types : :values
+      @selections.any? { |sel| sel[kind][str].equal?(n) }
+    end
+
+    def visible?(str, n, type, implicit: true)
+      return true if ghc?(str, n, type, implicit: implicit)
+
+      !prelude_name?(str, type) && !@hidden.key?(type ? "type:#{str}" : str)
+    end
+
+    private
+
+    def prelude_name?(str, type)
+      (type ? BASE_TYPES[str] : BASE_VALUES[str]) == 'Prelude'
+    end
+  end
+
   # Session-wide names. Only committed after an input checks completely,
   # so a failed input changes nothing (as in GHCi).
   class NameEnv
@@ -183,9 +228,10 @@ module Rhci
     # Names whose definition the session refused as unsupported: using one
     # is unsupported too (GHCi would have defined it), not "not in scope".
     attr_reader :refused
-    # The prompt's `import`s: aliases (alias => [module names], for
-    # qualified names) and names imported unqualified from modules outside
-    # the default scope (str => [Name or MissingName]).
+    # The prompt's `import`s: aliases (alias => {module name => the
+    # {values:, types:} imported under it}, for qualified names) and names
+    # imported unqualified from modules outside the default scope (str =>
+    # [Name or MissingName]).
     attr_reader :aliases, :imports, :import_types
 
     BUILTIN_TYPES = { '[]' => Types::LIST, '()' => Types::UNIT, '->' => Types::ARROW,
@@ -264,12 +310,46 @@ module Rhci
       @defined.key?(str)
     end
 
-    def define(str, type: false)
-      @defined[type ? "type:#{str}" : str] = true
+    # from_module: a loaded module's name, which unlike the prompt's own
+    # does not shadow the prompt's imports.
+    def define(str, type: false, from_module: false)
+      @defined[type ? "type:#{str}" : str] = from_module ? :module : true
+    end
+
+    def from_module?(key)
+      @defined[key] == :module
+    end
+
+    # The default scope's entity of that spelling, whatever shadows it.
+    def base_entity(str, type)
+      type ? (@base_types || @types)[str] : (@base_values || @values)[str]
     end
 
     def clear_definitions
       @defined.clear
+    end
+
+    # The prompt's imports of default-scope modules (not in the snapshot).
+    def default_scope
+      @default_scope ||= DefaultScope.new
+    end
+
+    # The loaded module's (GHCi's *M): after a :load, the prompt sees its
+    # scope, and the Prelude only through it or an import of its own.
+    attr_accessor :module_scope
+
+    # Is the default scope's n, spelled str, in scope at the prompt?
+    def base_visible?(str, n, type: false)
+      return default_scope.visible?(str, n, type) unless @module_scope
+
+      @module_scope.visible?(str, n, type) || default_scope.visible?(str, n, type, implicit: false)
+    end
+
+    # Does the prompt import it (so that it clashes with other imports)?
+    def base_imported?(str, n, type: false)
+      return default_scope.ghc?(str, n, type) unless @module_scope
+
+      @module_scope.ghc?(str, n, type) || default_scope.ghc?(str, n, type, implicit: false)
     end
 
     def known_module?(mod)
@@ -315,6 +395,8 @@ module Rhci
     # Forget prompt imports and definitions (:load starts afresh).
     def reset_prompt
       @local_modules = nil
+      @module_scope = nil
+      @default_scope = DefaultScope.new
       @aliases.clear
       @imports.clear
       @import_types.clear
@@ -365,23 +447,20 @@ module Rhci
     # (a value may be an Array of Names: ambiguous). module_mode: a file,
     # where a name defined or imported there that clashes with one the
     # Prelude (or an explicitly imported base module) provides is ambiguous.
-    # official: default modules the file imports (a name, or [name,
-    # {str => Name}] for an import list); hidden: names it hides.
+    # scope: the file's imports of default modules (a DefaultScope).
     # internal: rhci_* names are visible (rhci's own synthesised inputs).
     # qualified: alias => [[module name, {values:, types:}]] for qualified
     # names; nil at the prompt, where the prompt's imports apply and every
     # known module can be named in full (as GHCi allows).
     def initialize(env, source = '<interactive>', prelude: false, fixity: nil, imported: nil,
-                   module_mode: false, official: [], hidden: [], internal: false, qualified: nil)
+                   module_mode: false, scope: nil, internal: false, qualified: nil)
       @internal = internal
       @qualified = qualified
       @env = env
       @fixity = fixity
       @imported = imported || { values: {}, types: {} }
       @module_mode = module_mode
-      @official = official
-      @hidden = {}
-      hidden.each { |h| @hidden[h] = true }
+      @scope = scope || DefaultScope.new
       @source = source
       @prelude = prelude
       @scopes = []
@@ -392,6 +471,12 @@ module Rhci
     # ---- entry points ----------------------------------------------------------
 
     def repl(node)
+      repl_node(node)
+      raise_deferred
+      @top
+    end
+
+    def repl_node(node)
       case node
       when ReplExpr
         expr(node.expr)
@@ -407,17 +492,18 @@ module Rhci
       when ReplDecls then top_decls(node.decls)
       when ReplImport then @top.import = node.import
       end
-      @top
     end
 
     def expression(e)
       expr(e)
+      raise_deferred
       e
     end
 
     def module_decls(m)
       m.imports.each { |i| check_import(i) }
       top_decls(m.decls)
+      raise_deferred
       @top
     end
 
@@ -481,7 +567,7 @@ module Rhci
         i -= 1
       end
       own = @top.values[str] || @imported[:values][str]
-      base = @hidden.key?(str) ? nil : @env.values[str]
+      base = visible_base(str, @env.values[str], false)
       if @module_mode && own
         # In a module a top-level definition does not shadow an import (the
         # prompt's do): using the name is ambiguous.
@@ -489,15 +575,40 @@ module Rhci
         [@top.values[str], @imported[:values][str]].each do |found|
           (found.is_a?(Array) ? found : [found]).each { |n| candidates << n if n && !candidates.include?(n) }
         end
-        candidates << base if base && official?(BASE_VALUES[str], str) && !candidates.include?(base)
+        candidates << base if base && @scope.ghc?(str, base, false) && !candidates.include?(base)
         return candidates[0] if candidates.length == 1
 
         raise Error.new(:compile, "Ambiguous occurrence ‘#{str}’", nil, nil, @source)
       end
       return own if own
-      return prompt_import(str, base, @env.imports) if !@module_mode && !@env.defined?(str) && @env.imports.key?(str)
+      if !@module_mode && !@env.defined?(str) && @env.imports.key?(str)
+        return prompt_import(str, base && @env.base_imported?(str, base) ? base : nil, @env.imports)
+      end
+      raise Error.new(:compile, "Ambiguous occurrence ‘#{str}’", nil, nil, @source) if module_clash?(str, base, false)
 
       base || ((@allow_internal || @internal) && str.start_with?('rhci_') ? @env.internal[str] : nil)
+    end
+
+    # The default scope's n (spelled str) if the context has it in scope.
+    # At the prompt, a name defined there is its own.
+    def visible_base(str, n, type)
+      return n if n.nil?
+      return (@scope.visible?(str, n, type) ? n : nil) if @module_mode
+      return n if @env.defined?(type ? "type:#{str}" : str)
+
+      @env.base_visible?(str, n, type: type) ? n : nil
+    end
+
+    # After a :load, the module's names do not shadow what the prompt
+    # imports itself (as in GHCi): another entity imported there makes the
+    # name ambiguous.
+    def module_clash?(str, n, type)
+      return false if @module_mode || n.nil? || !@env.from_module?(type ? "type:#{str}" : str)
+
+      b = @env.base_entity(str, type)
+      return true if b && !b.equal?(n) && @env.default_scope.ghc?(str, b, type, implicit: false)
+
+      ((type ? @env.import_types : @env.imports)[str] || []).any? { |m| !m.equal?(n) }
     end
 
     # A name the prompt imported unqualified (with the default scope's own
@@ -514,9 +625,11 @@ module Rhci
     def qualified_tables(qual)
       return @qualified[qual] || [] if @qualified
 
-      mods = @env.aliases[qual] || []
-      mods += [qual] if @env.known_module?(qual) && !mods.include?(qual)
-      mods.map { |m| [m, @env.module_table(m) || @env.local_module(m)] }.reject { |_, t| t.nil? }
+      # What the prompt imported under the alias; any known module can also
+      # be named in full, whatever was imported from it.
+      tables = (@env.aliases[qual] || {}).reject { |m, _| m == qual }.to_a
+      full = @env.known_module?(qual) && (@env.module_table(qual) || @env.local_module(qual))
+      full ? tables + [[qual, full]] : tables
     end
 
     # Q.x: the entity the modules named Q export as x.
@@ -545,37 +658,61 @@ module Rhci
       err(:scope, tok, "Not in scope: #{what} ‘#{qual}.#{str}’")
     end
 
-    # A base module whose names count as imported by the file being renamed.
-    # Does the file import str from default module mod itself (all of mod,
-    # or str by name)?
-    def official?(mod, str)
-      return true if mod == 'Prelude'
-
-      @official.any? { |o| o == mod || (o.is_a?(Array) && o[0] == mod && o[1].key?(str)) }
-    end
-
     def resolve_value(node, str, qual, what)
       if qual
-        n = resolve_qualified(node.tok, :values, qual, str)
+        begin
+          n = resolve_qualified(node.tok, :values, qual, str)
+        rescue Error => e
+          return defer(:ambiguous, e) if ambiguity?(e)
+
+          raise e
+        end
         note_reference(n)
         return n
       end
       begin
         n = lookup_value(str)
       rescue Error => e
-        raise Error.new(e.kind, e.detail, node.tok&.line, node.tok&.col, @source)
+        e = Error.new(e.kind, e.detail, node.tok&.line, node.tok&.col, @source)
+        return defer(:ambiguous, e) if ambiguity?(e)
+
+        raise e
       end
       not_yet(node.tok, str, n.mod) if n.is_a?(MissingName)
       if n.nil?
         if what == :con && (@top.types[str] || @imported[:types][str] || @env.types[str])
           err(:compile, node.tok, "Illegal term-level use of the type constructor or class ‘#{str}’")
         end
-        not_yet(node.tok, str, BASE_VALUES[str])
+        # A name rhci defines but an import hid is simply not in scope.
+        not_yet(node.tok, str, BASE_VALUES[str]) unless @env.values[str]
         msg = what == :con ? "Data constructor not in scope: #{str}" : "Variable not in scope: #{str}"
-        err(:scope, node.tok, msg)
+        e = Error.new(:scope, msg, node.tok&.line, node.tok&.col, @source)
+        return defer(:scope, e) unless what == :con
+
+        raise e
       end
       note_reference(n)
       n
+    end
+
+    # GHC reports an ambiguous variable from the renamer, and a variable
+    # not in scope only later, from the type checker: renaming goes on past
+    # either (with a stand-in name), and at its end the first ambiguity is
+    # raised, else the first variable not in scope. Other renamer errors
+    # (a type or qualified name not in scope) stop it at once.
+    def defer(kind, e)
+      (@deferred ||= {})[kind] ||= e
+      @env.fresh('rhci_unresolved', :var)
+    end
+
+    def ambiguity?(e)
+      e.kind == :compile && e.detail.to_s.start_with?('Ambiguous occurrence')
+    end
+
+    def raise_deferred
+      return unless @deferred
+
+      raise @deferred[:ambiguous] || @deferred[:scope]
     end
 
     def lookup_type(tok, str)
@@ -590,17 +727,18 @@ module Rhci
       if @module_mode && @top.types[str] && imp && !imp.equal?(@top.types[str])
         err(:compile, tok, "Ambiguous occurrence ‘#{str}’")
       end
-      if n.nil? && !@hidden.key?(str)
-        base = @env.types[str]
+      if n.nil?
+        base = visible_base(str, @env.types[str], true)
         n = if !@module_mode && !@env.defined?("type:#{str}") && @env.import_types.key?(str)
-              prompt_import(str, base, @env.import_types)
+              prompt_import(str, base && @env.base_imported?(str, base, type: true) ? base : nil, @env.import_types)
             else
               base
             end
+        err(:compile, tok, "Ambiguous occurrence ‘#{str}’") if module_clash?(str, n, true)
       end
       not_yet(tok, str, n.mod) if n.is_a?(MissingName)
       unless n
-        not_yet(tok, str, BASE_TYPES[str])
+        not_yet(tok, str, BASE_TYPES[str]) unless @env.types[str]
         err(:scope, tok, "Not in scope: type constructor or class ‘#{str}’")
       end
       n

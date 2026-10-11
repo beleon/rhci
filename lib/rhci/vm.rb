@@ -1152,7 +1152,10 @@ module Rhci
         Builtins.bool(a0 >= a1)
       end
 
+      # CRuby's Math.sqrt(-0.0) is 0.0; IEEE (and GHC, and mruby) keep the sign.
       def p_doubleSqrt(a0)
+        return a0 if a0.zero?
+
         a0 < 0 ? NAN : Math.sqrt(a0)
       end
 

@@ -487,6 +487,7 @@ module Rhci
       @names.refused.clear
       @names.clear_definitions
       @names.local_modules = nil
+      @names.module_scope = nil
       @fixities = {}
       prompt_alias_fixities
     end
@@ -494,7 +495,7 @@ module Rhci
     # The prompt's imports survive :load; so do their operators' fixities.
     def prompt_alias_fixities
       @names.aliases.each do |a, mods|
-        mods.each { |m| alias_fixities(a, m).each { |k, v| @fixities[k] = v } }
+        mods.each_key { |m| alias_fixities(a, m).each { |k, v| @fixities[k] = v } }
       end
     end
 
@@ -532,15 +533,14 @@ module Rhci
 
       @loading.push(name)
       imported = { values: {}, types: {} }
-      official = []
-      hidden = []
+      scope = DefaultScope.new
       fixities = {}
       local = []
       # Qualified names: the Prelude is implicitly importable as Prelude.x.
       qualified = { 'Prelude' => [['Prelude', @names.module_table('Prelude')]] }
       raw.imports.each do |imp|
         if MODULE_EXPORTS.key?(imp.module_name) || @names.library_module?(imp.module_name)
-          base_import(imp, official, hidden, imported, qualified, fixities, path)
+          base_import(imp, scope, imported, qualified, fixities, path)
           next
         end
         target = module_path(imp.module_name)
@@ -555,7 +555,7 @@ module Rhci
       end
       m = Frontend.resolve_module(raw, fixities, path)
       renamer = Renamer.new(@names, path, fixity: fixity_lookup, imported: imported, module_mode: true,
-                                          official: official, hidden: hidden, qualified: qualified)
+                                          scope: scope, qualified: qualified)
       renamer.imported_modules = local
       rtop = renamer.module_decls(m)
       tc = TypeChecker.new(@names, @tenv, path, mode: :file)
@@ -565,42 +565,43 @@ module Rhci
       tc.pending.each { |n, sc| @tenv[n] = sc if n.global || n.kind != :var }
       tc.new_instances.each { |(klass, key), inst| add_instance(klass, key, inst) }
       layer = FixityResolver.new(fixities, path).group_layer(m.decls)
-      mod = { name: name, rtop: rtop, imported: imported, fixities: fixities.merge(layer) }
+      mod = { name: name, rtop: rtop, imported: imported, scope: scope, fixities: fixities.merge(layer) }
       mod[:exports] = module_exports(m, rtop, imported, path)
       @modules[name] = mod
       @loading.pop
       mod
     end
 
-    # A file's import of a base module. The default-scope modules are
-    # visible anyway (`official` makes their names clash with the file's
-    # own); others add their names; every import is a qualifier.
-    def base_import(imp, official, hidden, imported, qualified, fixities, path)
+    # A file's import of a base module: default-scope modules go into its
+    # DefaultScope, others add their names; every import is a qualifier.
+    def base_import(imp, scope, imported, qualified, fixities, path)
       mod = imp.module_name
       table = @names.module_table(mod)
       selection = import_selection(table, imp, path)
-      add_qualified(qualified, imp.as || mod, mod, table)
+      add_qualified(qualified, imp.as || mod, mod, imp.items ? selection : table)
       alias_fixities(imp.as || mod, mod).each { |k, v| fixities[k] = v }
+      return scope.import(mod, imp.qualified, selection, hidden_by(imp, table, selection)) if DEFAULT_MODULES.include?(mod)
       return if imp.qualified
 
-      if DEFAULT_MODULES.include?(mod)
-        # `import Data.List (sort)` makes only sort official.
-        official << (imp.items && !imp.hiding ? [mod, selection[:values]] : mod)
-        return unless imp.hiding && imp.items
-
-        imp.items.each do |n, subs|
-          hidden << n
-          hidden.concat(subs) if subs.is_a?(Array)
-        end
-        return
-      end
       selection[:values].each { |str, n| add_import(imported[:values], str, n) }
       selection[:types].each { |str, n| imported[:types][str] = n }
     end
 
+    # Several imports of one module under one alias add up.
     def add_qualified(qualified, alias_name, mod, table)
       list = (qualified[alias_name] ||= [])
-      list << [mod, table] unless list.any? { |m, _| m == mod }
+      i = list.index { |m, _| m == mod }
+      return list << [mod, table] unless i
+
+      list[i] = [mod, { values: list[i][1][:values].merge(table[:values]), types: list[i][1][:types].merge(table[:types]) }]
+    end
+
+    # What an import's hiding list takes away: "str" and "type:str" keys.
+    def hidden_by(imp, table, selection)
+      return [] unless imp.hiding
+
+      table[:values].keys.reject { |s| selection[:values].key?(s) } +
+        table[:types].keys.reject { |s| selection[:types].key?(s) }.map { |s| "type:#{s}" }
     end
 
     # The names an import brings in unqualified: {values:, types:}, from a
@@ -660,9 +661,10 @@ module Rhci
 
       selection = import_selection(table, imp)
       alias_name = imp.as || mod
-      list = (@names.aliases[alias_name] ||= [])
-      list << mod unless list.include?(mod)
+      under = ((@names.aliases[alias_name] ||= {})[mod] ||= { values: {}, types: {} })
+      selection.each { |kind, names| under[kind] = under[kind].merge(names) }
       alias_fixities(alias_name, mod).each { |k, v| @fixities[k] = v }
+      @names.default_scope.import(mod, imp.qualified, selection, hidden_by(imp, table, selection)) if DEFAULT_MODULES.include?(mod)
       unless imp.qualified || DEFAULT_MODULES.include?(mod) || @names.local_module(mod)
         selection[:values].each { |str, n| add_prompt_import(@names.imports, str, n) }
         selection[:types].each { |str, n| add_prompt_import(@names.import_types, str, n) }
@@ -749,27 +751,28 @@ module Rhci
 
     # After a load the prompt sees the module's full scope (GHCi's *M).
     def expose_module_scope(mod)
+      @names.module_scope = mod[:scope]
       mod[:imported][:values].each do |s, n|
         next if n.is_a?(Array) || n.is_a?(MissingName)
 
         @names.values[s] = n
-        @names.define(s)
+        @names.define(s, from_module: true)
       end
       mod[:imported][:types].each do |s, n|
         next if n.is_a?(MissingName)
 
         @names.types[s] = n
-        @names.define(s, type: true)
+        @names.define(s, type: true, from_module: true)
       end
       mod[:rtop].values.each do |s, n|
         next if s.start_with?('rhci_')
 
         @names.values[s] = n
-        @names.define(s)
+        @names.define(s, from_module: true)
       end
       mod[:rtop].types.each do |s, n|
         @names.types[s] = n
-        @names.define(s, type: true)
+        @names.define(s, type: true, from_module: true)
       end
       local = {}
       @modules.each { |name, m| local[name] = m[:exports] }
@@ -839,14 +842,13 @@ module Rhci
       label = "<#{mod}>"
       raw = Frontend.parse_module_raw(LIBRARY_SOURCES.fetch(mod), label)
       imported = { values: {}, types: {} }
-      official = []
-      hidden = []
+      scope = DefaultScope.new
       fixities = {}
       qualified = { 'Prelude' => [['Prelude', @names.module_table('Prelude')]] }
-      raw.imports.each { |imp| base_import(imp, official, hidden, imported, qualified, fixities, label) }
+      raw.imports.each { |imp| base_import(imp, scope, imported, qualified, fixities, label) }
       m = Frontend.resolve_module(raw, fixities, label)
       renamer = Renamer.new(@names, label, fixity: fixity_lookup, imported: imported, module_mode: true,
-                                           official: official, hidden: hidden, qualified: qualified, internal: true)
+                                           scope: scope, qualified: qualified, internal: true)
       rtop = renamer.module_decls(m)
       tc = TypeChecker.new(@names, @tenv, label, mode: :file)
       tc.top(rtop)

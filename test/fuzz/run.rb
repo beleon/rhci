@@ -5,10 +5,15 @@
 # oracle's rules -- values exactly, errors by kind, and the output printed
 # before an exception exactly.
 #
-#   ruby test/fuzz/run.rb [--seed N] [--count N] [--bottoms P] [--mruby] [--sessions]
+#   ruby test/fuzz/run.rb [--seed N] [--count N] [--bottoms P] [--mruby] [--sessions | --defaulting]
 #
 # --sessions generates GHCi sessions instead (session_gen.rb): COUNT inputs
 # in sessions of SESSION_LENGTH, each section one session.
+#
+# --defaulting generates definitions typed by defaulting and the
+# monomorphism restriction instead (default_gen.rb), COUNT cases: each is a
+# module loaded in one section and the same definitions at the prompt in
+# another, followed by the same uses.
 #
 # --mruby evaluates in the mruby test interpreter (build/mruby/bin/mruby,
 # with the C loop and rhci-native, as the binary) instead of in-process
@@ -25,6 +30,7 @@ require_relative '../../lib/rhci'
 require_relative '../oracle'
 require_relative 'gen'
 require_relative 'session_gen'
+require_relative 'default_gen'
 
 module Fuzz
   ROOT = File.expand_path('../..', __dir__)
@@ -53,22 +59,52 @@ module Fuzz
     out = []
     list.each_with_index do |chunk, i|
       out << "## fuzz #{i + 1}" << ''
-      # Sessions use what programs use (Data.Bits, Data.Ratio, ...).
-      out.concat(sessions ? ProgGen::IMPORTS : IMPORTS)
-      out.concat(Gen::DECLS)
+      # A session brings its own imports and declarations.
+      out.concat(IMPORTS).concat(Gen::DECLS) unless sessions
       out.concat(chunk)
       out << ''
     end
     File.write(path, out.join("\n"))
   end
 
-  def golden(seed, count, bottoms, sessions = false)
+  # The --defaulting cases: modules written into dir, and the probes (a
+  # section loading each, and one with its definitions at the prompt, in
+  # a :{ :} block or line by line).
+  def write_defaulting(seed, count, path, dir)
+    FileUtils.mkdir_p(dir)
+    r = Random.new(seed)
+    out = []
+    DefaultGen.new(seed).cases(count).each do |name, (src, defs, uses)|
+      File.write(File.join(dir, "#{name}.hs"), src)
+      out << "## #{name} file" << '' << ":load #{name}"
+      out.concat(uses) << ''
+      out << "## #{name} prompt" << ''
+      if r.rand < 0.6
+        out << ':{'
+        out.concat(defs) << ':}'
+      else
+        # A signature goes on its definition's line.
+        out.concat(defs.join("\n").gsub(/^(\w+ :: [^\n]*)\n/, '\\1; ').split("\n"))
+      end
+      out.concat(uses) << ''
+    end
+    FileUtils.chmod_R('a+rwX', dir)
+    File.write(path, out.join("\n"))
+  end
+
+  def golden(seed, count, bottoms, sessions = false, defaulting: false)
     FileUtils.mkdir_p(WORK)
-    base = File.join(WORK, "#{sessions ? 'r' : 's'}#{seed}-n#{count}#{bottoms.positive? ? "-b#{bottoms}" : ''}")
+    base = File.join(WORK, "#{sessions ? 'r' : defaulting ? 'd' : 's'}#{seed}-n#{count}#{bottoms.positive? ? "-b#{bottoms}" : ''}")
     unless File.exist?("#{base}.golden")
-      write_probes("#{base}.probes", probes(seed, count, bottoms, sessions), sessions)
+      files = []
+      if defaulting
+        write_defaulting(seed, count, "#{base}.probes", "#{base}-files")
+        files = ['--files', "#{base}-files"]
+      else
+        write_probes("#{base}.probes", probes(seed, count, bottoms, sessions), sessions)
+      end
       out, err, st = Open3.capture3('uv', 'run', '--no-project', 'python',
-                                    File.join(ROOT, 'oracle', 'run_oracle.py'), "#{base}.probes")
+                                    File.join(ROOT, 'oracle', 'run_oracle.py'), "#{base}.probes", *files)
       raise "oracle failed: #{err}" unless st.success?
 
       File.write("#{base}.golden", out)
@@ -102,9 +138,9 @@ module Fuzz
   end
 
   # [[Result, output], ...] for one section, in a CRuby session.
-  def cruby_results(probes)
+  def cruby_results(probes, cwd = nil)
     out = Sink.new
-    s = Rhci::Session.new(stdout: out, stderr: out, limits: { steps: 5_000_000 })
+    s = Rhci::Session.new(stdout: out, stderr: out, limits: { steps: 5_000_000 }, cwd: cwd)
     probes.map do |p|
       before = out.text.length
       r = s.eval(input_of(p))
@@ -136,7 +172,7 @@ module Fuzz
     text = File.open(ARGV[0]) { |f| f.read }
     text.split("\x1c").each do |sec|
       out = FuzzSink.new
-      s = Rhci::Session.new(stdout: out, stderr: out, limits: { steps: 5_000_000 })
+      s = Rhci::Session.new(stdout: out, stderr: out, limits: { steps: 5_000_000 }, cwd: ARGV[1])
       sec.split("\x1d").each do |input|
         begin
           r = s.eval(input)
@@ -149,14 +185,14 @@ module Fuzz
   RUBY
 
   # Section title => [[Result, output], ...], from one mruby run.
-  def mruby_results(probes)
+  def mruby_results(probes, cwd = nil)
     sections = probes.map(&:section).uniq
     FileUtils.mkdir_p(WORK)
     runner = File.join(WORK, 'mruby_runner.rb')
     File.write(runner, File.read(File.join(ROOT, 'mrbgems', 'rhci', 'mrblib', 'rhci.rb')) + MRUBY_RUNNER)
     inputs = File.join(WORK, 'mruby_inputs.txt')
     File.write(inputs, sections.map { |s| probes.select { |p| p.section == s }.map { |p| input_of(p) }.join("\x1d") }.join("\x1c"))
-    out, err, st = Open3.capture3(File.join(ROOT, 'build', 'mruby', 'bin', 'mruby'), runner, inputs)
+    out, err, st = Open3.capture3(File.join(ROOT, 'build', 'mruby', 'bin', 'mruby'), runner, inputs, *[cwd].compact)
     raise "mruby runner failed: #{err[0, 500]}" unless st.success?
 
     records = out.split("\x1f", -1)
@@ -184,6 +220,8 @@ module Fuzz
       if p.input.start_with?('import ', 'data ', 'infixl ', 'instance ', ':{')
         if !r.ok? && Oracle.outcome(p.text) == :ok
           problems << "#{p.input}\n    rhci rejected a declaration GHCi accepts: #{r.message}"
+        elsif r.ok? && p.input.start_with?('import ') && Oracle.outcome(p.text) != :ok
+          problems << "#{p.input}\n    rhci accepted an import GHCi rejects: #{p.text.lines.first.to_s.strip}"
         end
         next stats[:import] += 1
       end
@@ -195,7 +233,10 @@ module Fuzz
 
       want = Oracle.outcome(p.text)
       ours = STATUS[r.status] || r.status
-      if want == :ok && ours == :ok && p.input.start_with?(':t ')
+      if p.input.start_with?(':load ')
+        # GHCi ran with -v0 (no "Ok, ... loaded."): the outcome only.
+        problems << "#{p.input}\n    GHCi #{want}, rhci #{ours}: #{r.message.to_s.lines.first}" if want != ours
+      elsif want == :ok && ours == :ok && p.input.start_with?(':t ')
         # Types up to renaming and constraint order (the oracle's rule).
         arg = p.input[3..-1]
         g = p.text.split(' ').join(' ').sub("#{arg} :: ", '')
@@ -207,7 +248,8 @@ module Fuzz
       elsif want == :ok && Rhci::Text.strip(got) != Rhci::Text.strip(p.text)
         problems << "#{p.input}\n    GHCi: #{p.text.strip[0, 300]}\n    rhci: #{got.strip[0, 300]}"
       elsif want == :runtime
-        prefix = p.text[0, p.text.index('*** Exception').to_i]
+        # From the raw output: Probe#text strips a leading space.
+        prefix = Oracle.before_exception(p.raw_text)
         problems << "#{p.input}\n    output before the exception: GHCi #{prefix.inspect}, rhci #{got.inspect}" if prefix != got
         g = Oracle.exception_message(p.text)
         o = Oracle.strip_locations(r.message.to_s.lines.first.to_s.strip)
@@ -231,9 +273,11 @@ module Fuzz
     count = (argv.include?('--count') ? argv[argv.index('--count') + 1] : 1000).to_i
     bottoms = (argv.include?('--bottoms') ? argv[argv.index('--bottoms') + 1] : 0).to_f
     sessions = argv.include?('--sessions')
-    probes = golden(seed, count, bottoms, sessions)
+    defaulting = argv.include?('--defaulting')
+    probes = golden(seed, count, bottoms, sessions, defaulting: defaulting)
+    cwd = defaulting ? File.join(WORK, "d#{seed}-n#{count}-files") : nil
     sections = probes.map(&:section).uniq
-    mruby = argv.include?('--mruby') ? mruby_results(probes) : nil
+    mruby = argv.include?('--mruby') ? mruby_results(probes, cwd) : nil
     total = Hash.new(0)
     all = []
     loose = []
@@ -243,7 +287,7 @@ module Fuzz
       # limit): nothing in it is known.
       next total[:ghci_lost] += in_sec.length if sessions && Rhci::Text.strip(in_sec.last.text).empty?
 
-      problems, stats, imprecise = compare_section(in_sec, mruby ? mruby[sec] : cruby_results(in_sec), sessions: sessions)
+      problems, stats, imprecise = compare_section(in_sec, mruby ? mruby[sec] : cruby_results(in_sec, cwd), sessions: sessions || defaulting)
       stats.each { |k, v| total[k] += v }
       all.concat(problems)
       loose.concat(imprecise)

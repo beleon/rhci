@@ -21,7 +21,7 @@ module SnapshotEncoder
   # Instance variables that only compile time needs (or caches).
   DROP = {
     'Rhci::Name' => %i[@field_types],
-    'Rhci::NameEnv' => %i[@module_tables],
+    'Rhci::NameEnv' => %i[@module_tables @default_scope @module_scope],
     'Rhci::ClassInfo' => %i[@tok @sigs @context_ast],
     'Rhci::InstInfo' => %i[@tok @type_ast @context_ast @super_evs @binds_full],
     'Rhci::RBind' => %i[@eqs @pat @rhs @names @sigs @tok @deps @dicts @signed],

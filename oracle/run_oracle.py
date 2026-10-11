@@ -51,8 +51,10 @@ def run_section(inputs):
         script.append(f":! echo {SEP}")
     mount = ["-v", f"{FILES}:/w:Z", "-w", "/w"] if FILES else []
     proc = subprocess.run(
-        ["podman", "run", "--rm", "-i", *mount, IMAGE, "sh", "-c",
-         "timeout 120 ghci -ignore-dot-ghci -v0 -fdiagnostics-color=never 2>&1"],
+        # A runaway probe (2 ^ (2 ^ 70)) must not take the machine with it:
+        # memory is capped, and the time limit kills (GHCi survived a TERM).
+        ["podman", "run", "--rm", "-i", "--memory", "8g", *mount, IMAGE, "sh", "-c",
+         "timeout -s KILL 120 ghci -ignore-dot-ghci -v0 -fdiagnostics-color=never 2>&1"],
         input="\n".join(script) + "\n", capture_output=True, text=True,
     )
     outs = proc.stdout.split(SEP + "\n")

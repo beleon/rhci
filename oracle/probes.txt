@@ -1491,3 +1491,47 @@ x
 it
 print (it, 1)
 it
+
+## 46. Imports at the prompt (found by session fuzzing)
+import qualified Data.Map as Mp (fromList, toList)
+Mp.toList (Mp.fromList [(1,2)])
+Mp.size (Mp.fromList [(1,2)])
+Data.Map.size (Mp.fromList [(1,2)])
+import qualified Data.Map as Mp hiding (toList)
+Mp.size (Mp.fromList [(1,2)])
+import qualified Data.Map.Strict as Mp
+Mp.insertWith (+) 1 2 Mp.empty
+import Data.Map (insert, empty, toList)
+insert 1 'a' empty
+toList (insert 1 'a' empty)
+import Data.Map (lookup)
+lookup 1 [(1,2)]
+lookup noSuchName [(1,2)]
+(noSuchName, lookup)
+(Nope.x, lookup)
+import Prelude hiding (lookup)
+lookup 1 (insert 1 'a' empty)
+import Prelude (map, show)
+map show [1, 2]
+length [1]
+import Prelude
+length [1]
+import Data.Map hiding (map, filter, lookup, foldr, null, take, drop, splitAt)
+size (fromList [(1,2)])
+import Prelude hiding (Maybe(..))
+Just 3
+import Data.Maybe (Maybe(Just))
+Just 3
+Nothing
+import qualified Prelude as P
+length [1]
+P.length [1]
+lookup = 5
+lookup
+
+## 47. The sign of zero through sqrt (found by defaulting fuzzing)
+sqrt (-0.0) :: Double
+sqrt (negate (sum [])) :: Double
+isNegativeZero (sqrt (-0.0 :: Double))
+log (-0.0) :: Double
+sqrt 0 :: Double

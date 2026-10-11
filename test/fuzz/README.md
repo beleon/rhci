@@ -88,3 +88,45 @@ programs agree. Found: in a module, a top-level definition and an import
 of the same name are ambiguous where used (rhci let the definition shadow
 the import, which only the prompt does).
 
+
+## Imports at the prompt
+
+Half the sessions also import along the way (`session_gen.rb`): Data.Map
+and Data.Set qualified under changing aliases (Data.Map.Strict under the
+same one, so names it redefines become ambiguous), with import and hiding
+lists; names from Data.Map unqualified; `import Prelude hiding (...)`,
+`import Prelude (...)`, `import qualified Prelude as P`. Their header
+imports Data.List without the Prelude names Data.Map clashes with, so that
+hiding those from the Prelude means the same in GHCi as in rhci (which has
+Data.List in scope regardless). Expressions then use the current aliases
+(the generator's qualifiers are variables) and the bare names, in scope or
+not, ambiguous or not. Found and fixed (oracle sections 46 and L12):
+- the prompt ignored `import Prelude hiding (...)` and `import Prelude
+  (...)`; an explicit import of the Prelude replaces the implicit one, and
+  a name one import hides is back if another brings it in (`DefaultScope`
+  in rename.rb, used for files too);
+- a qualified import list (`import qualified Data.Map as M (fromList)`)
+  did not restrict `M.`;
+- `import Data.Map (insert)` made `insert` ambiguous with Data.List's,
+  which rhci has in scope but the user never imported;
+- files with `import Prelude (...)`, `import qualified Prelude as P`, or a
+  hidden name another import provides were rejected;
+- after `:load`, the prompt sees the module's scope (and no implicit
+  Prelude), and the module's names do not shadow the prompt's own imports;
+- GHC reports an ambiguous name (renamer) before a variable not in scope
+  (type checker): rhci reported whichever came first.
+
+## Defaulting: files versus the prompt
+
+`ruby test/fuzz/run.rb --defaulting --seed N [--count N]`
+(`default_gen.rb`) generates groups of numeric definitions, mostly
+without signatures (literals, arithmetic across the group, functions bound
+with and without arguments, `show`, lists, `maxBound`, `read`, ...). Each
+group is loaded from a module, where Haskell 2010 defaulting and the
+monomorphism restriction decide the types across the whole module, and
+typed at the prompt (a `:{ :}` block or line by line), with extended
+defaulting and no MR; both sections then print the definitions, ask `:t`
+and use them at other types. Each side is compared with GHCi.
+
+The oracle runner caps each GHCi container at 8 GB and kills it after its
+time limit: a generated `2 ^ (2 ^ 70)` once grew GHCi to 84 GB.

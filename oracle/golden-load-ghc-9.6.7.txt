@@ -186,3 +186,42 @@ AmbType.hs:7:6: error:
 7 | h :: T
   |      ^
 
+## L12. Explicit imports of the Prelude in files, and the scope after :load
+
+ghci> :load PreOnly
+ghci> w
+7
+ghci> length [1]
+7
+ghci> show 1
+
+<interactive>:7:1: error: [GHC-88464]
+    Variable not in scope: show :: t0 -> t
+ghci> :load PreQual
+ghci> w
+9
+ghci> length [1, 2]
+9
+ghci> :load PreHideBack
+ghci> w
+Just 2
+ghci> :load PreHidden
+ghci> lookup 1 [(1, 2)]
+
+<interactive>:21:1: error: [GHC-88464]
+    Variable not in scope: lookup :: t0 -> [(a0, b0)] -> t
+ghci> import Prelude
+ghci> lookup 1 [(1, 2)]
+Just 2
+ghci> :load PreHideOwn
+ghci> twice 3
+5
+ghci> lookup 5
+
+<interactive>:31:1: error:
+    Ambiguous occurrence ‘lookup’
+    It could refer to
+       either ‘PreHideOwn.lookup’, defined at PreHideOwn.hs:4:1
+           or ‘Prelude.lookup’,
+              imported from ‘Prelude’ (and originally defined in ‘GHC.List’)
+

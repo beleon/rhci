@@ -18,6 +18,12 @@ module Oracle
 
     # GHCi's output without its warnings (rhci emits none, by decision).
     def text
+      Rhci::Text.strip(raw_text)
+    end
+
+    # The same, not stripped (output printed before an exception may begin
+    # with spaces).
+    def raw_text
       lines = []
       skipping = false
       @output.each do |l|
@@ -30,7 +36,8 @@ module Oracle
           lines << l
         end
       end
-      Rhci::Text.strip(lines.join("\n"))
+      lines.shift while !lines.empty? && Rhci::Text.blank?(lines[0])
+      lines.join("\n")
     end
 
     # :parse (a lexical/parse/fixity error), :command (unknown command),

@@ -39,10 +39,10 @@ module Fuzz
         name
       end
       script = names.map do |n|
-        "cd /w/#{n} && (timeout 30 runghc Main.hs < input.txt > ghc.out 2> ghc.err; echo $? > ghc.status); cd /w"
+        "cd /w/#{n} && (timeout -s KILL 30 runghc Main.hs < input.txt > ghc.out 2> ghc.err; echo $? > ghc.status); cd /w"
       end.join("\n")
       FileUtils.chmod_R('a+rwX', dir)
-      _, err, st = Open3.capture3('podman', 'run', '--rm', '-i', '-v', "#{dir}:/w:Z", '-w', '/w', IMAGE, 'sh', '-c', script)
+      _, err, st = Open3.capture3('podman', 'run', '--rm', '-i', '--memory', '8g', '-v', "#{dir}:/w:Z", '-w', '/w', IMAGE, 'sh', '-c', script)
       raise "GHC run failed: #{err}" unless st.success?
 
       File.write(File.join(dir, 'done'), '')
